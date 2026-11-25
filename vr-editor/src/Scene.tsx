@@ -6,7 +6,10 @@ import type { EditorObject, SceneManifest } from "./types";
 import { studyColor } from "./finishStudy";
 import { safeDrafts } from "./reviewDraft";
 import type { DraftHistory, WallDraft } from "./reviewDraft";
-import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS } from "./visualRealism";
+import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget } from "./visualRealism";
+import {createMaterialDetailLibrary,physicalUV} from "./materialDetail";
+import {createPresentationGarden} from "./presentationGarden";
+import {RoomEnvironment} from "three/addons/environments/RoomEnvironment.js";
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
@@ -309,9 +312,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
 
     const scene = new THREE.Scene();
     const wallTextures=createWallTextureLibrary();
+    const details=createMaterialDetailLibrary();
     const initialPreset = VISUAL_PRESETS[visualSettings.current.mood];
     scene.background = new THREE.Color(initialPreset.background);
     const environment=createOutdoorEnvironment(scene);
+    const garden=createPresentationGarden(scene);
     const ambient = new THREE.HemisphereLight(
       initialPreset.ambientSky, initialPreset.ambientGround, initialPreset.ambientIntensity,
     );
@@ -351,6 +356,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     renderer.toneMappingExposure = initialPreset.exposure;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Static architectural lighting: refresh a shadow map on actual changes,
+    // never every frame in a stationary scene.
+    renderer.shadowMap.autoUpdate=false;
+    const pmrem=new THREE.PMREMGenerator(renderer);
+    const lightingRoom=new RoomEnvironment();
+    const environmentMap=pmrem.fromScene(lightingRoom,.04);
+    lightingRoom.dispose();pmrem.dispose();
+    scene.environment=environmentMap.texture;scene.environmentIntensity=.65;
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local-floor");
     renderer.xr.setFramebufferScaleFactor(0.8);
@@ -855,6 +868,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const junctionLayer=new THREE.Group();junctionLayer.name="NominalDraftJunctionBacking";scene.add(junctionLayer);
     const shellGroup=new THREE.Group();shellGroup.name="LocalDraftConnectedShell";scene.add(shellGroup);
     let currentShell:DraftShell|null=null;
+    let gardenBounds:{minX:number;maxX:number;minZ:number;maxZ:number}|null=null;
     let shellFloorHosts:CatalogueHost[]=[];
     let lastShellHosts:CatalogueHost[]|null=null;
     let combinedDraftHosts:CatalogueHost[]=[];
@@ -863,12 +877,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const next=construction.current.shell;
       if(next!==currentShell){
         currentShell=next;
-        itemView.clear();shellFloorHosts=[];
+        itemView.clear();shellFloorHosts=[];gardenBounds=null;
+        if(manifest.scope.workspaceId==="starter-house-local"&&next){const vertices=next.surfaces.filter(s=>s.kind==="floor").flatMap(s=>s.vertices);if(vertices.length)gardenBounds={minX:Math.min(...vertices.map(v=>v[0])),maxX:Math.max(...vertices.map(v=>v[0])),minZ:Math.min(...vertices.map(v=>v[2])),maxZ:Math.max(...vertices.map(v=>v[2]))};}
         for(const child of [...shellGroup.children]){shellGroup.remove(child);child.traverse(o=>{if(o instanceof THREE.Mesh){o.geometry.dispose();(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());}});}
         for(const surface of next?.surfaces??[]){
           const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(surface.vertices.flat(),3));geometry.computeVertexNormals();
           const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
-          const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;shellGroup.add(mesh);
+          physicalUV(geometry,surface.kind==="roof"?.3:.5,surface.kind==="roof"?1.4:.5);
+          if(surface.kind==="roof"){const maps=details.get("roof");material.map=maps.map;material.bumpMap=maps.bumpMap;material.bumpScale=.003;material.roughness=.68;}
+          const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;mesh.receiveShadow=true;mesh.castShadow=surface.kind!=="floor";shellGroup.add(mesh);
           if(surface.kind==="floor"&&next){const vertices=surface.vertices.flatMap((_,i)=>i%3===0&&surface.vertices.slice(i,i+3).every(v=>Math.abs(v[1]-.002)<1e-6)?surface.vertices.slice(i,i+3):[]);if(vertices.length){const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(vertices.flat(),3));g.computeVertexNormals();const host=new THREE.Mesh(g,new THREE.MeshBasicMaterial({side:THREE.DoubleSide,visible:false}));host.userData.surfaceKind="floor";shellGroup.add(host);shellFloorHosts=[{id:localFloorHostId(next.levelId),target:"floor",mesh:host}];}}
           if(surface.kind==="ceiling"){const lining=makeShellCeilingLining(surface.vertices);if(lining)shellGroup.add(lining); }
         }
@@ -935,7 +952,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const key="wall:"+wall.proposalId,signature=JSON.stringify([wall,corner]);
         const previous=draftMeshes.get(key);
         const reused=previous?.signature===signature;
-        const group=reused && previous.object instanceof THREE.Group ? previous.object : displayWallDraft(wall,wallTextures,corner);
+        const group=reused && previous.object instanceof THREE.Group ? previous.object : displayWallDraft(wall,wallTextures,corner,details);
         if(!reused){
           group.userData.reviewOnlyWallProposal = true;
           group.userData.proposalId = wall.proposalId;
@@ -1826,6 +1843,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let lastPreviewLighting=-Infinity;
     const lightEye=new THREE.Vector3();
     let lastQuality: RenderQuality | null = null;
+    let shadowKey:readonly unknown[]=[];let lastShadowRefresh=-Infinity;
+    let materialBudgetKey:readonly unknown[]=[];
     let lastPresenting=false;
     let lastDetail: SurfaceDetail | null = null;
     let lastCameraSerial: number | null = null;
@@ -2139,9 +2158,21 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       const outdoor=visualSettings.current.outdoor&&!topEditing();
       environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z);
+      const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
+      garden.update(gardenBounds,outdoor&&budget.landscape);
+      const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items];
+      if(!nextMaterialKey.every((v,i)=>v===materialBudgetKey[i])){
+        materialBudgetKey=nextMaterialKey;
+        for(const layer of [wallAdditionLayer,shellGroup])layer.traverse(obj=>{if(obj instanceof THREE.Mesh&&obj.material instanceof THREE.MeshStandardMaterial){const m=obj.material;const original=m.userData.originalBump??m.bumpMap;if(original)m.userData.originalBump=original;const map=budget.detail?original??null:null;if(m.bumpMap!==map){m.bumpMap=map;m.needsUpdate=true;}}});
+      }
       grid.visible = activeInspection.showGrid&&!outdoor;
-      sunlight.castShadow = activeInspection.showShadows&&!renderer.xr.isPresenting;
-      presentationFloor.visible = activeInspection.showShadows&&!renderer.xr.isPresenting;
+      const useShadows=activeInspection.showShadows&&budget.shadows;
+      sunlight.castShadow=useShadows;renderer.shadowMap.enabled=useShadows;
+      presentationFloor.visible=useShadows&&!outdoor;
+      const nextShadowKey=[activeMood,activeQuality,lastAddedWall,currentShell,itemControls.current.items,currentStage,construction.current.layers,interaction.current.visibleIds,resize.current.projection,draftMap.current,moveSettings.current.wallMoveState];
+      if(useShadows&&now-lastShadowRefresh>=budget.shadowRefreshMs&&(!nextShadowKey.every((v,i)=>v===shadowKey[i])||renderer.xr.isPresenting!==lastPresenting)){
+        shadowKey=nextShadowKey;lastShadowRefresh=now;renderer.shadowMap.needsUpdate=true;
+      }
       if (lastMood !== activeMood) {
         const preset = VISUAL_PRESETS[activeMood];
         scene.background = new THREE.Color(preset.background);
@@ -2173,6 +2204,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         lastDetail = activeDetail;
       }
       if (lastQuality !== activeQuality||lastPresenting!==renderer.xr.isPresenting) {
+        scene.environment=budget.detail?environmentMap.texture:null;scene.environmentIntensity=budget.environmentIntensity;
         const size = shadowMapSize(activeQuality);
         sunlight.shadow.mapSize.set(size, size);
         if (sunlight.shadow.map) {
@@ -2402,7 +2434,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           materials.forEach(m => m.dispose());
         }
       });
-      roughTile.dispose();wallTextures.dispose();environment.dispose();
+      roughTile.dispose();wallTextures.dispose();details.dispose();environment.dispose();garden.dispose();environmentMap.dispose();
       buildOverlay.dispose();
       planOverview.dispose();
       presentationFloor.geometry.dispose();
