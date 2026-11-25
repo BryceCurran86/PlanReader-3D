@@ -15,6 +15,8 @@ import {DesignReviewPanel} from "./DesignReviewPanel";
 import {captureAlternative,restoreAlternative} from "./vrDesignReview";
 import type {DesignAlternative} from "./vrDesignReview";
 import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
+import {ArchitecturalPlan} from "./ArchitecturalPlanPanel";
+import type {LiningBoard} from "./constructionLiningVisual";
 import type {LayerOverrides} from "./constructionLayers";
 import {itemLayerVisible,itemLayer} from "./constructionLayers";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
@@ -80,6 +82,8 @@ export function App() {
   const [panel, setPanel] = useState<"plan" | "items" | "review" | "settings">("plan");
   const catalogueOpen = panel === "items";
   const [stage, setStage] = useState<ConstructionStage>("finished");
+  const [planPreview,setPlanPreview]=useState(false);
+  const [liningBoard,setLiningBoard]=useState<LiningBoard>("standard");
   const [layers,setLayers]=useState<LayerOverrides>({});
   const [resize, setResize] = useState<{
     scene: SceneManifest; enabled: boolean; hint: string;
@@ -664,7 +668,7 @@ export function App() {
     "Drag to orbit. Choose a tool to draw or place items.");
   const planKind = isDemo ? "Example plan" : authenticatedSource ? "PlanReader workspace" : "Local scene";
   const cameraOptions: readonly [CameraView, string][] = [
-    ["isometric", "3D"], ["plan", "Plan"], ["north", "Front"], ["east", "Side"],
+    ["isometric", "3D"], ["plan", "Top 3D"], ["north", "Front"], ["east", "Side"],
   ];
   const panels = manifest ? [["plan", "Plan"], ["items", "Items"], ["review", "Review"], ["settings", "Settings"]] as const :
     [["plan", "Plan"], ["settings", "Settings"]] as const;
@@ -687,6 +691,7 @@ export function App() {
         {manifest ? <>
           <div className="view-toolbar" aria-label="Scene views">
             <ConstructionView stage={stage} onStage={onStage} />
+            <label>Preview board <select value={liningBoard} onChange={e=>setLiningBoard(e.currentTarget.value as LiningBoard)} title="Visual board colour only, not a certified assembly"><option value="standard">Standard</option><option value="wet-area">Wet-area</option><option value="fire-rated">Fire-rated</option></select></label>
             <ConstructionLayerPanel layers={layers} onLayers={setLayers}/>
             <label><input type="checkbox" checked={allDimensions} onChange={e=>setAllDimensions(e.currentTarget.checked)}/> Persistent dimensions (up to 40 labels)</label>
             {levels.length > 1 && <label>Level
@@ -698,7 +703,8 @@ export function App() {
             <div className="tool-group" role="group" aria-label="Camera view">
               {cameraOptions.map(([orientation, label]) => <button key={orientation} type="button"
                 aria-pressed={cameraRequest.mode === orientation && cameraRequest.focus === "scene"}
-                onClick={() => requestCamera(orientation)}>{label}</button>)}
+                onClick={() => {setPlanPreview(false);requestCamera(orientation);}}>{label}</button>)}
+              <button type="button" aria-pressed={planPreview} onClick={()=>setPlanPreview(p=>!p)}>{planPreview?"Return to 3D":"Architectural plan (2D)"}</button>
               <button type="button" disabled={!selected} onClick={() => requestCamera(cameraRequest.mode, "selected")}>
                 Focus selection
               </button>
@@ -738,7 +744,7 @@ export function App() {
           {toolMessage && <span className="sr-only" role="status">{toolMessage}</span>}
 
           <div className="viewport">
-            <Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
+            {planPreview?<ArchitecturalPlan scene={manifest} build={buildState} level={level} visible={visibleIds} projection={projection} moves={activeWallMoves?safeWallMoves(activeWallMoves,manifest):[]} extra={[...activeBatchSketches,...(activeAddedWallSketch?[activeAddedWallSketch]:[])]}/>:<Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
@@ -747,7 +753,7 @@ export function App() {
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch} addedWallSketches={activeBatchSketches}
-                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} liningBoard={liningBoard} onLiningBoard={setLiningBoard} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
                 onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} toolFeedback={toolMessage} onToolMessage={setToolMessage}
@@ -759,7 +765,7 @@ export function App() {
                 onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={reportHeadset} onExportLocalDraft={exportLocalVrDraft}
                 onReviewLocalWall={reviewWall} budget={{summary:assemblyStudy.summary,onCapture:assemblyStudy.capture,onClear:assemblyStudy.clear}} />
-            </Suspense>
+            </Suspense>}
           </div>
           <div className="viewer-footer">
             <span>Alt + drag to orbit with a tool active · Esc to finish · Ctrl/⌘ + Z to undo</span>

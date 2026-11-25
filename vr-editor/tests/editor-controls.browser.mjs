@@ -46,7 +46,7 @@ try {
   const view = page.locator(".view-toolbar");
   const tools = page.locator(".build-tools");
   const button = (area, name) => area.getByRole("button", { name, exact: true });
-  await button(view, "Plan").click();
+  await button(view, "Top 3D").click();
   await button(tools, "Wall").click();
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const box = await canvas.boundingBox();
@@ -90,11 +90,38 @@ try {
   await button(footprint, "Done").click();
   await button(notice, "Return to source size").click();
 
+  const stage=view.locator(".stage-select select");
+  const board=view.getByLabel("Preview board");
+  for(const value of ["framing","rough-in","lock-up","insulation","sheeted","set","sanded","undercoat","finished"]){
+    await stage.selectOption(value);
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    assert.equal(await canvas.evaluate(element=>window.testCanvas===element&&element.isConnected),true,"Construction stages must preserve the existing 3D renderer");
+  }
+  await stage.selectOption("set");
+  for(const value of ["wet-area","fire-rated","standard"]){
+    await board.selectOption(value);
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    assert.equal(await board.inputValue(),value);
+  }
+  await stage.selectOption("finished");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(() => innerWidth === 390 && document.documentElement.scrollWidth <= 391);
   assert.equal(await layoutClear(), true, "The toolbar obscures the narrow-view canvas");
+  await page.setViewportSize({width:1280,height:900});
+  await button(view,"Architectural plan (2D)").click();
+  const plan=page.getByRole("region",{name:"Architectural plan preview"});
+  await plan.waitFor();
+  const image=plan.locator("canvas");
+  await image.waitFor();
+  await page.waitForFunction(()=>{
+    const canvas=document.querySelector('canvas[aria-label="2D architectural plan drawing"]');
+    return canvas?.getContext("2d")?.getImageData(0,0,1,1).data[3]===255;
+  });
+  await button(view,"Return to 3D").click();
+  await plan.waitFor({state:"hidden"});
+  await canvas.waitFor();
   assert.deepEqual(errors, [], "Browser runtime exceptions");
-  console.log("Browser checks passed: plan opening, tool switching, drawing, undo/redo, filtering, footprint resize and narrow layout.");
+  console.log("Browser checks passed: plan opening, tool switching, drawing, undo/redo, filtering, footprint resize, construction stage/board switching, architectural plan and narrow layout.");
 } finally {
   await browser?.close();
   server.closeAllConnections();

@@ -19,7 +19,12 @@ import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
   displayWallDraft, draftGesturePreview, magneticDraftWalls } from "./buildScene";
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
-import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES } from "./constructionStages";
+import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
+import {setLiningAppearance,LINING_BOARDS,makeShellCeilingLining} from "./constructionLiningVisual";
+import {nominalShellFraming} from "./constructionFrameVisual";
+import {junctionBackingMesh} from "./constructionJunctionVisual";
+import {sourceWallLiningPreview,sourceCeilingLiningPreview} from "./sourceLiningPreview";
+import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type { ControlMode, HistoryAction } from "./editorControls";
@@ -92,6 +97,8 @@ type Props = {
   buildSizes: BuildSizes;
   stage: ConstructionStage;
   onStage: (stage: ConstructionStage) => void;
+  liningBoard:LiningBoard;
+  onLiningBoard:(board:LiningBoard)=>void;
   layers:LayerOverrides;
   onLayers:(layers:LayerOverrides)=>void;
   allDimensions:boolean;
@@ -237,7 +244,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback });
@@ -261,8 +268,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   addedWallsRef.current = addedWallSketches;
   const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes });
   build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes };
-  const construction = useRef({ stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell });
-  construction.current = { stage, onStage, layers, onLayers, allDimensions, onAllDimensions, shell };
+  const construction = useRef({ stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell });
+  construction.current = { stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell };
   const resize = useRef(footprint);
   resize.current = footprint;
   const itemControls = useRef(catalogue);
@@ -358,6 +365,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     // All headset UX state is local to this viewer and resets on scene change.
     // The authenticated original scene and signed quantities never change.
     let selectedDraftId: string | null = null;
+    let inspectedWall:string|null=null;
     let hoveredDraftId: string | null = null;
     let magnetic=true, multiSelect=false;
     let wallLock:WallAim|null=null;let hoveredSourceId:string|null=null;
@@ -458,13 +466,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           elevatedView:!!elevatedReturn,walkSpeed,ghost:ghostMode,night:visualSettings.current.mood==="night",previewLights:visualSettings.current.previewLights,magnetic,multiSelect,selectedCount:groupIds().length,
           budget:liveBudget.current.summary,budgetOpen,budgetPage,
           wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,allDimensions:construction.current.allDimensions,
-          radial,layersOpen,layers:construction.current.layers,
+          radial,layersOpen,layers:construction.current.layers,liningBoard:construction.current.liningBoard,liningHidden:!!selectedDraftId&&inspectedWall===selectedDraftId,
         });
       if(!layout.radial&&!angleTools&&!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
       return layout;
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
+      if(choice.area==="lining"){
+        if(choice.action==="board"){const i=LINING_BOARDS.indexOf(construction.current.liningBoard);construction.current.onLiningBoard(LINING_BOARDS[(i+1)%LINING_BOARDS.length]);}
+        else{const wall=selectedDraftWall();if(wall){inspectedWall=inspectedWall===wall.proposalId?null:wall.proposalId;}}
+        return;
+      }
       if(choice.area==="layer"){construction.current.onLayers(cycleLayer(construction.current.layers,choice.layer));return;}
       if(choice.area==="wall-profile"){
         if(resize.current.enabled||resize.current.projection)return;
@@ -750,6 +763,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         (mesh.material as THREE.MeshStandardMaterial).color.getHex();
       mesh.userData.originalOpacity = 1;
     }
+    const surfacesById=new Map((manifest.sourceSurfaces??[]).map(s=>[s.surfaceId,s]));
+    const sourceLiningCache=new Map<THREE.Object3D,THREE.Group|null>();
+    let sourceLiningKey:readonly unknown[]=[];
+    let sourceLiningPending:THREE.Object3D[]=[];
+    let sourceLiningCursor=0,sourceLiningVertices=0;
     const sourceGeometry = footprintGeometry([...new Set([
       ...pickables, ...sourceItemHosts.filter(host => host.target !== "site").map(host => host.mesh),
     ])]);
@@ -767,20 +785,30 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const wallAdditionLayer = new THREE.Group();
     wallAdditionLayer.name = "UnapprovedNewWallStudy";
     scene.add(wallAdditionLayer);
+    const junctionLayer=new THREE.Group();junctionLayer.name="NominalDraftJunctionBacking";scene.add(junctionLayer);
     const shellGroup=new THREE.Group();shellGroup.name="LocalDraftConnectedShell";scene.add(shellGroup);
     let currentShell:DraftShell|null=null;
     function refreshShell(){
       const next=construction.current.shell;
       if(next!==currentShell){
         currentShell=next;
-        for(const child of [...shellGroup.children]){shellGroup.remove(child);if(child instanceof THREE.Mesh){child.geometry.dispose();child.material.dispose();}}
+        for(const child of [...shellGroup.children]){shellGroup.remove(child);child.traverse(o=>{if(o instanceof THREE.Mesh){o.geometry.dispose();(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());}});}
         for(const surface of next?.surfaces??[]){
           const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(surface.vertices.flat(),3));geometry.computeVertexNormals();
           const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
           const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;shellGroup.add(mesh);
+          if(surface.kind==="ceiling"){const lining=makeShellCeilingLining(surface.vertices);if(lining)shellGroup.add(lining); }
         }
+        if(next)for(const accessory of nominalShellFraming(next).children.slice())shellGroup.add(accessory);
       }
-      for(const mesh of shellGroup.children)mesh.visible=displaySurface(construction.current.stage,mesh.userData.surfaceKind);
+      for(const mesh of shellGroup.children){
+        const accessory=mesh.userData.constructionAccessory;
+        if(mesh instanceof THREE.Mesh&&mesh.userData.illustrativeLining){
+          const stage=construction.current.stage;
+          mesh.visible=isLiningStage(stage)&&displaySurface(stage,"ceiling")&&layerVisible(construction.current.layers,"lining",true);
+          if(isLiningStage(stage))setLiningAppearance(mesh,stage,construction.current.liningBoard);
+        }else mesh.visible=accessory==="roof-frame"||accessory==="ceiling-frame"?!elevatedReturn&&layerVisible(construction.current.layers,accessory,construction.current.stage==="framing"):displaySurface(construction.current.stage,mesh.userData.surfaceKind);
+      }
     }
     const buildOverlay = createBuildOverlay(scene);
     const planOverview=createVrPlanOverview(scene,manifest);
@@ -821,6 +849,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const signature = JSON.stringify([active, ceilings]);
       if (lastAddedWall === signature) return;
       lastAddedWall = signature;
+      // Separate adjacency mesh: rebuilding junctions must not reset unchanged door poses.
+      for(const child of [...junctionLayer.children]){junctionLayer.remove(child);if(child instanceof THREE.Mesh){child.geometry.dispose();(Array.isArray(child.material)?child.material:[child.material]).forEach(m=>m.dispose());}}
+      const junctions=junctionBackingMesh(active);if(junctions)junctionLayer.add(junctions);
       itemView.clear();
       draftItemHosts = [];
       const nextMeshes=new Map<string,{signature:string;object:THREE.Object3D}>();
@@ -980,8 +1011,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(!resize.current.enabled&&!projection){
         for(const w of buildState.walls){
           if(w.scopeKey!==sceneScope||w.levelId!==buildLevel)continue;
-          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"||profileDetails(w.assembly).core==="masonry"))&&
-            !layerVisible(layers,"framing",stage==="framing"))continue;
+          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation"||profileDetails(w.assembly).core==="masonry"))&&
+            !layerVisible(layers,"framing",stage==="framing"||stage==="insulation"))continue;
           targets.push({key:"draft:"+w.proposalId,kind:"draft",id:w.proposalId,start:w.start,end:w.end,heightM:w.heightM,halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
         }
       }
@@ -1431,9 +1462,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         for(const raw of build.current.buildState.walls){
           if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
-          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"||profileDetails(raw.assembly).core==="masonry"))&&!layerVisible(layers,"framing",stage==="framing"))continue;
+          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation"||profileDetails(raw.assembly).core==="masonry"))&&!layerVisible(layers,"framing",stage==="framing"||stage==="insulation"))continue;
           const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
-          const showDoors=layerVisible(layers,"openings",stage!=="slab"&&stage!=="framing"&&stage!=="rough-in");
+          const showDoors=layerVisible(layers,"openings",stage!=="slab"&&stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation");
           walls.push(...localNavigationWalls(w,openDoors,showDoors));
         }
       return walls;
@@ -1667,6 +1698,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const gripPosition = new THREE.Vector3();
     let indexedMoveState: WallMoveHistory | null | undefined;
     const movesById = new Map<string, ReturnType<typeof safeWallMoves>[number]>();
+    let planMoves:ReturnType<typeof safeWallMoves>=[];
+    let planExtra:WallVisual[]=[];let planExtraBatch:WallVisual[]|undefined;let planExtraSingle:WallVisual|null|undefined;
     let frameStart=0,previousFrame=0,frameCount=0,worstFrame=0,slowWindows=0,fastWindows=0;
     let sourceAppearanceKey: readonly unknown[] = [];
     let surfaceVisibilityKey: readonly unknown[] = [];
@@ -1694,7 +1727,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (moveState !== indexedMoveState) {
         indexedMoveState = moveState;
         movesById.clear();
-        for (const move of moveState ? safeWallMoves(moveState, manifest) : []) {
+        planMoves=moveState?safeWallMoves(moveState,manifest):[];
+        for (const move of planMoves) {
           if (!movesById.has(move.objectId)) movesById.set(move.objectId, move);
         }
       }
@@ -1718,9 +1752,13 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       if (startPointer && !samePointerContext(startPointer.context)) cancelPointer();
       syncItems();
+      if(overviewOpen&&(planExtraBatch!==addedWallsRef.current||planExtraSingle!==addedWallRef.current)){
+        planExtraBatch=addedWallsRef.current;planExtraSingle=addedWallRef.current;
+        planExtra=[...planExtraBatch,...(planExtraSingle?[planExtraSingle]:[])];
+      }
       planOverview.update(build.current.buildState,interaction.current.level,
         interaction.current.visibleIds,renderer.xr.isPresenting?renderer.xr.getCamera():camera,
-        renderer.xr.isPresenting&&overviewOpen);
+        renderer.xr.isPresenting&&overviewOpen,resize.current.projection,planMoves,planExtra);
       gizmo.show(resize.current.enabled ? resize.current.box : null);
       if (startPointer?.resize && hoveringCanvas && !renderer.xr.isPresenting) {
         raycaster.setFromCamera(mouse, camera);
@@ -1729,9 +1767,39 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const currentStage = construction.current.stage;
       refreshDimensions();refreshShell();
       if(now-lastPreviewLighting>=150){(renderer.xr.isPresenting?renderer.xr.getCamera():camera).getWorldPosition(lightEye);itemView.updatePreviewLights(visualSettings.current.previewLights,lightEye);lastPreviewLighting=now;}
-      const framing = currentStage === "framing" || currentStage === "rough-in";
+      const framing = currentStage === "framing" || currentStage === "rough-in" || currentStage==="insulation";
+      const liningStage=isLiningStage(currentStage)?currentStage:null;
+      // Preview only; keep original source surfaces, review openings and all quantity links intact.
+      // Build at most one missing source overlay each frame, bounded in total, and reuse on finish switches.
+      const sourceLiningAllowed=!!liningStage&&!appliedProjection&&layerVisible(construction.current.layers,"lining",true);
+      const sourceLiningInputs=[liningStage,sourceLiningAllowed,construction.current.liningBoard,construction.current.layers,interaction.current.visibleIds,draftMap.current,!!elevatedReturn];
+      const canShowSourceLining=(obj:THREE.Object3D)=>sourceLiningAllowed&&sourceVisible(obj)&&displaySurface(currentStage,obj.userData.surfaceKind)&&!draftMap.current.get(obj.userData.objectId)?.heightM;
+      if(!sourceLiningInputs.every((v,i)=>v===sourceLiningKey[i])){
+        sourceLiningKey=sourceLiningInputs;
+        sourceLiningPending=[];sourceLiningCursor=0;
+        for(const [obj,group] of sourceLiningCache)if(group){
+          group.visible=canShowSourceLining(obj);
+          if(group.visible&&liningStage)for(const child of group.children)if(child instanceof THREE.Mesh)setLiningAppearance(child,liningStage,construction.current.liningBoard);
+        }
+        if(sourceLiningAllowed)sourceLiningPending=pickables.filter(obj=>obj instanceof THREE.Mesh&&!sourceLiningCache.has(obj)&&canShowSourceLining(obj)&&(obj.userData.sourceWitnessedFace||obj.userData.surfaceKind==="ceiling")).slice(0,120);
+      }
+      if(liningStage&&sourceLiningAllowed&&sourceLiningCursor<sourceLiningPending.length&&sourceLiningCache.size<120&&sourceLiningVertices<1_000_000){
+        const obj=sourceLiningPending[sourceLiningCursor++];
+        const row=sourceById.get(obj.userData.objectId),surface=surfacesById.get(obj.userData.surfaceId);
+        const group=surface?sourceCeilingLiningPreview(surface):row?sourceWallLiningPreview(row):null;
+        if(group){
+          let count=0;for(const child of group.children)if(child instanceof THREE.Mesh)count+=child.geometry.getAttribute("position").count;
+          if(sourceLiningVertices+count<=1_000_000){
+            sourceLiningVertices+=count;obj.add(group);group.visible=canShowSourceLining(obj);
+            for(const child of group.children)if(child instanceof THREE.Mesh)setLiningAppearance(child,liningStage,construction.current.liningBoard);
+            sourceLiningCache.set(obj,group);
+          }else{for(const child of group.children)if(child instanceof THREE.Mesh){child.geometry.dispose();(Array.isArray(child.material)?child.material:[child.material]).forEach(m=>m.dispose());}sourceLiningCache.set(obj,null);}
+        }else sourceLiningCache.set(obj,null);
+      }
+      junctionLayer.visible=layerVisible(construction.current.layers,"framing",currentStage==="framing"||currentStage==="insulation");
+      for(const child of junctionLayer.children)child.visible=junctionLayer.visible;
       const visibilityKey=[currentStage,construction.current.layers,interaction.current.visibleIds,
-        resize.current.projection,draftMap.current,!!elevatedReturn,lastAddedWall];
+        resize.current.projection,draftMap.current,!!elevatedReturn,lastAddedWall,construction.current.liningBoard,inspectedWall];
       if(!visibilityKey.every((v,i)=>v===surfaceVisibilityKey[i])){
       surfaceVisibilityKey=visibilityKey;
       for (const obj of pickables) {
@@ -1750,12 +1818,22 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         shape.visible = true;
         if (shape instanceof THREE.Mesh && shape.material instanceof THREE.MeshStandardMaterial) {
           shape.material.visible = displaySurface(currentStage, "ceiling");
+          for(const child of shape.children)if(child instanceof THREE.Mesh){
+            if(child.userData.illustrativeLining){child.visible=!!liningStage&&shape.material.visible&&layerVisible(construction.current.layers,"lining",true);if(liningStage)setLiningAppearance(child,liningStage,construction.current.liningBoard);}
+            else if(child.userData.constructionAccessory==="ceiling-frame")child.visible=!elevatedReturn&&layerVisible(construction.current.layers,"ceiling-frame",currentStage==="framing");
+          }
         } else {
+          const inspect=inspectedWall!==null&&shape.userData.proposalId===inspectedWall&&!shape.userData.masonryAssembly&&currentStage!=="slab";
           for (const child of shape.children) {
-            if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",currentStage==="framing");
-            else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",false);
+            if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",inspect||currentStage==="framing"||currentStage==="insulation");
+            else if(child.userData.constructionAccessory==="bracing"||child.userData.constructionAccessory==="tie-down")child.visible=layerVisible(construction.current.layers,child.userData.constructionAccessory,inspect||currentStage==="framing");
+            else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",currentStage==="insulation");
+            else if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
+              child.visible=!!liningStage&&!inspect&&layerVisible(construction.current.layers,"wall",true)&&layerVisible(construction.current.layers,"lining",true);
+              if(liningStage)setLiningAppearance(child,liningStage,construction.current.liningBoard);
+            }
             else if(child instanceof THREE.Mesh&&child.material instanceof THREE.MeshStandardMaterial){
-              const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true));
+              const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true)&&!inspect);
               child.material.visible=child.userData.exteriorTexture?showBody&&layerVisible(construction.current.layers,"envelope",!framing):
                 child.userData.catalogueDoorLeaf?layerVisible(construction.current.layers,"openings",currentStage!=="slab"&&!framing):showBody;
             } else if(child instanceof THREE.Line)child.visible=layerVisible(construction.current.layers,"wall",currentStage!=="slab");
