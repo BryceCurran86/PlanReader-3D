@@ -3,6 +3,7 @@ import {showConstructionItem,showConstructionSurface} from "./constructionStages
 import type {ConstructionStage} from "./constructionStages.ts";
 export const CONSTRUCTION_LAYERS=[
  ["floor","Slab / floors"],["wall","Wall bodies"],["framing","Framing"],["insulation","Insulation (illustrative)"],
+ ["bracing","Nominal bracing (illustrative)"],["tie-down","Nominal tie-down (illustrative)"],["ceiling-frame","Ceiling framing (illustrative)"],["roof-frame","Roof framing (illustrative)"],
  ["ceiling","Ceilings"],["roof","Roof"],["envelope","Exterior cladding / masonry finishes"],
  ["lining","Wall linings"],["openings","Doors and windows"],["electrical","Electrical rough-in"],
  ["plumbing","Plumbing rough-in"],["air","Air-conditioning rough-in"],
