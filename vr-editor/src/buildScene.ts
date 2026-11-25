@@ -21,6 +21,8 @@ import {nominalTrimMesh} from "./constructionTrimVisual.ts";
 import type {WallCornerJoins} from "./wallCornerJoin.ts";
 import {createPhysicalToolTray} from "./physicalToolTray.ts";
 import {openingFrameVisual,nominalDoorSlab} from "./openingFinishVisual.ts";
+import {physicalUV} from "./materialDetail.ts";
+import type {MaterialDetailLibrary} from "./materialDetail.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -72,7 +74,7 @@ export function illustrativeTimberFrame(wall: WallVisual) {
   return group;
 }
 
-export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,joins:WallCornerJoins={}) {
+export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,joins:WallCornerJoins={},details?:MaterialDetailLibrary) {
   const group = new THREE.Group();
   const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[],exteriorFaces:number[]=[],exteriorUV:number[]=[],leftFinish:number[]=[],rightFinish:number[]=[];
   const texture=textures?.get(wallAssembly(wall.assembly).profile);
@@ -123,9 +125,11 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
       new THREE.Float32BufferAttribute(vertices, 3));
     if(wallFace)geometry.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
     geometry.computeVertexNormals();
+    if(wallFace&&details)physicalUV(geometry,.4,.4,[(wall.end[0]-wall.start[0])/length,(wall.end[1]-wall.start[1])/length]);
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
       color:wallFace?0xffffff:color,vertexColors:wallFace, side: THREE.DoubleSide, transparent: opacity < 1, opacity, depthWrite: opacity === 1, roughness: 0.82,
     }));
+    if(wallFace&&details){const material=mesh.material as THREE.MeshStandardMaterial;material.bumpMap=details.get("plaster").bumpMap;material.bumpScale=.0012;material.roughness=.86;mesh.receiveShadow=true;mesh.castShadow=true;}
     mesh.userData.catalogueWallFace = wallFace;
     if (doorId) mesh.userData.catalogueDoorLeaf = doorId;
     group.add(mesh);
