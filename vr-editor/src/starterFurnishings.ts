@@ -17,13 +17,17 @@ export function starterFurnishings(scene:SceneManifest){
  put("oak-floor","Engineered timber · Natural Oak",floor(3,3));
  for(let i=0;i<4;i++)put("kitchen-base-"+i,"Base cabinet 600 mm · Polar white",floor(1+i*.61,7.55),2);
  put("kitchen-island","Kitchen island 1600 mm · Pale oak",floor(2.5,5.85));
- put("kitchen-sink","Single bowl kitchen sink · White",worktop("kitchen-base-1",1.61,.902,7.55));
- put("kitchen-mixer","Gooseneck kitchen mixer · Brushed nickel",worktop("kitchen-base-1",1.61,.902,7.8),2);
+ put("kitchen-sink","Single bowl kitchen sink · White",worktop("kitchen-base-1",0,.02115,0));
+ put("kitchen-mixer","Gooseneck kitchen mixer · Brushed nickel",worktop("kitchen-base-1",0,.02115,-.23));
  put("bath-vanity","Vanity 900 mm · Polar white",floor(9.35,4.45));
- put("bath-basin","Round countertop basin · White",worktop("bath-vanity",9.35,.842,4.45));
- put("bath-mixer","Basin mixer · Chrome",worktop("bath-vanity",9.35,.842,4.27));
+ put("bath-basin","Round countertop basin · White",worktop("bath-vanity",0,.01974,0));
+ put("bath-mixer","Basin mixer · Chrome",worktop("bath-vanity",0,.01974,-.17));
  put("bath-toilet","Back-to-wall toilet · White",floor(9.5,6.9),2);
  put("bath-tub","Freestanding bath 1500 mm · White",floor(8.85,7.4));
+ put("living-sofa","Three-seat sofa · Linen",floor(1.25,3.5),1);
+ put("living-table","Round coffee table · Oak",floor(2.7,3.5));
+ put("bed-one","Queen bed · Linen",floor(8.2,2.3));
+ put("bed-two","Single bed · Linen",floor(6.95,6.45));
  for(const c of build.ceilings){
   for(const [x,z] of (c.proposalId==="living-ceiling"?[[.25,.25],[.75,.25],[.25,.75],[.75,.75]]:[[.5,.5]])){
    const p:ItemHit={target:"ceiling",hostId:ceilingDraftHostId(c.proposalId),point:[c.start[0]+(c.end[0]-c.start[0])*x,c.heightM,c.start[1]+(c.end[1]-c.start[1])*z],normal:[0,-1,0],side:1,anchor:{kind:"ceiling",xFraction:x,zFraction:z}};
