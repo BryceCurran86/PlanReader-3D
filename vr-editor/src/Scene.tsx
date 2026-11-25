@@ -39,7 +39,7 @@ import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
 import type {WallAim,WallTarget} from "./wallMagnet";
-import {thumbstickSector} from "./toolWheelInput";
+import {displayedMenuAction,thumbstickSector} from "./toolWheelInput";
 import {createWallTextureLibrary} from "./wallTextures";
 import {layerVisible,surfaceLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
 import type {LayerOverrides} from "./constructionLayers";
@@ -1259,14 +1259,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function activateDisplayedMenu(current: ReturnType<typeof menuLayout>) {
       const shown=displayedMenuLayout;
-      if(!shown || shown.width!==current.width || shown.height!==current.height || shown.radial!==current.radial)return;
+      if(!shown)return;
       const hit=menuTarget(shown);
       if(!hit?.action)return;
-      const before=shown.buttons[hit.index],after=current.buttons[hit.index];
-      // React updates can change the selection or a submenu between rendered frames.
-      // Fail closed instead of dispatching a newly positioned or disabled action.
-      if(!before||!after||before.disabled||after.disabled||JSON.stringify(before)!==JSON.stringify(after))return;
-      activateMenu(hit.action);
+      // React can change selection or submenu between rendered frames.
+      const action=displayedMenuAction(shown,current,hit.index);
+      if(action)activateMenu(action);
     }
     function menuKey(layout: ReturnType<typeof menuLayout>) {
       const hit=menuTarget(layout);
