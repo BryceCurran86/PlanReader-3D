@@ -107,9 +107,10 @@ export function buildMenuLayout(
     ({ area: "quest", action });
   if(quest?.layersOpen){
     CONSTRUCTION_LAYERS.forEach(([id,label],i)=>add(label+" · "+(quest.layers?.[id]??"auto").toUpperCase(),20+(i%2)*475,85+Math.floor(i/2)*67,455,58,{area:"layer",layer:id},{active:quest.layers?.[id]==="show"}));
-    add("Reset to stage defaults",20,630,455,60,questAction("reset-layers"));
-    add("Back",495,630,455,60,questAction("layers"));
-    return {buttons,title:"CONSTRUCTION LAYERS",width:WIDTH,height:750,note:"Select a layer to cycle Auto → Show → Hide. Overrides do not change quantities."};
+    const bottom=85+Math.ceil(CONSTRUCTION_LAYERS.length/2)*67+8;
+    add("Reset to stage defaults",20,bottom,455,60,questAction("reset-layers"));
+    add("Back",495,bottom,455,60,questAction("layers"));
+    return {buttons,title:"CONSTRUCTION LAYERS",width:WIDTH,height:bottom+120,note:"Select a layer to cycle Auto → Show → Hide. Overrides do not change quantities."};
   }
   if(quest?.radial&&!quest.layersOpen&&!quest.wallProfilesOpen&&!quest.budgetOpen&&!quest.help&&!quest.numeric&&!quest.angleTools&&!quest.openingTools&&!quest.multiSelect&&!viewsOpen&&!browser.open&&!footprint.enabled){
     const canDraw=!!levelId&&!footprint.changed;
