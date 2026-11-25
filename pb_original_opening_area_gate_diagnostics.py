@@ -9,6 +9,7 @@ from collections import Counter
 import math
 from typing import Any, Iterable
 
+from pb_external_door_height_estimate_policy import OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
 from pb_live_opening_area_quantity_publication import _opening_quantity
 from pb_live_physical_opening_void_composition import LiveCanonicalOpeningObject
 from pb_migration_contracts import QuantityEvidence
@@ -177,6 +178,7 @@ def audit_original_opening_area_gates(
         "figured_opening_label", "resolved_opening_geometry",
         "authenticated_elevation_frame", "authenticated_frame_schedule",
         "owner_approved_second_axis", "assumed_external_door_height_2100_mm",
+        "assumed_external_door_height_2100_mm_owner_policy", OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS,
     })
     for opening in objects:
         if type(opening) is not LiveCanonicalOpeningObject:
