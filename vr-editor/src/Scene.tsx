@@ -46,7 +46,7 @@ import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
 import type {WallAim,WallTarget} from "./wallMagnet";
 import {displayedMenuAction,thumbstickSector} from "./toolWheelInput";
 import {createWallTextureLibrary} from "./wallTextures";
-import {layerVisible,surfaceLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
+import {layerVisible,editableSurfaceVisible,draftWallLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
 import type {LayerOverrides} from "./constructionLayers";
 import type { ImmersiveBudget } from "./vrAssemblyStudy";
 import type { CatalogueItem } from "./itemCatalogue";
@@ -416,11 +416,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let walkSpeed=1.2, turnArmed=true, lastNavTime=0;
     let ghostMode=false,openDoors=new Set<string>();
     const topEditing=()=>!!elevatedReturn||(!renderer.xr.isPresenting&&visualSettings.current.cameraRequest.mode==="plan");
-    const displaySurface=(stage:ConstructionStage,kind?:"floor"|"ceiling"|"roof")=>{
-      if(topEditing()&&kind==="roof")return false;
-      if(topEditing()&&kind==="ceiling")return directSelection.current.kind==="ceilings";
-      return surfaceLayerVisible(stage,kind,construction.current.layers,!!elevatedReturn);
-    };
+    const displaySurface=(stage:ConstructionStage,kind?:"floor"|"ceiling"|"roof")=>
+      editableSurfaceVisible(stage,kind,construction.current.layers,!!elevatedReturn,topEditing(),directSelection.current.kind==="ceilings");
     let openingTools = false;
     let openingIndex = 0;
     let numberPad: {field:NumericDraftField;digits:string}|null = null;
@@ -1030,8 +1027,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(!resize.current.enabled&&!projection){
         for(const w of buildState.walls){
           if(w.scopeKey!==sceneScope||w.levelId!==buildLevel)continue;
-          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation"||profileDetails(w.assembly).core==="masonry"))&&
-            !layerVisible(layers,"framing",stage==="framing"||stage==="insulation"))continue;
+          if(!draftWallLayerVisible(stage,layers,profileDetails(w.assembly).core==="masonry"))continue;
           targets.push({key:"draft:"+w.proposalId,kind:"draft",id:w.proposalId,start:w.start,end:w.end,heightM:w.heightM,halfThickness:wallAssembly(w.assembly).thicknessMm/2000});
         }
       }
@@ -1196,7 +1192,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(interaction.current.mode==="inspect"&&(!renderer.xr.isPresenting||topEditing())){
         const kind=directSelection.current.kind;
         const stage=construction.current.stage;
-        const allowed={...buildState,walls:displaySurface(stage)?buildState.walls:[],ceilings:displaySurface(stage,"ceiling")?buildState.ceilings:[]};
+        const layers=construction.current.layers;
+        const allowed={...buildState,walls:buildState.walls.filter(w=>w.scopeKey===sceneScope&&w.levelId===buildLevel&&draftWallLayerVisible(stage,layers,profileDetails(w.assembly).core==="masonry")),ceilings:displaySurface(stage,"ceiling")?buildState.ceilings:[]};
         return directDraftGesture(allowed,buildLevel,raycaster.ray,kind,topEditing(),snapOptions());
       }
       if(interaction.current.mode!=="draw")return null;
