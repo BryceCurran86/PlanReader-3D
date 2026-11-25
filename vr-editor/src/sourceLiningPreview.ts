@@ -13,10 +13,11 @@ export function sourceWallLiningPreview(row:EditorObject){
  if(!Number.isFinite(length)||length<.05||length>20||!Number.isFinite(g.heightM)||g.heightM<.05||g.heightM>6)return null;
  const ux=(g.end[0]-g.start[0])/length,uz=(g.end[1]-g.start[1])/length;
  const group=new THREE.Group();
- // Source openingReview is explicitly not cutout authority. Leave the entire
- // witnessed face intact and retain the separate original review markers.
+ // Preserve visibility of positioned review markers by leaving their cosmetic
+ // patch bare. The original witnessed face itself is never cut or modified.
+ const holes=(row.openingReview?.positioned??[]).map(o=>({x0:Math.max(0,o.offsetM),x1:Math.min(length,o.offsetM+o.widthM),y0:Math.max(0,o.sillM),y1:Math.min(g.heightM,o.sillM+o.heightM)}));
  for(const side of [-1,1]){
-  const mesh=makeLiningVisual(length,g.heightM,[],(x,y,offset)=>new THREE.Vector3(g.start[0]+ux*x-uz*side*offset,y,g.start[1]+uz*x+ux*side*offset));
+  const mesh=makeLiningVisual(length,g.heightM,holes,(x,y,offset)=>new THREE.Vector3(g.start[0]+ux*x-uz*side*offset,y,g.start[1]+uz*x+ux*side*offset));
   if(mesh){mesh.visible=true;group.add(mesh);}
  }
  if(!group.children.length)return null;
