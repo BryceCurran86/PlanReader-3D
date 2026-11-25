@@ -93,7 +93,20 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(() => innerWidth === 390 && document.documentElement.scrollWidth <= 391);
   assert.equal(await layoutClear(), true, "The toolbar obscures the narrow-view canvas");
-  assert.deepEqual(errors, [], "Browser runtime exceptions");
+  await page.setViewportSize({width:1280,height:900});
+  await button(view,"Architectural plan (2D)").click();
+  const plan=page.getByRole("region",{name:"Architectural plan preview"});
+  await plan.waitFor();
+  const image=plan.locator("canvas");
+  await image.waitFor();
+  await page.waitForFunction(()=>{
+    const canvas=document.querySelector('canvas[aria-label="2D architectural plan drawing"]');
+    return canvas?.getContext("2d")?.getImageData(0,0,1,1).data[3]===255;
+  });
+  await button(view,"Return to 3D").click();
+  await plan.waitFor({state:"hidden"});
+  await canvas.waitFor();
+    assert.deepEqual(errors, [], "Browser runtime exceptions");
   console.log("Browser checks passed: plan opening, tool switching, drawing, undo/redo, filtering, footprint resize and narrow layout.");
 } finally {
   await browser?.close();
