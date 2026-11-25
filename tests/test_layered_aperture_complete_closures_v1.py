@@ -2,8 +2,8 @@
 
 One physical opening is often described by several raw wall gaps at once (a wall's body band and its face lines). The builder closes the clear
 opening where door evidence exists, but a wall stub between the opening and the wall it meets carries no strip, so the face-line gap that spans the
-stub stays unresolved and the room leaks through a slit narrower than the wall is thick. ``aperture_complete_closures`` (default off) lets an
-unresolved gap inherit the evidence of an evidence-closed gap of its own aperture, never anything else.
+stub stays unresolved and the room leaks through a slit narrower than the wall is thick. ``aperture_complete_closures`` (default off) closes such
+a gap as a ``KIND_APERTURE_MEMBER`` barrier that carries the native paths of the evidence-closed gaps of its own aperture, never anything else.
 """
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import pytest
 
 import pb_layered_wall_doorway_room_ring_shadow as module
 from pb_layered_wall_doorway_room_ring_shadow import (
+    KIND_APERTURE_MEMBER,
     KIND_SLIDING_LEAF,
     KIND_STROKE,
     KIND_SWING,
@@ -36,6 +37,7 @@ NOISE = 0.05  # the builder's representation-noise constant
 BODY = (40.0, 46.0)  # the wall's body band, 6 thick
 FACE = (45.0, 46.4)  # a face band 1.4 thick, sticking 0.4 above the body band (a host-wall-thick band)
 THIN_FACE = (45.4, 46.4)  # 1.0 thick: lining-thin, so no swing is ever placed on it
+SECOND = (44.0, 45.4)  # a second 1.4-thick band of the same wall (the second seed of the two-seed scene)
 REACH = 2.0 * (BODY[1] - BODY[0])  # one wall stub (shorter than the wall is thick) plus the thickness of the wall it meets
 OPENING = (10.6, 58.0)  # the clear opening of the doorway on the body band
 
@@ -77,9 +79,10 @@ def swing(centre, open_tip, closed_tip, tf=identity, layer=WALL):
 
 
 def office_analog(
-    tf=identity, *, seed="stroke", face=FACE, p_east=4.0, second_opening=False, partition=False, lining=False, twin_stroke=False, extra=(),
+    tf=identity, *, seed="stroke", face=FACE, p_east=4.0, second_opening=False, second_band=False, partition=False, lining=False,
+    twin_stroke=False, extra=(),
 ):
-    """A room (x p_east..118, y 46.4..138) whose south wall W (body band y 40..46) has a doorway on its west part.
+    """A room (x p_east..118, y face top..138) whose south wall W (body band y 40..46) has a doorway on its west part.
 
     A perpendicular wall P ends at x = ``p_east`` and a jamb line J (x 9.4..10.6) cuts the body band, so the clear opening is x 10.6..58 and the
     wall stub between P and J (x p_east..9.4) carries no strip. A face strip on the east part of W leaves the face-line gap free to span the stub
@@ -92,6 +95,8 @@ def office_analog(
     for a, b in pieces:
         rows += strip(a, BODY[0], b, BODY[1], tf)
         rows += strip(a, face[0], b, face[1], tf)
+        if second_band:
+            rows += strip(a, SECOND[0], b, SECOND[1], tf)
         if lining:
             rows += strip(a, 46.0, b, 47.2, tf)  # a second face line overlapping only the twin's band
     rows += strip(9.4, -10, 10.6, 46.2, tf)  # J: fully cuts the body band, not the face band
@@ -171,20 +176,20 @@ def test_without_the_keyword_the_doorway_stays_closed_but_the_room_leaks_through
     assert build_layered_wall_doorway_room_rings(office_analog(), source_sha256=SHA, page_index=0) == off
 
 
-def test_with_the_keyword_the_twin_gap_inherits_the_evidence_and_the_room_gets_its_ring():
+def test_with_the_keyword_the_twin_gap_is_closed_as_an_aperture_member_and_the_room_gets_its_ring():
     on = build(office_analog(), on=True)
     assert on.status is EvidenceResolutionStatus.CANDIDATE
     ring = candidates(on)
     assert len(on.rings) == 1 and len(ring) == 1
     assert ring[0].bbox_pdf_pts == (4.0, 46.4, 118.0, 138.0)
     assert math.isclose(ring[0].area_pt2, 114.0 * 91.6, rel_tol=1e-9)
-    assert _closure_view(on) == sorted([(KIND_STROKE, _r(BODY), _r(OPENING)), (KIND_STROKE, _r(FACE), (4.0, 58.0))])
-    seed, inherited = sorted(on.closures, key=lambda c: c.band)
-    # the inherited closure carries exactly the seed's evidence: one doorway, one set of native paths
-    assert inherited.native_path_indices == seed.native_path_indices and inherited.kind == seed.kind
-    assert inherited.closure_id != seed.closure_id
-    # the ring can say which closure it relied on: its south edge is the inherited closure, not the seed's (which the face line covers)
-    assert ring[0].bounding_closure_ids == (inherited.closure_id,)
+    assert _closure_view(on) == sorted([(KIND_STROKE, _r(BODY), _r(OPENING)), (KIND_APERTURE_MEMBER, _r(FACE), (4.0, 58.0))])
+    seed, member = sorted(on.closures, key=lambda c: c.band)
+    # the member is a barrier of its own kind (never a doorway chord) that carries the seed's native paths
+    assert member.kind == KIND_APERTURE_MEMBER and seed.kind == KIND_STROKE
+    assert member.native_path_indices == seed.native_path_indices and member.closure_id != seed.closure_id
+    # the ring can say which closure it relied on: its south edge is the member, not the seed (which the face line covers)
+    assert ring[0].bounding_closure_ids == (member.closure_id,)
     assert ring[0].takeoff_eligible is False and ring[0].commercial_projection_allowed is False
     assert ring[0].physical_room_identity_issued is False and ring[0].metric_area_issued is False
 
@@ -193,8 +198,26 @@ def test_the_seed_evidence_may_also_be_a_swing_and_the_twin_may_be_lining_thin()
     rows = office_analog(seed="swing", face=THIN_FACE)
     off, on = build(rows, on=False), build(rows, on=True)
     assert [c.kind for c in off.closures] == [KIND_SWING] and off.rings == ()
-    assert [c.kind for c in on.closures] == [KIND_SWING, KIND_SWING] and len(candidates(on)) == 1
+    assert sorted(c.kind for c in on.closures) == sorted([KIND_SWING, KIND_APERTURE_MEMBER]) and len(candidates(on)) == 1
     assert len({c.native_path_indices for c in on.closures}) == 1
+
+
+def test_a_twin_inherits_the_paths_of_every_seed_of_its_aperture_and_chooses_none(monkeypatch):
+    # two closed gaps of one aperture with different evidence (as a swing and a jamb stroke can be): both qualify, so both are carried
+    def two_strokes(drawings, gap, *, all_ink=False):
+        if gap.band == BODY:
+            return (9001,)
+        if gap.band == SECOND:
+            return (9002,)
+        return None
+
+    monkeypatch.setattr(module, "_stroke_closed", two_strokes)
+    rows = office_analog(seed=None, p_east=8.0, second_band=True)
+    off, on = build(rows, on=False), build(rows, on=True)
+    assert sorted(c.native_path_indices for c in off.closures) == [(9001,), (9002,)] and off.rings == ()
+    member = [c for c in on.closures if c.kind == KIND_APERTURE_MEMBER]
+    assert len(on.closures) == 3 and len(member) == 1 and member[0].native_path_indices == (9001, 9002)
+    assert len(candidates(on)) == 1
 
 
 def test_a_twin_the_builder_already_closes_by_its_own_stroke_needs_nothing_from_the_keyword():
@@ -237,6 +260,15 @@ def test_the_widening_is_two_band_thicknesses_within_representation_noise(excess
     assert len(on.closures) == (2 if completes else 1)
 
 
+@pytest.mark.parametrize("top,completes", [(51.0, True), (51.04, True), (51.07, False), (52.0, False)])
+def test_a_gap_thicker_than_the_closed_band_is_a_different_structure_and_stays_open(top, completes):
+    # the body band is 6 thick: a twin band of up to 6 (plus noise) is a line of the same wall, a thicker one is not
+    rows = office_analog(face=(45.0, top))
+    on = build(rows, on=True)
+    assert (len(candidates(on)) == 1) is completes
+    assert len(on.closures) == (2 if completes else 1)
+
+
 def test_a_second_opening_beside_the_doorway_is_a_second_aperture_not_the_same_one():
     # an opening with no evidence starts 10 pt past the doorway (inside the widened reach) but shares no interval with it
     rows = office_analog(second_opening=True)
@@ -253,8 +285,8 @@ def test_a_gap_on_another_band_that_only_shares_an_interval_is_not_the_same_aper
     assert len(on.closures) == 2 and len(off.closures) == 1
 
 
-def test_an_inherited_closure_is_not_itself_a_seed_for_a_further_gap():
-    # a lining band overlaps the twin's band only: it must not inherit through the twin
+def test_a_member_is_not_itself_a_seed_for_a_further_gap():
+    # a lining band overlaps the twin's band only: it must not be completed through the twin
     rows = office_analog(lining=True)
     on = build(rows, on=True)
     assert len(on.closures) == 2
@@ -284,10 +316,28 @@ def test_nothing_changes_where_there_is_nothing_to_complete():
 
 # ------------------------------------------------------------------------------------------------ the rule itself
 
-def test_helper_returns_the_one_evidence_of_the_aperture_and_sorts_its_native_paths():
-    seed = _seed(native=(9, 3, 5))
-    assert _aperture_complete_evidence(_twin(), [seed]) == (KIND_SWING, (3, 5, 9))
+def test_helper_returns_the_sorted_native_paths_of_the_qualifying_seed():
+    assert _aperture_complete_evidence(_twin(), [_seed(native=(9, 3, 5))]) == (3, 5, 9)
     assert _aperture_complete_evidence(_twin(), []) is None
+    assert _aperture_complete_evidence(_twin(), [_seed(native=())]) is None  # a seed without a native path gives nothing to carry
+
+
+def test_helper_keeps_every_qualifying_seed_whatever_its_kind_and_chooses_none():
+    a = _seed(native=(2, 1))
+    b = _seed(native=(4,), kind=KIND_STROKE, band=(40.5, 45.5))
+    assert _aperture_complete_evidence(_twin(), [a, b]) == (1, 2, 4)
+    assert _aperture_complete_evidence(_twin(), [b, a]) == (1, 2, 4)
+    # the same native paths twice are one set; a sliding-leaf seed is a seed like any other
+    assert _aperture_complete_evidence(_twin(), [a, _seed(kind=KIND_STROKE, native=(1, 2))]) == (1, 2)
+    assert _aperture_complete_evidence(_twin(), [_seed(kind=KIND_SLIDING_LEAF, native=(6, 7))]) == (6, 7)
+
+
+def test_helper_ignores_a_seed_that_does_not_qualify():
+    near = _seed(native=(1, 2))
+    far = _seed(kind=KIND_STROKE, native=(7,), interval=(300.0, 340.0))  # another doorway: not this aperture
+    assert _aperture_complete_evidence(_twin(), [far, near]) == (1, 2)
+    assert _aperture_complete_evidence(_twin(), [near, far]) == (1, 2)
+    assert _aperture_complete_evidence(_twin(), [far]) is None
 
 
 def test_helper_needs_the_same_orientation():
@@ -325,11 +375,6 @@ def test_helper_overlaps_of_exactly_the_noise_are_no_overlap():
     assert _aperture_complete_evidence(_twin(lo=-NOISE - 0.01, hi=5.0, band=(-1.0, 1.2)), [seed]) is not None
 
 
-def test_helper_widening_is_inclusive_at_exactly_the_reach_plus_the_noise():
-    assert _aperture_complete_evidence(_twin(lo=OPENING[0] - REACH - NOISE, hi=OPENING[1]), [_seed()]) is not None
-    assert _aperture_complete_evidence(_twin(lo=OPENING[0], hi=OPENING[1] + REACH + NOISE), [_seed()]) is not None
-
-
 @pytest.mark.parametrize("lo,hi,found", [
     (OPENING[0] - REACH, OPENING[1] + REACH, True),
     (OPENING[0] - REACH - 0.04, OPENING[1] + REACH + 0.04, True),
@@ -341,6 +386,11 @@ def test_helper_widens_each_end_by_two_of_the_seed_band_thicknesses(lo, hi, foun
     assert (_aperture_complete_evidence(_twin(lo=lo, hi=hi), [_seed()]) is not None) is found
 
 
+def test_helper_widening_is_inclusive_at_exactly_the_reach_plus_the_noise():
+    assert _aperture_complete_evidence(_twin(lo=OPENING[0] - REACH - NOISE, hi=OPENING[1]), [_seed()]) is not None
+    assert _aperture_complete_evidence(_twin(lo=OPENING[0], hi=OPENING[1] + REACH + NOISE), [_seed()]) is not None
+
+
 def test_helper_widens_by_the_seeds_own_thickness_not_the_twins():
     thin = _seed(band=(40.0, 43.0), interval=(10.0, 50.0))  # 3 thick: reach 6
     assert _aperture_complete_evidence(_twin(lo=4.1, hi=50.0, band=(41.0, 44.0)), [thin]) is not None
@@ -350,27 +400,22 @@ def test_helper_widens_by_the_seeds_own_thickness_not_the_twins():
     assert _aperture_complete_evidence(_twin(lo=-14.1, hi=50.0, band=(41.0, 44.0)), [thick]) is None
 
 
-def test_helper_ignores_a_seed_that_does_not_qualify_when_choosing_the_evidence():
-    near = _seed(native=(1, 2))
-    far = _seed(kind=KIND_STROKE, native=(7,), interval=(300.0, 340.0))  # another doorway: not this aperture
-    assert _aperture_complete_evidence(_twin(), [far, near]) == (KIND_SWING, (1, 2))
-    assert _aperture_complete_evidence(_twin(), [near, far]) == (KIND_SWING, (1, 2))
+@pytest.mark.parametrize("top,found", [(51.0, True), (51.04, True), (51.07, False), (60.0, False), (46.4, True)])
+def test_helper_refuses_a_gap_thicker_than_the_seed_band(top, found):
+    assert (_aperture_complete_evidence(_twin(band=(45.0, top)), [_seed()]) is not None) is found
 
 
-def test_helper_treats_two_qualifying_seeds_with_different_evidence_as_competing():
-    a = _seed(native=(1, 2))
-    b = _seed(native=(4,), kind=KIND_STROKE, band=(40.5, 45.5))
-    assert _aperture_complete_evidence(_twin(), [a, b]) is None
-    assert _aperture_complete_evidence(_twin(), [b, a]) is None
-    # the same native paths with a different kind are different evidence too
-    assert _aperture_complete_evidence(_twin(), [_seed(native=(1, 2)), _seed(kind=KIND_STROKE, native=(1, 2))]) is None
+def test_helper_thickness_limit_is_inclusive_at_exactly_the_seed_band_plus_the_noise():
+    seed = _seed(band=(0.0, 6.0), interval=(10.0, 50.0))
+    assert _aperture_complete_evidence(_twin(lo=10.0, hi=50.0, band=(1.0, 1.0 + 6.0 + NOISE)), [seed]) is not None
+    assert _aperture_complete_evidence(_twin(lo=10.0, hi=50.0, band=(1.0, 1.0 + 6.0 + NOISE + 0.02)), [seed]) is None
 
 
-def test_helper_accepts_two_seeds_that_agree_in_any_order():
-    a = _seed(native=(2, 1))
-    b = _seed(native=(1, 2), band=(40.5, 45.5))
-    assert _aperture_complete_evidence(_twin(), [a, b]) == (KIND_SWING, (1, 2))
-    assert _aperture_complete_evidence(_twin(), [b, a]) == (KIND_SWING, (1, 2))
+def test_helper_judges_the_thickness_against_each_seed_separately():
+    thin = _seed(native=(8,), band=(44.0, 45.4))  # a twin as thick as 1.4 qualifies against a 1.4 seed ...
+    wide = _seed(native=(1, 2))  # ... and against the 6 thick body band
+    narrow = _seed(native=(3,), band=(44.5, 45.5))  # ... but not against a 1.0 thick one
+    assert _aperture_complete_evidence(_twin(lo=9.0), [thin, wide, narrow]) == (1, 2, 8)
 
 
 # ------------------------------------------------------------------------------------------------ geometry-preserving invariances
@@ -439,6 +484,12 @@ def test_the_completion_also_works_on_the_dark_painted_source_path():
 def test_the_keyword_must_be_an_explicit_boolean(value):
     with pytest.raises(ValueError, match="aperture_complete_closures"):
         build_layered_wall_doorway_room_rings(office_analog(), source_sha256=SHA, page_index=0, aperture_complete_closures=value)
+
+
+def test_the_new_kind_is_exported_and_distinct():
+    assert KIND_APERTURE_MEMBER == "aperture_member_closure"
+    assert "KIND_APERTURE_MEMBER" in module.__all__
+    assert len({KIND_APERTURE_MEMBER, KIND_STROKE, KIND_SWING, KIND_SLIDING_LEAF}) == 4
 
 
 @pytest.mark.parametrize("flag", [True, False])
