@@ -145,8 +145,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
     surface(opening.offsetM, right, opening.sillHeightM + opening.heightM, wall.heightM);
     const frame=openingFrameVisual(wall,opening);if(frame)group.add(frame);
     const points = openingOutline(wall, opening);
-    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),
-      new THREE.LineBasicMaterial({ color: 0xf5d9ad })));
+    const openingGuide=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({ color: 0xf5d9ad }));openingGuide.userData.draftGuide=true;group.add(openingGuide);
     if(opening.openingKind==="window"){
       const glass:number[]=[];panel(points,glass);addMesh(glass,0xb5d0d9,.42);
       const pane=group.children[group.children.length-1];pane.userData.catalogueWindow=true;
@@ -179,6 +178,8 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
   addMesh(faces, 0xeeeae1, 1, true);
+  const wallFace=group.children.find(c=>c.userData.catalogueWallFace);
+  if(wallFace instanceof THREE.Mesh){const edges=new THREE.LineSegments(new THREE.EdgesGeometry(wallFace.geometry,25),new THREE.LineBasicMaterial({color:0x85dce8,transparent:true,opacity:.85}));edges.userData.selectionEdge=true;edges.visible=false;group.add(edges);}
   if(texture&&exteriorFaces.length){
     const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(exteriorFaces,3)).setAttribute("uv",new THREE.Float32BufferAttribute(exteriorUV,2));
     g.computeVertexNormals();
@@ -224,7 +225,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
     atOffset(wall, planLength(wall.start, wall.end), wall.heightM),
     atOffset(wall, planLength(wall.start, wall.end), 0.018), atOffset(wall, 0, 0.018),
   ]), new THREE.LineBasicMaterial({ color: 0xa589e4 }));
-  group.add(outline);
+  outline.userData.draftGuide=true;group.add(outline);
   return group;
 }
 
