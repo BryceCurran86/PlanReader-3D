@@ -21,6 +21,7 @@ import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
 import {setLiningAppearance,LINING_BOARDS} from "./constructionLiningVisual";
+import {nominalShellFraming} from "./constructionFrameVisual";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
@@ -783,14 +784,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const next=construction.current.shell;
       if(next!==currentShell){
         currentShell=next;
-        for(const child of [...shellGroup.children]){shellGroup.remove(child);if(child instanceof THREE.Mesh){child.geometry.dispose();child.material.dispose();}}
+        for(const child of [...shellGroup.children]){shellGroup.remove(child);child.traverse(o=>{if(o instanceof THREE.Mesh){o.geometry.dispose();(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());}});}
         for(const surface of next?.surfaces??[]){
           const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(surface.vertices.flat(),3));geometry.computeVertexNormals();
           const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
           const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;shellGroup.add(mesh);
         }
+        if(next)shellGroup.add(...nominalShellFraming(next).children.slice());
       }
-      for(const mesh of shellGroup.children)mesh.visible=displaySurface(construction.current.stage,mesh.userData.surfaceKind);
+      for(const mesh of shellGroup.children){
+        const accessory=mesh.userData.constructionAccessory;
+        mesh.visible=accessory==="roof-frame"||accessory==="ceiling-frame"?!elevatedReturn&&layerVisible(construction.current.layers,accessory,construction.current.stage==="framing"):displaySurface(construction.current.stage,mesh.userData.surfaceKind);
+      }
     }
     const buildOverlay = createBuildOverlay(scene);
     const planOverview=createVrPlanOverview(scene,manifest);
@@ -1761,14 +1766,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         shape.visible = true;
         if (shape instanceof THREE.Mesh && shape.material instanceof THREE.MeshStandardMaterial) {
           shape.material.visible = displaySurface(currentStage, "ceiling");
-          for(const child of shape.children)if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
-            child.visible=!!liningStage&&shape.material.visible&&layerVisible(construction.current.layers,"lining",true);
-            if(liningStage)setLiningAppearance(child,liningStage,construction.current.liningBoard);
+          for(const child of shape.children)if(child instanceof THREE.Mesh){
+            if(child.userData.illustrativeLining){child.visible=!!liningStage&&shape.material.visible&&layerVisible(construction.current.layers,"lining",true);if(liningStage)setLiningAppearance(child,liningStage,construction.current.liningBoard);}
+            else if(child.userData.constructionAccessory==="ceiling-frame")child.visible=!elevatedReturn&&layerVisible(construction.current.layers,"ceiling-frame",currentStage==="framing");
           }
         } else {
           const inspect=inspectedWall!==null&&shape.userData.proposalId===inspectedWall&&!shape.userData.masonryAssembly&&currentStage!=="slab";
           for (const child of shape.children) {
             if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",inspect||currentStage==="framing"||currentStage==="insulation");
+            else if(child.userData.constructionAccessory==="bracing"||child.userData.constructionAccessory==="tie-down")child.visible=layerVisible(construction.current.layers,child.userData.constructionAccessory,inspect||currentStage==="framing");
             else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",currentStage==="insulation");
             else if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
               child.visible=!!liningStage&&!inspect&&layerVisible(construction.current.layers,"wall",true)&&layerVisible(construction.current.layers,"lining",true);
