@@ -20,11 +20,11 @@ on:
           - focused
           - readiness
       workers:
-        description: "Full suite workers: serial (default), 2 or 4 for experimental profiling"
+        description: "Manual reference full suite: serial (default), 2, 4 or 8 experimental workers"
         required: true
         default: '0'
         type: choice
-        options: ['0', '2', '4']
+        options: ['0', '2', '4', '8']
 
 # Public CI verifies code and source integrity but never needs a write token.
 permissions:
@@ -37,16 +37,122 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  shard:
+    # Complete isolated test partitions on each Python version. Manual full
+    # dispatch retains the serial/xdist reference route instead.
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
+        index: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reject newly committed private original-source files (PR)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git diff --diff-filter=AMRCT --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_private_original_source_additions.py
+
+      - name: Reject newly committed private original-source files (push)
+        if: github.event_name == 'push'
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          ZERO_SHA="0000000000000000000000000000000000000000"
+          if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ] || [ "$BASE_SHA" = "$ZERO_SHA" ] || [ "$HEAD_SHA" = "$ZERO_SHA" ]; then
+            echo "Cannot audit an empty source-change comparison range." >&2
+            exit 1
+          fi
+          git diff --diff-filter=AMRCT --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_private_original_source_additions.py
+
+      - name: Enforce Full Plan V2 truth / production separation (pull request)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_v2_truth_separation.py --nul
+
+      - name: Enforce Full Plan V2 truth / production separation (push)
+        if: github.event_name == 'push'
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          ZERO_SHA="0000000000000000000000000000000000000000"
+          if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ] || [ "$BASE_SHA" = "$ZERO_SHA" ] || [ "$HEAD_SHA" = "$ZERO_SHA" ]; then
+            echo "V2 truth separation cannot validate an empty or all-zero push comparison range." >&2
+            exit 1
+          fi
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_v2_truth_separation.py --nul
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ci-v1228.txt
+      - name: Install unchanged test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+          python -m ruff --version
+      - name: Verify pinned checkout
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Execute one isolated complete-collection shard
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: '1'
+          PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+          PLANREADER_CI_SHARDS: '4'
+          PLANREADER_CI_SHARD_INDEX: ${{ matrix.index }}
+          PLANREADER_CI_SHARD_RECEIPT: ${{ runner.temp }}/receipt.json
+        run: |
+          python -m pytest -p scripts.ci_pytest_shard -q -rs --durations=20 tests/
+      - name: Retain count and digest receipt only (no source bytes or test output)
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.python-version }}-${{ matrix.index }}
+          path: ${{ runner.temp }}/receipt.json
+          if-no-files-found: error
+          retention-days: 2
+
   # Required CI / test check name remains unchanged for every PR and
-  # main push. Manual focused/readiness verification does NOT replace it.
+  # main push. Every test executes on both Python versions via isolated
+  # shards; serial/xdist full reference is available by manual dispatch.
+  # Manual focused/readiness verification does NOT replace it.
   test:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.suite == 'full' }}
+    needs: shard
+    # Keep required matrix check contexts. A failed/cancelled/missing shard
+    # must FAIL the required check, never silently skip it.
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.suite == 'full') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
     steps:
+      - name: Require every automatic shard to succeed
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          SHARD_RESULT: ${{ needs.shard.result }}
+        run: test "$SHARD_RESULT" = success
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -150,7 +256,21 @@ jobs:
           PY
           node --check /tmp/planreader_floor_mapper_v131.js
 
+      - name: Download only full-suite shard receipts
+        if: github.event_name != 'workflow_dispatch'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-${{ matrix.python-version }}-*
+          path: ${{ runner.temp }}/shards
+      - name: Verify every collected test executed exactly once across four shards
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          python scripts/ci_pytest_shard.py "$RUNNER_TEMP/shards" 4 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo 'Full collection and execution receipts verified; source-free release checks only.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run all available-source and synthetic tests (report private source omissions)
+        if: github.event_name == 'workflow_dispatch'
         env:
           # Public checkout must never carry private customer PDFs. This is
           # explicitly a SOURCE-UNAVAILABLE run, not a passing original-
