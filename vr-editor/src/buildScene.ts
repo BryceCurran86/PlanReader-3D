@@ -19,6 +19,7 @@ import {makeLiningVisual} from "./constructionLiningVisual.ts";
 import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameVisual.ts";
 import {nominalTrimMesh} from "./constructionTrimVisual.ts";
 import type {WallCornerJoins} from "./wallCornerJoin.ts";
+import {createPhysicalToolTray} from "./physicalToolTray.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -558,18 +559,12 @@ export function createBuildOverlay(scene: THREE.Scene) {
   texture.colorSpace = THREE.SRGBColorSpace;
   const menu = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
     new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true, depthTest: false, depthWrite: false }));
-  menu.renderOrder = 20;
+  menu.renderOrder = 23;
   menu.visible = false;
   scene.add(menu);
-  // Hover is a tiny untextured overlay, not a full canvas redraw/upload.
-  const hoverMesh=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({color:0x91e8d2,transparent:true,opacity:.20,depthTest:false,depthWrite:false,toneMapped:false}));
-  hoverMesh.renderOrder=21;hoverMesh.visible=false;menu.add(hoverMesh);
+  const tray=createPhysicalToolTray(menu);
   function highlightMenu(layout:MenuLayout,index:number){
-    const button=layout.buttons[index];
-    hoverMesh.visible=!layout.radial&&!!button&&!button.disabled;
-    if(!hoverMesh.visible)return;
-    hoverMesh.position.set((button.x+button.w/2)/layout.width-.5,.5-(button.y+button.h/2)/layout.height,.002);
-    hoverMesh.scale.set(button.w/layout.width,button.h/layout.height,1);
+    if(!layout.radial)tray.highlight(index);
   }
   const mark = new THREE.Mesh(new THREE.RingGeometry(0.037, 0.057, 24),
     new THREE.MeshBasicMaterial({ color: 0x71f7dc, side: THREE.DoubleSide }));
@@ -649,8 +644,10 @@ export function createBuildOverlay(scene: THREE.Scene) {
     previousHead.copy(head);
     previousFacing.copy(facing);
     right.set(-facing.z, 0, facing.x);
-    menu.position.copy(head).addScaledVector(facing, 1.30);
-    menu.position.y -= 0.30;
+    // A compact virtual workbench below the sightline, not a screen
+    // covering the building. Stable until explicitly reopened/recentered.
+    menu.position.copy(head).addScaledVector(facing, 1.05).addScaledVector(right,-.18);
+    menu.position.y -= 0.48;
     menu.lookAt(head);
     menu.updateMatrixWorld();
     menu.visible = true;
@@ -667,7 +664,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
   }
   function sizeMenu(layout: MenuLayout) {
     // Larger angular hit targets without changing the menu action mapping.
-    const scale=layout.radial?950:Math.max(800,layout.height/.85,layout.width/1.12);
+    const scale=layout.radial?950:Math.max(900,layout.height/.68,layout.width/.98);
     const width = layout.width / scale, height = layout.height / scale;
     if (menu.scale.x !== width || menu.scale.y !== height) {
       menu.scale.set(width, height, 1);
@@ -686,6 +683,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     const key = JSON.stringify([layout, layout.radial?hover:-1]);
     if (!context || drawn === key) return;
     drawn = key;
+    tray.update(layout);
+    highlightMenu(layout,hover);
     if (canvas.width !== layout.width || canvas.height !== layout.height) {
       canvas.width = layout.width;
       canvas.height = layout.height;
@@ -693,7 +692,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     context.clearRect(0,0,canvas.width,canvas.height);
     context.fillStyle = "#13242c";
     if(layout.radial){context.beginPath();context.arc(canvas.width/2,canvas.height/2,canvas.width/2-2,0,Math.PI*2);context.fill();}
-    else context.fillRect(0, 0, canvas.width, canvas.height);
+    // Transparent gaps expose the building between individual physical keys.
+    else {context.fillStyle="rgba(18,30,36,.92)";context.fillRect(10,10,canvas.width-20,54);context.fillRect(10,canvas.height-52,canvas.width-20,44);}
     context.font = "bold 33px sans-serif";
     context.fillStyle = "#f0fbfc";
     if(layout.radial){/* title is rendered in the centre below */}
@@ -737,15 +737,11 @@ export function createBuildOverlay(scene: THREE.Scene) {
     }
     for (const [index, button] of layout.buttons.entries()) {
       const highlight = button.active;
-      context.fillStyle = highlight ? "#69dbca" : "#2a4651";
-      context.fillRect(button.x, button.y, button.w, button.h);
+      // The key itself is a batched 3D mesh; this atlas contains text only.
       const middle = button.y + button.h / 2;
-      if (button.swatch !== undefined) {
-        context.fillStyle = "#" + button.swatch.toString(16).padStart(6, "0");
-        context.fillRect(button.x + 12, middle - 13, 25, 26);
-      }
-      context.fillStyle = highlight ? "#102421" : button.disabled ? "#a1aeb4" : "#fff";
-      context.font = "bold 25px sans-serif";
+      // Colour samples are physical swatches, separate from the text atlas.
+      context.fillStyle = button.disabled ? "#a1aeb4" : "#fff";
+      context.font = "bold 28px sans-serif";
       context.textAlign = "center";
       const inset = button.swatch === undefined ? 0 : 38;
       context.fillText(button.label, button.x + (button.w + inset) * 0.5, middle + 9, button.w - 18 - inset);
@@ -800,5 +796,5 @@ export function createBuildOverlay(scene: THREE.Scene) {
   }
   return { positionMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, highlightMenu, showAim, showWallGhost,
     hideMenu: () => { menu.visible = false; },
-    dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
+    dispose: () => { tray.dispose();texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }
