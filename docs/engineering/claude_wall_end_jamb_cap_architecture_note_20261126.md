@@ -42,7 +42,10 @@ deeper than a third. An opening with no jamb stroke where only a continuing wall
 
 ## 5. Proof
 
-RESULTS-PENDING
+- Synthetic: `tests/test_layered_wall_end_jamb_caps_v1.py` (63 cases: positives, look-alikes, the far face line, rotation,
+  mirroring, input order, unrelated content, no mutation, replay, switch validation and forwarding). Against a do-nothing
+  switch every strict-behaviour case failed first; 29 of 29 single-line mutants are caught.
+- Originals, counts only: the measured effect and the switch-off identity checks are recorded in the pull request.
 
 ## 6. Not covered
 

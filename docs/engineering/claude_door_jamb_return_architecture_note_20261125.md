@@ -106,3 +106,10 @@ because both faces run more than 1 pt from the end). Scale invariance is not cla
 ## 8. Observations that must not influence implementation
 
 Door tags, room names, rooms read by eye, any sheet's counts or areas. No quantity, benchmark value or file name was used.
+
+## 9. Successor on current main (26 November 2026)
+
+The door-stroke exclusion of #4683 and these returns now ship together behind `door_jamb_returns` (default off). #4683 on
+its own applied the exclusion even with every switch off and lost the D03, D15 and page index 26 D11 doorways; with the pair
+they are kept (sections 3a and 6), and with the switch off the builder is main again. The successor's checks (switch off
+against main, switch on against the head measured above, regression) are recorded in its pull request.
