@@ -1638,9 +1638,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const p=controllers[activeGrip.index].getWorldPosition(new THREE.Vector3());
         dragX=p.x-activeGrip.from.x;dragZ=p.z-activeGrip.from.z;
       }
+      // Index once per frame instead of scanning the move list for every mesh.
+      // Preserve the previous find() behavior if duplicate IDs ever reach here.
+      const movesById = new Map<string, (typeof activeMoves)[number]>();
+      for (const move of activeMoves) {
+        if (!movesById.has(move.objectId)) movesById.set(move.objectId, move);
+      }
       for (const obj of pickables) {
         const id=obj.userData.objectId as string|undefined;
-        const move=activeMoves.find(m=>m.objectId===id);
+        const move=id === undefined ? undefined : movesById.get(id);
         const held=activeGrip?.objectId===id;
         const dx=(move?.dx??0)+(held?dragX:0);
         const dz=(move?.dz??0)+(held?dragZ:0);
