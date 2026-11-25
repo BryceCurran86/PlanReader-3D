@@ -2,7 +2,10 @@ import { activeStart, BUILD_TOOLS } from "./buildPlacement.ts";
 import {wallAngleDegrees} from "./buildPlacement.ts";
 import type { BuildAction, BuildState, PlacedWall, WallAxis, WallRotationPivot } from "./buildPlacement.ts";
 import { CATALOGUE_GROUPS, ITEM_CATALOGUE, itemCanRotate } from "./itemCatalogue.ts";
-import type { CatalogueItem } from "./itemCatalogue.ts";
+import type { CatalogueItem,CatalogueGroup } from "./itemCatalogue.ts";
+import {contextGroups,contextChoices,contextTitle,finishGroupLabel} from "./contextFinishes.ts";
+import type {FinishContext} from "./contextFinishes.ts";
+import type {ItemHit} from "./itemPlacement.ts";
 import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages.ts";
 import type { ConstructionStage } from "./constructionStages.ts";
 import type { ControlMode, HistoryAction } from "./editorControls.ts";
@@ -16,10 +19,12 @@ import type {LiningBoard} from "./constructionLiningVisual.ts";
 
 export type ItemAction =
   | { kind: "choose"; itemId: string }
+  | { kind:"apply-finish";itemId:string;hit:ItemHit;replaceId?:string }
   | { kind: "undo" | "redo" | "done" | "rotate" };
 type BrowseAction = { kind: "toggle" } | { kind: "groups" } | { kind: "category" | "page" | "group-page"; step: number }
   | { kind: "choose-group"; index: number };
 export type MenuAction =
+  | {area:"finish";action:"group"|"page"|"apply"|"back"|"close";group?:CatalogueGroup;step?:number;itemId?:string}
   | { area: "build"; action: BuildAction }
   | { area: "items"; action: ItemAction }
   | { area: "browse"; action: BrowseAction }
@@ -30,7 +35,7 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "ghost" | "lighting-night" | "lighting-on" | "all-dimensions" }
+      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "ghost" | "lighting-night" | "lighting-on" | "all-dimensions" | "environment" | "home" }
   | {area:"layer";layer:ConstructionLayer}
   | {area:"lining";action:"board"|"inspect"}
   | { area:"wall-profile"; profile:WallProfileId }
@@ -52,6 +57,7 @@ export type MenuLayout = { title: string; width: number; height: number;
 export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
+  simpleHome?:boolean;outdoor?:boolean;finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;
   rotationPivot?:WallRotationPivot; connectedRotation?:boolean; angleTools?:boolean; feedback?:string;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
@@ -105,6 +111,51 @@ export function buildMenuLayout(
   const items = (action: ItemAction): MenuAction => ({ area: "items", action });
   const questAction = (action: Extract<MenuAction, {area:"quest"}>["action"]): MenuAction =>
     ({ area: "quest", action });
+  if(quest?.finishContext){
+    const c=quest.finishContext,group=quest.finishGroup;
+    const groups=contextGroups(c);
+    const page=Math.max(0,quest.finishPage??0);
+    if(group){
+      const choices=contextChoices(c,group),max=Math.max(0,Math.ceil(choices.length/6)-1),p=Math.min(page,max);
+      choices.slice(p*6,p*6+6).forEach((item,i)=>add(item.label,24+(i%2)*460,88+Math.floor(i/2)*84,440,74,{area:"finish",action:"apply",itemId:item.id},{active:c.entry?.itemId===item.id,swatch:item.visual.color}));
+      add("Back",24,354,210,68,{area:"finish",action:"back"});
+      add("Previous",250,354,210,68,{area:"finish",action:"page",step:-1},{disabled:p===0});
+      add("Next",476,354,210,68,{area:"finish",action:"page",step:1},{disabled:p===max});
+      add("Close",702,354,210,68,{area:"finish",action:"close"});
+      return {buttons,title:finishGroupLabel(group)+" · "+(p+1)+"/"+(max+1),width:936,height:476,note:"Choose a finish to apply directly to the selected item or face."};
+    }
+    const max=Math.max(0,Math.ceil(groups.length/8)-1),p=Math.min(page,max);
+    groups.slice(p*8,p*8+8).forEach((g,i)=>add(finishGroupLabel(g),24+(i%2)*460,86+Math.floor(i/2)*74,440,64,{area:"finish",action:"group",group:g}));
+    add("Tools",24,394,210,65,{area:"finish",action:"back"});
+    add("Previous",250,394,210,65,{area:"finish",action:"page",step:-1},{disabled:p===0});
+    add("Next",476,394,210,65,{area:"finish",action:"page",step:1},{disabled:p===max});
+    add("Close",702,394,210,65,{area:"finish",action:"close"});
+    return {buttons,title:contextTitle(c),width:936,height:512,note:"Choose a category. Existing fixtures retain their position."};
+  }
+  if(quest?.simpleHome&&!quest.layersOpen&&!quest.wallProfilesOpen&&!quest.budgetOpen&&!quest.help&&!quest.numeric&&!quest.angleTools&&!quest.openingTools&&!quest.multiSelect&&!viewsOpen&&!browser.open&&!footprint.enabled){
+    const selected=quest.selectedWall&&!build.tool&&!item;
+    const entries:{label:string;action:MenuAction;disabled?:boolean}[]=selected?[
+      {label:"Move wall",action:{area:"draft",action:"move"}},
+      {label:"Stretch wall",action:{area:"draft",action:"stretch"}},
+      {label:"Wall assembly",action:questAction("wall-profiles")},
+      {label:"Doors / windows",action:questAction("openings"),disabled:!quest.selectedWall?.openings.length},
+      {label:"Angle",action:{area:"wall-angle",action:"panel"}},
+      {label:"More tools",action:questAction("more-tools")},
+    ]:[
+      {label:"Build / edit",action:questAction("more-tools")},
+      {label:"Materials & fixtures",action:browse({kind:"groups"})},
+      {label:"Plan / walkthrough",action:questAction("elevated-view")},
+      {label:quest.outdoor?"Grass & sky: ON":"Grass & sky: OFF",action:questAction("environment")},
+      {label:"Construction stages",action:{area:"view"}},
+      {label:"Budget",action:questAction("budget")},
+    ];
+    entries.forEach((e,i)=>add(e.label,24+(i%2)*460,88+Math.floor(i/2)*86,440,76,e.action,{disabled:e.disabled}));
+    add("Undo",24,358,210,70,{area:"history",action:"undo"},{disabled:!interaction?.canUndo});
+    add("Redo",250,358,210,70,{area:"history",action:"redo"},{disabled:!interaction?.canRedo});
+    add("Home",476,358,210,70,questAction("home"));
+    add("Close",702,358,210,70,questAction("hide-tools"));
+    return {buttons,title:selected?"EDIT WALL":"PLANREADER · QUICK TOOLS",width:936,height:480,note:"Aim at an object, then open tools for its finishes. Grip closes tools."};
+  }
   if(quest?.layersOpen){
     CONSTRUCTION_LAYERS.forEach(([id,label],i)=>add(label+" · "+(quest.layers?.[id]??"auto").toUpperCase(),20+(i%2)*475,85+Math.floor(i/2)*67,455,58,{area:"layer",layer:id},{active:quest.layers?.[id]==="show"}));
     const bottom=85+Math.ceil(CONSTRUCTION_LAYERS.length/2)*67+8;
