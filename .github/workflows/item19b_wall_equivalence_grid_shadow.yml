@@ -10,7 +10,6 @@ on:
       - "pb_*opening*.py"
       - "tests/*wall*.py"
       - "tests/test_opening_host_binding_*.py"
-      - "scripts/item19b_kstvet_callout_wall_fast_shadow.py"
       - ".github/workflows/item19b_wall_equivalence_grid_shadow.yml"
 
 concurrency:
@@ -18,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  kstvet-wall-authority-shadow:
+  wall-authority-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,20 +42,4 @@ jobs:
             tests/test_opening_host_binding_cross_role_same_v3.py \
             tests/test_net_wall_boolean_union_production_v1.py \
             tests/test_wall_finish_face_binding_authority_v1.py
-
-      - name: Download pinned KSTVET source
-        run: |
-          set -euo pipefail
-          curl -fL --retry 3 --retry-delay 2 \
-            'https://tenders.go.ke/storage/Documents/1727358888238-bq-nd-drawing.pdf' \
-            -o /tmp/kstvet.pdf
-          echo '6856bfa739aa136dd8e0bf17cb25fd43d0d31c9c3dfe3252525454f09d8fa4dc  /tmp/kstvet.pdf' | sha256sum -c -
-
-      - name: Run focused page 54 Item19B callout wall shadow
-        run: |
-          PYTHONPATH=. python scripts/item19b_kstvet_callout_wall_fast_shadow.py /tmp/kstvet.pdf
-
-      # Retired legacy scoring is intentionally not part of this source-backed production shadow
-      # pre-merge wall-equivalence shadow. The production agent first verifies
-      # that representative_wall_ids reach the live commercial quantity path;
-      # only then is the complete benchmark run, per the benchmark gate.
+      # The retired KSTVET drawing's download and replay steps were removed on 26 November 2026 (owner decision).
