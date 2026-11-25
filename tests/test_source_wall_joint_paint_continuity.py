@@ -308,3 +308,120 @@ def test_replay_is_deterministic_and_inputs_are_not_modified():
     first, second = _attempt(drawings), _attempt(drawings)
     assert first == second
     assert drawings == before
+
+
+def test_overlapping_declared_viewports_do_not_bridge_or_veto_valid_joints():
+    """Viewport-scoped wall union: an overlapping foreign-viewport bar neither lends a flush side nor vetoes a valid joint."""
+    # Valid floor-plan ring + joint at index 4, plus an overlapping elevation right wall at index 5
+    # (gives only 1 flush side in elevation: x=97.5, while x=94.0 belongs solely to floor-plan).
+    drawings = _drawings(_outline_row(JOINT))
+    for row in drawings:
+        row["viewport_id"] = "floor-plan"
+    foreign_bar = _rect_row((97.5, 0.0, 100.0, 80.0))
+    foreign_bar["viewport_id"] = "elevation"
+    # A joint declared in "elevation" gets only 1 flush side from elevation and 1 from floor-plan -> must NOT pass.
+    foreign_joint = _outline_row(JOINT)
+    foreign_joint["viewport_id"] = "elevation"
+    rows = drawings + [foreign_bar, foreign_joint]
+    bars = _bars() + [_Bar(box(97.5, 0.0, 100.0, 80.0), 5)]
+    selected = detect_source_wall_joint_paint(
+        [(4, Polygon(JOINT)), (6, Polygon(JOINT))],
+        source_drawings=rows,
+        wall_bars=bars,
+    )
+    # Index 4 (floor-plan) stays admitted despite overlapping elevation bar; index 6 (elevation, 1 elevation bar only) is rejected.
+    assert [p.source_path_id for p in selected] == [4]
+
+
+def test_unscoped_joint_cannot_bridge_two_different_declared_viewports():
+    rows = _drawings(_outline_row(JOINT))
+    rows[0]["viewport_id"] = "vp-a"
+    rows[1]["viewport_id"] = "vp-b"
+    rows[2]["viewport_id"] = "vp-a"
+    rows[3]["viewport_id"] = "vp-a"
+    # Joint row[4] has no declared viewport_id, touching vp-a (top wall) and vp-b (right wall).
+    assert detect_source_wall_joint_paint(
+        [(4, Polygon(JOINT))], source_drawings=rows, wall_bars=_bars(),
+    ) == ()
+
+
+def test_overlapping_spatial_viewports_preserve_native_path_indexing_and_deduplicate():
+    """Overlapping viewport boxes keep original native path indices and emit each distinct joint once."""
+    # Insert 3 leading non-matching rows far outside the viewports so native indices shift (+3).
+    prefix = [
+        _rect_row((800.0, 800.0, 820.0, 802.5), layer="Annotation"),
+        _rect_row((830.0, 800.0, 850.0, 802.5), layer="Annotation"),
+        _rect_row((860.0, 800.0, 880.0, 802.5), layer="Annotation"),
+    ]
+    # Second distinct mitred joint at the bottom-right corner (x=94..97.5, y=77.5..80).
+    walls_two_gaps = (
+        (0.0, 0.0, 94.0, 2.5),
+        (97.5, 0.0, 100.0, 80.0),
+        (0.0, 77.5, 94.0, 80.0),
+        (0.0, 2.5, 2.5, 77.5),
+    )
+    joint_bottom = ((94.0, 77.5), (97.5, 78.8), (97.5, 80.0), (94.0, 80.0))
+    drawings = prefix + _drawings(_outline_row(JOINT), _outline_row(joint_bottom), walls=walls_two_gaps)
+    vp_top = (-5.0, -5.0, 105.0, 50.0)
+    vp_bottom = (-5.0, 30.0, 105.0, 85.0)
+    vp_overlap_corner = (80.0, -5.0, 105.0, 85.0)
+
+    res_a = _attempt(drawings, viewport_pdf_pts=(vp_top, vp_bottom, vp_overlap_corner))
+    res_b = _attempt(drawings, viewport_pdf_pts=(vp_overlap_corner, vp_bottom, vp_top))
+    assert res_a.status == res_b.status == "CANDIDATE"
+    # Native path indices must remain 7 and 8 (offset by the 3 clipped prefix rows) with no duplicates.
+    assert [p.source_path_id for p in res_a.source_wall_joint_paint] == [7, 8]
+    assert res_a.source_wall_joint_paint == res_b.source_wall_joint_paint
+    assert res_a.source_wall_path_ids == (3, 4, 5, 6)
+
+
+def test_source_path_indexing_rejects_bool_out_of_range_and_keeps_distinct_joints_per_path():
+    rows = _drawings(_outline_row(JOINT))
+    # Two distinct non-rectangular joint polygons on the SAME source path index (e.g. compound PDF path),
+    # plus a duplicate of the first and malformed path indices (bool, negative, out-of-range).
+    walls_two_gaps = (
+        (0.0, 0.0, 94.0, 2.5),
+        (97.5, 0.0, 100.0, 80.0),
+        (0.0, 77.5, 94.0, 80.0),
+        (0.0, 2.5, 2.5, 77.5),
+    )
+    joint_bottom = ((94.0, 77.5), (97.5, 78.8), (97.5, 80.0), (94.0, 80.0))
+    bars = [_Bar(box(*b), i) for i, b in enumerate(walls_two_gaps)]
+    selected = detect_source_wall_joint_paint(
+        [
+            (4, Polygon(JOINT)),
+            (4, Polygon(JOINT)),  # exact duplicate -> deduplicated
+            (4, Polygon(joint_bottom)),  # distinct joint on same path -> kept
+            (True, Polygon(JOINT)),  # bool masquerading as int 1 -> rejected
+            (-1, Polygon(JOINT)),
+            (999, Polygon(JOINT)),
+        ],
+        source_drawings=rows,
+        wall_bars=bars,
+    )
+    assert len(selected) == 2
+    assert all(p.source_path_id == 4 for p in selected)
+    assert selected[0].bounds_pdf_pts != selected[1].bounds_pdf_pts
+
+
+def test_structurally_different_l_shaped_plan_with_internal_reentrant_joint():
+    """Second structurally distinct plan topology: concave L-shaped wing with a mitred re-entrant corner."""
+    l_walls = (
+        (0.0, 0.0, 120.0, 2.5),      # north
+        (117.5, 2.5, 120.0, 50.0),   # east upper wing
+        (64.0, 47.5, 117.5, 50.0),   # re-entrant horizontal step (stops at x=64, gap to x=60)
+        (57.5, 52.5, 60.0, 100.0),   # re-entrant vertical step (starts at y=52.5, gap from y=50)
+        (0.0, 97.5, 57.5, 100.0),    # south lower wing
+        (0.0, 2.5, 2.5, 97.5),       # west
+    )
+    # L-shaped mitred wedge bridging x=60..64 and y=47.5..52.5 (flush with step horizontal & step vertical).
+    reentrant_joint = ((57.5, 47.5), (64.0, 47.5), (64.0, 50.0), (60.0, 52.5), (57.5, 52.5))
+    drawings = _drawings(_outline_row(reentrant_joint), walls=l_walls)
+    off = _attempt(drawings, admit=False)
+    assert off.status == "ABSTAINED"
+    on = _attempt(drawings, admit=True)
+    assert on.status == "CANDIDATE"
+    assert len(on.source_wall_joint_paint) == 1
+    assert on.source_wall_joint_paint[0].source_path_id == len(l_walls)
+    assert on.source_wall_joint_paint[0].flush_side_count >= 2
+    assert on.source_wall_band_count == len(l_walls)
