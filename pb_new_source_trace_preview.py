@@ -17,6 +17,11 @@ from pb_layered_wall_doorway_room_ring_shadow import (
     _collect_dark_painted_source_wall_strips,
     _source_wall_ink_candidate_drawings,
 )
+from pb_native_page_frame import (
+    NATIVE_PAGE_FRAME_UNRESOLVED,
+    NativePageFrameUnresolved,
+    native_page_frame,
+)
 from pb_new_exterior_wall_preflight import (
     SourceNativeOuterWallAttempt,
     attempt_source_native_outer_wall_first,
@@ -63,6 +68,12 @@ def _full_page_source_tiles(width: float, height: float, drawing_count: int):
         )
         for y in range(n) for x in range(n)
     )
+
+
+def _new_native_frame_canvas(preview, document, page_index, frame):
+    canvas = preview.new_page(width=frame.display_width, height=frame.display_height)
+    canvas.show_pdf_page(canvas.rect, document, page_index)
+    return canvas
 
 
 def _draw_unsealed_source_ring_preview(canvas, outside_walk) -> bool:
