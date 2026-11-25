@@ -6,6 +6,7 @@ import type { CatalogueItem,CatalogueGroup } from "./itemCatalogue.ts";
 import {contextGroups,contextChoices,contextTitle,finishGroupLabel} from "./contextFinishes.ts";
 import type {FinishContext} from "./contextFinishes.ts";
 import type {ItemHit} from "./itemPlacement.ts";
+import type {DoorHardwareFinish} from "./wallAdditionProtocol.ts";
 import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages.ts";
 import type { ConstructionStage } from "./constructionStages.ts";
 import type { ControlMode, HistoryAction } from "./editorControls.ts";
@@ -24,7 +25,7 @@ export type ItemAction =
 type BrowseAction = { kind: "toggle" } | { kind: "groups" } | { kind: "category" | "page" | "group-page"; step: number }
   | { kind: "choose-group"; index: number };
 export type MenuAction =
-  | {area:"finish";action:"group"|"page"|"apply"|"back"|"close";group?:CatalogueGroup;step?:number;itemId?:string}
+  | {area:"finish";action:"group"|"page"|"apply"|"back"|"close"|"hardware";group?:CatalogueGroup;step?:number;itemId?:string;hardware?:DoorHardwareFinish}
   | { area: "build"; action: BuildAction }
   | { area: "items"; action: ItemAction }
   | { area: "browse"; action: BrowseAction }
@@ -126,6 +127,10 @@ export function buildMenuLayout(
     }
     const max=Math.max(0,Math.ceil(groups.length/8)-1),p=Math.min(page,max);
     groups.slice(p*8,p*8+8).forEach((g,i)=>add(finishGroupLabel(g),24+(i%2)*460,86+Math.floor(i/2)*74,440,64,{area:"finish",action:"group",group:g}));
+    if(c.hit.target==="opening"&&c.hit.opening?.door&&c.hit.hostId.startsWith("opening:")&&groups.length<=4){
+      const finishes=[["Chrome",0xc4ced4,"chrome"],["Matte black",0x292c2e,"matte-black"],["Brushed brass",0xb99b63,"brushed-brass"],["Brushed nickel",0xaaa9a4,"brushed-nickel"]] as const;
+      finishes.forEach(([label,swatch,hardware],index)=>{const i=groups.length+index;add("Handle · "+label,24+(i%2)*460,86+Math.floor(i/2)*74,440,64,{area:"finish",action:"hardware",hardware},{swatch});});
+    }
     add("Tools",24,394,210,65,{area:"finish",action:"back"});
     add("Previous",250,394,210,65,{area:"finish",action:"page",step:-1},{disabled:p===0});
     add("Next",476,394,210,65,{area:"finish",action:"page",step:1},{disabled:p===max});
