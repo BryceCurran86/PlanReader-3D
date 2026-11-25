@@ -36,7 +36,7 @@ export type MenuAction =
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
       "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
-      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "ghost" | "lighting-night" | "lighting-on" | "all-dimensions" | "environment" | "home" }
+      "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "ghost" | "lighting-night" | "lighting-on" | "all-dimensions" | "environment" | "home" | "quality" }
   | {area:"layer";layer:ConstructionLayer}
   | {area:"lining";action:"board"|"inspect"}
   | { area:"wall-profile"; profile:WallProfileId }
@@ -58,7 +58,7 @@ export type MenuLayout = { title: string; width: number; height: number;
 export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
-  simpleHome?:boolean;outdoor?:boolean;finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;
+  simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;
   rotationPivot?:WallRotationPivot; connectedRotation?:boolean; angleTools?:boolean; feedback?:string;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
@@ -157,7 +157,7 @@ export function buildMenuLayout(
     entries.forEach((e,i)=>add(e.label,24+(i%2)*460,88+Math.floor(i/2)*86,440,76,e.action,{disabled:e.disabled}));
     add("Undo",24,358,210,70,{area:"history",action:"undo"},{disabled:!interaction?.canUndo});
     add("Redo",250,358,210,70,{area:"history",action:"redo"},{disabled:!interaction?.canRedo});
-    add("Home",476,358,210,70,questAction("home"));
+    add(selected?"Home":quest.quality==="performance"?"Performance":quest.quality==="high"?"Ultra":"Realistic",476,358,210,70,questAction(selected?"home":"quality"));
     add("Close",702,358,210,70,questAction("hide-tools"));
     return {buttons,title:selected?"WALL WORKBENCH":"PLANREADER · TOOL TRAY",width:936,height:480,note:"Left grip: tools · Right grip on an object: finishes · Trigger: choose"};
   }
