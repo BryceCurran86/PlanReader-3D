@@ -38,6 +38,7 @@ import { LocalOutlinePanel } from "./LocalOutlinePanel";
 import {PreciseCommandPanel} from "./PreciseCommandPanel";
 import {localBuildingShell,DEFAULT_SHELL} from "./connectedDraftShell";
 import {starterManifest,starterBuild,starterBounds,STARTER_SHELL} from "./starterHouse";
+import {starterFurnishings} from "./starterFurnishings";
 import type {DraftPickKind} from "./buildScene";
 import type {ShellSettings} from "./connectedDraftShell";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
@@ -198,7 +199,7 @@ export function App() {
     setDraftState(freshDrafts(result)); setReviewNotes(freshReviewNotes(result));
     setWallMoveState(freshWallMoves(result)); setMoveMode("inspect"); setMoveError(null);
     setTeleportMode(false); setTeleportMessage(null);
-    setPlaced(origin==="starter"?{scene:result,build:starterBuild(result)}:null); setCatalogueSession(null); setResize(null);
+    setPlaced(origin==="starter"?{scene:result,build:starterBuild(result)}:null); setCatalogueSession(origin==="starter"?{scene:result,itemId:null,turn:0,draft:starterFurnishings(result)}:null); setResize(null);
     setShellStore(origin==="starter"?{scene:result,settings:STARTER_SHELL}:null);
     setAddedWallSketch(null); setAddedWallBatchSketches([]); setWallReview(null);
     setSelectedId(null); setClipboardMessage(null); setCaptureStatus(null);
