@@ -1624,6 +1624,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let lastCameraSerial: number | null = null;
     let lastCaptureSerial = visualSettings.current.captureSerial;
     let disposed = false;
+    const gripPosition = new THREE.Vector3();
+    let indexedMoveState: WallMoveHistory | null | undefined;
+    const movesById = new Map<string, ReturnType<typeof safeWallMoves>[number]>();
     renderer.setAnimationLoop((now) => {
       stationaryNavigation(now);
       const { mood: activeMood, quality: activeQuality, detail: activeDetail,
@@ -1644,18 +1647,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           if (squeezeTracker.poll(String(index),pressed))handleGripAction(index);
         }
       }
-      const activeMoves = moveSettings.current.wallMoveState
-        ? safeWallMoves(moveSettings.current.wallMoveState, manifest) : [];
+      const moveState = moveSettings.current.wallMoveState;
+      if (moveState !== indexedMoveState) {
+        indexedMoveState = moveState;
+        movesById.clear();
+        for (const move of moveState ? safeWallMoves(moveState, manifest) : []) {
+          if (!movesById.has(move.objectId)) movesById.set(move.objectId, move);
+        }
+      }
       let dragX=0,dragZ=0;
       if (activeGrip && moveSettings.current.moveMode === "move") {
-        const p=controllers[activeGrip.index].getWorldPosition(new THREE.Vector3());
+        const p=controllers[activeGrip.index].getWorldPosition(gripPosition);
         dragX=p.x-activeGrip.from.x;dragZ=p.z-activeGrip.from.z;
-      }
-      // Index once per frame instead of scanning the move list for every mesh.
-      // Preserve the previous find() behavior if duplicate IDs ever reach here.
-      const movesById = new Map<string, (typeof activeMoves)[number]>();
-      for (const move of activeMoves) {
-        if (!movesById.has(move.objectId)) movesById.set(move.objectId, move);
       }
       const projectionX=resize.current.projection?.scaleX ?? 1;
       const projectionZ=resize.current.projection?.scaleZ ?? 1;
@@ -1941,7 +1944,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const swatch = studyColor(row, draft?.swatch ? { objectId: id, swatch: draft.swatch } : null);
         const originalHeight = item.userData.originalHeight as number | undefined;
         const ghostHeight = draft?.heightM;
-        const moved=activeMoves.some(m=>m.objectId===id) ||
+        const moved=movesById.has(id) ||
           activeGrip?.objectId===id;
         const ghost=(activeInspection.showGhosts && ghostHeight !== null &&
           ghostHeight !== undefined && originalHeight !== undefined) || moved;
@@ -1960,11 +1963,13 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const height=activeInspection.showGhosts && ghostHeight !== null &&
             ghostHeight !== undefined ? ghostHeight : originalHeight;
           const position = item.geometry.getAttribute("position");
-          if (position instanceof THREE.BufferAttribute && position.getY(2) !== height) {
+          if (position instanceof THREE.BufferAttribute && position.getY(2) !== Math.fround(height)) {
             // Triangle vertices 2, 4 and 5 are the upper face vertices.
             position.setY(2, height); position.setY(4, height); position.setY(5, height);
             position.needsUpdate = true;
             item.geometry.computeVertexNormals();
+            item.geometry.computeBoundingBox();
+            item.geometry.computeBoundingSphere();
           }
         }
       }
