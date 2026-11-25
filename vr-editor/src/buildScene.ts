@@ -732,9 +732,17 @@ export function createBuildOverlay(scene: THREE.Scene) {
     }
     outline.visible = !!aim?.line;
     if (aim?.line) {
-      aim.line.forEach((point, i) => positions.setXYZ(i, point.x, point.y, point.z));
-      positions.needsUpdate = true;
-      geometry.setDrawRange(0, aim.line.length);
+      let changed=geometry.drawRange.count!==aim.line.length;
+      aim.line.forEach((point,i)=>{
+        if(positions.getX(i)!==Math.fround(point.x)||positions.getY(i)!==Math.fround(point.y)||positions.getZ(i)!==Math.fround(point.z)){
+          positions.setXYZ(i,point.x,point.y,point.z);
+          changed=true;
+        }
+      });
+      if(changed){
+        positions.needsUpdate=true;
+        geometry.setDrawRange(0,aim.line.length);
+      }
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
