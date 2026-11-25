@@ -155,7 +155,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
       const slab=nominalDoorSlab(wall,opening);
       if(slab&&door instanceof THREE.Mesh){
         slab.updateMatrix();door.geometry.dispose();door.geometry=slab.geometry.applyMatrix4(slab.matrix);
-        slab.material.dispose();door.userData.nominalDoorSlab=true;
+        (Array.isArray(slab.material)?slab.material:[slab.material]).forEach(m=>m.dispose());door.userData.nominalDoorSlab=true;
       }
       door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
       door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
