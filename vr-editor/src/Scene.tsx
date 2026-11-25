@@ -1980,7 +1980,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
             else if(child instanceof THREE.Mesh&&child.material instanceof THREE.MeshStandardMaterial){
               const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true)&&!inspect);
               child.material.visible=child.userData.exteriorTexture?showBody&&layerVisible(construction.current.layers,"envelope",!framing):
-                child.userData.catalogueDoorLeaf?layerVisible(construction.current.layers,"openings",currentStage!=="slab"&&!framing):showBody;
+                (child.userData.catalogueDoorLeaf||child.userData.nominalOpeningFrame||child.userData.catalogueWindow)?layerVisible(construction.current.layers,"openings",currentStage!=="slab"&&!framing):showBody;
             } else if(child instanceof THREE.Line)child.visible=layerVisible(construction.current.layers,"wall",currentStage!=="slab");
           }
         }
