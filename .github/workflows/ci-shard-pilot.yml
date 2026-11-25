@@ -26,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -74,5 +75,6 @@ jobs:
           path: ${{ runner.temp }}/shards
       - name: Verify all shards ran against an identical complete test collection
         run: |
+          set -euo pipefail
           python scripts/ci_pytest_shard.py "$RUNNER_TEMP/shards" 4 | tee -a "$GITHUB_STEP_SUMMARY"
           echo 'Pilot only; existing required full CI and security gates are unchanged.' >> "$GITHUB_STEP_SUMMARY"
