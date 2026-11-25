@@ -2170,6 +2170,12 @@ def _source_unresolved_gap_witnesses(
     return ordered[:limit], len(ordered)
 
 
+def _without_door_owned_paths(
+    drawings: Sequence[Any], witnesses: Sequence[Mapping[str, Any]],
+) -> Sequence[Any]:
+    return drawings
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
