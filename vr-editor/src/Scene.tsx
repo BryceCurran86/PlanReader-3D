@@ -19,7 +19,8 @@ import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
   displayWallDraft, draftGesturePreview, magneticDraftWalls } from "./buildScene";
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
-import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES } from "./constructionStages";
+import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
+import {setLiningFinish} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type { ControlMode, HistoryAction } from "./editorControls";
@@ -1729,7 +1730,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const currentStage = construction.current.stage;
       refreshDimensions();refreshShell();
       if(now-lastPreviewLighting>=150){(renderer.xr.isPresenting?renderer.xr.getCamera():camera).getWorldPosition(lightEye);itemView.updatePreviewLights(visualSettings.current.previewLights,lightEye);lastPreviewLighting=now;}
-      const framing = currentStage === "framing" || currentStage === "rough-in";
+      const framing = currentStage === "framing" || currentStage === "rough-in" || currentStage==="insulation";
+      const liningStage=isLiningStage(currentStage)?currentStage:null;
       const visibilityKey=[currentStage,construction.current.layers,interaction.current.visibleIds,
         resize.current.projection,draftMap.current,!!elevatedReturn,lastAddedWall];
       if(!visibilityKey.every((v,i)=>v===surfaceVisibilityKey[i])){
@@ -1750,10 +1752,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         shape.visible = true;
         if (shape instanceof THREE.Mesh && shape.material instanceof THREE.MeshStandardMaterial) {
           shape.material.visible = displaySurface(currentStage, "ceiling");
+          for(const child of shape.children)if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
+            child.visible=!!liningStage&&shape.material.visible&&layerVisible(construction.current.layers,"lining",true);
+            if(liningStage)setLiningFinish(child,liningStage);
+          }
         } else {
           for (const child of shape.children) {
-            if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",currentStage==="framing");
-            else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",false);
+            if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",currentStage==="framing"||currentStage==="insulation");
+            else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",currentStage==="insulation");
+            else if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
+              child.visible=!!liningStage&&layerVisible(construction.current.layers,"wall",true)&&layerVisible(construction.current.layers,"lining",true);
+              if(liningStage)setLiningFinish(child,liningStage);
+            }
             else if(child instanceof THREE.Mesh&&child.material instanceof THREE.MeshStandardMaterial){
               const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true));
               child.material.visible=child.userData.exteriorTexture?showBody&&layerVisible(construction.current.layers,"envelope",!framing):
