@@ -14,6 +14,7 @@ import type {WallTextureLibrary} from "./wallTextures.ts";
 import {menuButtonAt} from "./toolWheelInput.ts";
 import {nominalFrameLayout} from "./constructionDetailLayout.ts";
 import {makeLiningVisual} from "./constructionLiningVisual.ts";
+import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameVisual.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -155,6 +156,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
     group.add(mount);
   }
   group.add(illustrativeTimberFrame(wall));
+  group.add(...nominalWallConnections(wall).children.slice());
   if(profile.core!=="masonry"){
     const holes=openings.map(o=>({x0:o.offsetM,x1:o.offsetM+o.widthM,y0:o.sillHeightM,y1:o.sillHeightM+o.heightM}));
     const sides=profile.role==="internal"?[1,-1]:[assembly.exteriorSide==="left"?-1:1];
@@ -193,6 +195,7 @@ export function displayCeilingDraft(draft: CeilingDraft) {
   const left=Math.min(draft.start[0],draft.end[0]),front=Math.min(draft.start[1],draft.end[1]);
   const lining=makeLiningVisual(Math.abs(draft.end[0]-draft.start[0]),Math.abs(draft.end[1]-draft.start[1]),[],(x,y,offset)=>new THREE.Vector3(left+x,draft.heightM-offset,front+y));
   if(lining)mesh.add(lining);
+  const framing=nominalCeilingFraming(draft);if(framing)mesh.add(framing);
   return mesh;
 }
 
