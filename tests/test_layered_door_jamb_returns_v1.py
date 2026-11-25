@@ -384,6 +384,12 @@ def test_a_face_a_point_off_the_chord_is_not_the_chord_face(monkeypatch):
     _only_stub(scene, monkeypatch)
 
 
+def test_a_face_off_the_chord_never_stands_in_for_it_even_when_a_line_crosses_the_jamb(monkeypatch):
+    off = FAR + 6.5 - 1.0
+    scene = Scene(drop=("frame_near_lo",), extra=[((LO, off), (LO - 2.2, off), {}), ((LO + 10.0, FAR + 6.5), (NIB_END, FAR + 6.5), {})])
+    _only_stub(scene, monkeypatch)
+
+
 def test_a_diagonal_chord_is_never_processed(monkeypatch):
     scene = Scene(vertical=True)
     seen = _existing_strips(scene.rows, monkeypatch)
