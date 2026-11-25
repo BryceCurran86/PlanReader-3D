@@ -37,7 +37,7 @@ export type MenuAction =
   | { area: "number"; action: "start" | "digit" | "erase" | "clear" | "apply" | "cancel";
       field?: NumericDraftField; digit?: string }
   | { area: "wall-angle"; action:"step"|"pivot"|"connected"|"panel"; degrees?:number }
-  | { area: "opening"; action: "drag" | "shift" | "width" | "height";
+  | { area: "opening"; action: "drag" | "shift" | "width" | "height" | "mechanism" | "toggle";
       deltaMm: number }
   | { area: "draft"; action: "move" | "stretch" | "nudge" | "rotate" | "duplicate" | "delete";
       direction?: "left" | "right" | "forward" | "back" };
@@ -227,7 +227,7 @@ export function buildMenuLayout(
     ];
     for(const [i,c] of controls.entries())add(c.label,20+(i%3)*315,118+Math.floor(i/3)*79,300,69,c.action,{active:c.active,disabled:c.disabled});
     return {buttons,title:"WALL ANGLE · "+wallAngleDegrees(wall).toFixed(1)+"°",subtitle:wallDimensionText(Math.hypot(wall.end[0]-wall.start[0],wall.end[1]-wall.start[1]),wall.heightM,wall.assembly),width:WIDTH,height:572,
-      note:quest.feedback||"Rotate about the chosen pivot. Junctions ON keeps adjoining endpoints connected.",sections:[{label:"PRECISION ROTATION · LOCAL DRAFT",y:100}]};
+      note:quest.feedback||"Rotate about the chosen pivot. Junctions ON also preserves adjoining endpoints during wall drags and stretches.",sections:[{label:"PRECISION ROTATION · LOCAL DRAFT",y:100}]};
   }
   // A selected local wall replaces the crowded toolbox with direct manipulation.
   if (quest?.selectedWall && !viewsOpen && !browser.open && !footprint.enabled && !footprint.changed) {
@@ -250,6 +250,7 @@ export function buildMenuLayout(
         {label:"Exact width",action:field("opening-width")},
         {label:"Exact height",action:field("opening-height")},
         {label:"Exact sill",action:field("opening-sill")},
+        ...(opening.openingKind==="door"?[{label:"Type: "+(opening.doorMechanism??"swing"),action:adjust("mechanism",0)},{label:"Open / close",action:adjust("toggle",0)}]:[]),
         {label:"Back to wall",action:questAction("openings")},
       ];
       for(const [i,entry] of controls.entries()) add(entry.label,

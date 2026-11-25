@@ -1,6 +1,7 @@
 import {ShapeUtils,Vector2} from "three";
 import {localOutline} from "./localOutline.ts";
-import type {PlacedWall,PlanPoint} from "./buildPlacement.ts";
+import {profileDetails} from "./wallProfiles.ts";
+import type {PlacedWall,PlanPoint,CeilingDraft} from "./buildPlacement.ts";
 export type ShellSettings={roof:"off"|"flat"|"gable";pitchDeg:number;slabMm:number;ridgeDeg?:number};
 export const DEFAULT_SHELL:ShellSettings={roof:"off",pitchDeg:22.5,slabMm:100};
 type Vertex=[number,number,number];
@@ -90,4 +91,18 @@ export function connectedDraftShell(walls:readonly PlacedWall[],settings:ShellSe
   roofM2=ring.areaM2/Math.cos(settings.pitchDeg*Math.PI/180);
  }
  return {surfaces:[{kind:"floor",vertices:floor},{kind:"ceiling",vertices:ceiling},{kind:"roof",vertices:roof}],floorM2:ring.areaM2,roofM2,slabM3:ring.areaM2*settings.slabMm/1000,heightM:height,levelId:walls[0].levelId};
+}
+
+/** Local design only: an explicitly marked exterior ring takes precedence.
+ * Internal partitions cannot be used to fill a missing exterior edge. Explicit
+ * ceiling drafts replace the generated full-area ceiling, not the roof/slab. */
+export function localBuildingShell(walls:readonly PlacedWall[],ceilings:readonly CeilingDraft[],settings:ShellSettings):DraftShell|null{
+ if(!walls.length)return null;
+ const {scopeKey,levelId}=walls[0];
+ if([...walls,...ceilings].some(o=>o.scopeKey!==scopeKey||o.levelId!==levelId))return null;
+ const exterior=walls.filter(w=>profileDetails(w.assembly).role==="external");
+ const boundary=exterior.length?exterior:walls;
+ const shell=connectedDraftShell(boundary,settings);
+ if(!shell)return null;
+ return ceilings.length?{...shell,surfaces:shell.surfaces.filter(s=>s.kind!=="ceiling")}:shell;
 }

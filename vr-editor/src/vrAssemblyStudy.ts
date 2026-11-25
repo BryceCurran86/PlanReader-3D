@@ -1,9 +1,9 @@
 /** Shared local budget study for desktop and immersive display. No commercial authority. */
 import type {BuildState} from "./buildPlacement.ts";
 import {draftAssembly,draftAssemblyCost,STUDY_PROFILE} from "./vrDraftAssembly.ts";
-import type {AssemblyProfile,AssemblyRates} from "./vrDraftAssembly.ts";
+import type {AssemblyProfile,AssemblyRates,ShellStudyMetrics} from "./vrDraftAssembly.ts";
 
-export type StudyGeometry=Pick<BuildState,"walls"|"ceilings">;
+export type StudyGeometry=Pick<BuildState,"walls"|"ceilings">&{shellMetrics?:ShellStudyMetrics};
 export const assemblyFields:readonly [keyof AssemblyProfile,string,number][]=[
  ["spacingMm","Stud spacing (mm)",1],["nogginRows","Noggin rows",1],
  ["wastePct","Material waste (%)",0.1],["sheetM2","Board sheet area (m²)",0.01],
@@ -14,9 +14,9 @@ export const assemblyFields:readonly [keyof AssemblyProfile,string,number][]=[
  ["electricalPoints","Electrical points allowance",1],["plumbingPoints","Plumbing points allowance",1],
 ];
 export const nullableAssemblyFields=new Set<keyof AssemblyProfile>(["floorM2","roofPlanM2","electricalPoints","plumbingPoints"]);
-export type AssemblyStudyConfig={enabled:boolean;inputs:Record<string,string>;rates:AssemblyRates;mode:"margin"|"markup";margin:string;gst:string;baseline:StudyGeometry|null};
+export type AssemblyStudyConfig={enabled:boolean;followShell?:boolean;inputs:Record<string,string>;rates:AssemblyRates;mode:"margin"|"markup";margin:string;gst:string;baseline:StudyGeometry|null};
 export function newAssemblyStudy():AssemblyStudyConfig{
- return {enabled:false,inputs:Object.fromEntries(assemblyFields.map(([key])=>[key,STUDY_PROFILE[key]===null?"":String(STUDY_PROFILE[key])])),rates:{},mode:"margin",margin:"0",gst:"10",baseline:null};
+ return {enabled:false,followShell:true,inputs:Object.fromEntries(assemblyFields.map(([key])=>[key,STUDY_PROFILE[key]===null?"":String(STUDY_PROFILE[key])])),rates:{},mode:"margin",margin:"0",gst:"10",baseline:null};
 }
 type Cost=ReturnType<typeof draftAssemblyCost>;
 export type StudyEvaluation={result:Cost|null;prior:Cost|null;error:string;baselineError:string};
@@ -32,7 +32,7 @@ export function evaluateAssemblyStudy(build:StudyGeometry,study:AssemblyStudyCon
    Object.assign(p,{[key]:value?Number(value):null});
   }
   if(!study.margin.trim()||!study.gst.trim())throw Error("Enter margin/markup and GST, including zero if not applicable.");
-  const calculate=(geometry:StudyGeometry)=>draftAssemblyCost(draftAssembly(geometry,p),study.rates,Number(study.margin),Number(study.gst),study.mode);
+  const calculate=(geometry:StudyGeometry)=>draftAssemblyCost(draftAssembly(geometry,p,study.followShell===false?undefined:geometry.shellMetrics),study.rates,Number(study.margin),Number(study.gst),study.mode);
   const result=calculate(build);
   let prior:Cost|null=null,baselineError="";
   if(study.baseline)try{prior=calculate(study.baseline);}catch{baselineError="Baseline no longer fits the current assumptions.";}

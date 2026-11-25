@@ -45,7 +45,8 @@ function readWall(value:unknown,key:string,levels:ReadonlySet<string>):PlacedWal
     start:[...wall.start],end:[...wall.end],heightM:wall.heightM,
     ...(wall.assembly?{assembly:{...wall.assembly}}:{}),
     openings:wall.openings.map(x=>({openingId:x.openingId,openingKind:x.openingKind,
-      offsetM:x.offsetM,widthM:x.widthM,heightM:x.heightM,sillHeightM:x.sillHeightM}))};
+      offsetM:x.offsetM,widthM:x.widthM,heightM:x.heightM,sillHeightM:x.sillHeightM,
+      ...(x.doorMechanism!==undefined?{doorMechanism:x.doorMechanism}:{})}))};
 }
 function readCeiling(value:unknown,key:string,levels:ReadonlySet<string>):CeilingDraft {
   if(!record(value)||value.scopeKey!==key||!string(value.proposalId)||

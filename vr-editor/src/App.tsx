@@ -36,8 +36,8 @@ import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, u
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
 import { LocalOutlinePanel } from "./LocalOutlinePanel";
 import {PreciseCommandPanel} from "./PreciseCommandPanel";
-import {connectedDraftShell,DEFAULT_SHELL} from "./connectedDraftShell";
-import {starterManifest,starterBuild,starterBounds,starterShell,STARTER_SHELL} from "./starterHouse";
+import {localBuildingShell,DEFAULT_SHELL} from "./connectedDraftShell";
+import {starterManifest,starterBuild,starterBounds,STARTER_SHELL} from "./starterHouse";
 import type {DraftPickKind} from "./buildScene";
 import type {ShellSettings} from "./connectedDraftShell";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
@@ -324,9 +324,13 @@ export function App() {
   const scopedResize = resize?.scene === manifest ? resize : null;
   const projection = scopedResize?.projection ?? null;
   const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
-  const assemblyStudy=useAssemblyStudy(studyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const shellSettings=shellStore&&shellStore.scene===manifest?shellStore.settings:DEFAULT_SHELL;
-  const shell=useMemo(()=>manifest&&buildLevel?(isStarter?starterShell(studyGeometry.walls,shellSettings):!studyGeometry.ceilings.some(c=>c.levelId===buildLevel)?connectedDraftShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),shellSettings):null):null,[manifest,buildLevel,studyGeometry,shellSettings,isStarter]);
+  const shell=useMemo(()=>manifest&&buildLevel?localBuildingShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),studyGeometry.ceilings.filter(c=>c.levelId===buildLevel&&c.scopeKey===scopeKey(manifest)),shellSettings):null,[manifest,buildLevel,studyGeometry,shellSettings]);
+  const pricedStudyGeometry=useMemo(()=>{
+    if(!shell||!manifest||!buildLevel||[...studyGeometry.walls,...studyGeometry.ceilings].some(o=>o.scopeKey!==scopeKey(manifest)||o.levelId!==buildLevel))return studyGeometry;
+    return {...studyGeometry,shellMetrics:{floorM2:shell.floorM2,roofM2:shell.roofM2,slabM3:shell.slabM3,ceilingM2:shell.surfaces.some(s=>s.kind==="ceiling")?shell.floorM2:0}};
+  },[shell,manifest,buildLevel,studyGeometry]);
+  const assemblyStudy=useAssemblyStudy(pricedStudyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
@@ -744,7 +748,7 @@ export function App() {
             {shellSettings.roof==="gable"&&<><label>Fixed ridge direction<input type="checkbox" checked={shellSettings.ridgeDeg!==undefined} onChange={e=>setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:e.currentTarget.checked?0:undefined}})}/></label>
             {shellSettings.ridgeDeg!==undefined&&<label>Ridge angle (degrees, +X toward +Z)<input type="number" min="0" max="360" step="1" value={shellSettings.ridgeDeg} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=0&&n<=360)setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:n}});}}/></label>}</>}
             <label>Slab thickness (mm) <input type="number" min="50" max="600" step="10" value={shellSettings.slabMm} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=50&&n<=600)setShellStore({scene:manifest,settings:{...shellSettings,slabMm:n}});}}/></label>
-            {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the outline, wall heights or existing local ceiling.</p>:null}
+            {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the exterior outline and wall heights.</p>:null}
           </details>}
           <PreciseCommandPanel key={scopeKey(manifest)} state={buildState} level={buildLevel} blocked={!!projection||resizeEnabled||mode!=="inspect"} onAction={onBuildAction}/>
           <div className="tool-group" aria-label="Direct object editing">

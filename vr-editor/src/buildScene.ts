@@ -2,11 +2,13 @@ import * as THREE from "three";
 import {
   activeStart, aimOpening, buildGuide, MAX_DRAFT_WALLS, nearWall,
   openingFits, planLength, projectOnWall, snappedPoint, snapDraftWallPoint, validWallLength,
-  draftShape, validCeiling, validEditedWall,
+  draftShape, validCeiling, validEditedWall, followDraftCeilingEdges,
 } from "./buildPlacement.ts";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallSnapOptions, WallVisual } from "./buildPlacement.ts";
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
+import {localDoorMotion} from "./localDoorMotion.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
+import { connectedWallEdit } from "./connectedWallEdit.ts";
 import type { MenuLayout } from "./catalogueMenu";
 import {wallAssembly,profileDetails} from "./wallProfiles.ts";
 import {chooseWallAim} from "./wallMagnet.ts";
@@ -15,6 +17,7 @@ import {menuButtonAt} from "./toolWheelInput.ts";
 import {nominalFrameLayout} from "./constructionDetailLayout.ts";
 import {makeLiningVisual} from "./constructionLiningVisual.ts";
 import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameVisual.ts";
+import {nominalTrimMesh} from "./constructionTrimVisual.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -135,6 +138,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
       addMesh(leaf, 0xb68b60, 1, false, opening.openingId);
       const door=group.children[group.children.length-1];
       door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
+      door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
     }
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
@@ -159,6 +163,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
     mount.userData.catalogueMountFace=true;
     group.add(mount);
   }
+  const trim=nominalTrimMesh(wall);if(trim)group.add(trim);
   group.add(illustrativeTimberFrame(wall));
   for(const accessory of nominalWallConnections(wall).children.slice())group.add(accessory);
   if(profile.core!=="masonry"){
@@ -297,7 +302,7 @@ export function directDraftGesture(state:BuildState,levelId:string|null,ray:THRE
 }
 
 export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray,
-  state?: BuildState, controllerPosition?: PlanPoint, options: WallSnapOptions = {}) {
+  state?: BuildState, controllerPosition?: PlanPoint, options: WallSnapOptions = {}, connected=false) {
   // With Quest controllers, manipulation should follow the hand in X/Z, not
   // require aiming at an imaginary ground plane throughout the drag.
   const current = "previous" in gesture && gesture.fromController && controllerPosition
@@ -350,10 +355,11 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
       ? { ...previous, start: target, end: anchor }
       : draftShape(previous, mode, from, mode === "stretch" ? target : to, anchor);
     if (!shape) return null;
-    valid = validEditedWall(shape);
+    const connectedWalls=connected&&state?connectedWallEdit(state.walls,previous,shape,true):null;
+    valid = validEditedWall(shape)&&(!connected||(connectedWalls!==null&&connectedWalls.every(validEditedWall)&&state!==undefined&&followDraftCeilingEdges(state.ceilings,previous,shape)!==null));
     line = [new THREE.Vector3(shape.start[0], shape.heightM, shape.start[1]),
       new THREE.Vector3(shape.end[0], shape.heightM, shape.end[1])];
-    action = { kind: "adjust", previous, wall: shape };
+    action = { kind: "adjust", previous, wall: shape, ...(connected ? {connected:true,allowTJunctions:true} : {}) };
   } else {
     const { previous, mode, from, anchor } = gesture;
     const corner: PlanPoint = [anchor[0] === Math.min(previous.start[0], previous.end[0])
@@ -368,7 +374,7 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
     line.push(line[0]);
     action = { kind: "adjust-ceiling", previous, ceiling: shape };
   }
-  const hint = !valid ? "Size is invalid or an opening would no longer fit."
+  const hint = !valid ? connected&&"previous" in gesture&&gesture.kind==="wall" ? "Connected edit blocked: junction, wall size or opening conflict. Turn Junctions OFF to edit independently." : "Size is invalid or an opening would no longer fit."
     : gesture.mode === "opening-move" ?
       "Release to slide draft opening along its host wall."
     : gesture.mode === "wall" && !("previous" in gesture)
