@@ -31,8 +31,20 @@ try {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto("http://127.0.0.1:" + server.address().port);
-  await page.getByRole("button", { name: "Open example", exact: true }).click();
   const canvas = page.locator(".viewport canvas");
+  await page.locator(".header-state").getByText("Editable starter house", {exact:true}).waitFor();
+  await canvas.waitFor();
+  await page.locator(".build-tools").getByText("Draft walls (7)",{exact:true}).waitFor();
+  const selection=page.getByLabel("Selected object");
+  assert.equal(await selection.locator("option").count(),12,"Seven editable walls and four editable ceilings");
+  await selection.selectOption("living-ceiling");
+  await page.getByLabel("Ceiling height (mm)").fill("2600");
+  await page.getByLabel("Ceiling height (mm)").press("Tab");
+  assert.equal(await page.getByLabel("Ceiling height (mm)").inputValue(),"2600");
+  await canvas.evaluate(element=>{window.starterCanvas=element;});
+  await page.getByRole("button", { name: "Open example", exact: true }).click();
+  await page.locator(".header-state").getByText("Example plan",{exact:true}).waitFor();
+  await page.waitForFunction(()=>!window.starterCanvas.isConnected);
   await canvas.waitFor();
   const layoutClear = () => page.evaluate(() => {
     const canvas = document.querySelector(".viewport canvas");
@@ -49,12 +61,27 @@ try {
   await button(view, "Top 3D").click();
   await button(tools, "Wall").click();
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await canvas.scrollIntoViewIfNeeded();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const box = await canvas.boundingBox();
   for (const part of [0.40, 0.56]) await page.mouse.click(box.x + box.width * part, box.y + box.height / 2);
   const walls = tools.getByText("Draft walls (1)", { exact: true });
   await walls.waitFor();
   await page.keyboard.press("Control+z");
   await walls.waitFor({ state: "hidden" });
+  await page.keyboard.press("Control+Shift+z");
+  await walls.waitFor();
+  await button(tools,"Done").click();
+  await page.getByLabel("Pick",{exact:true}).selectOption("walls");
+  await canvas.scrollIntoViewIfNeeded();
+  const directBox=await canvas.boundingBox();
+  await page.mouse.move(directBox.x+directBox.width*.48,directBox.y+directBox.height*.5);
+  await page.mouse.down();
+  await page.mouse.move(directBox.x+directBox.width*.48,directBox.y+directBox.height*.5+35,{steps:8});
+  await page.mouse.up();
+  await page.waitForFunction(()=>document.querySelector('select[aria-label="Selected object"]')?.value||Array.from(document.querySelectorAll("label")).find(e=>e.textContent.startsWith("Selected object"))?.querySelector("select")?.value);
+  await page.keyboard.press("Control+z");
+  await walls.waitFor(); // undoing a direct drag must retain the original drawn wall
   await page.keyboard.press("Control+Shift+z");
   await walls.waitFor();
 

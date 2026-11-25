@@ -1877,8 +1877,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=100)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
         const layout=toolsOpen?cachedMenu:null;
         if(layout){
-          buildOverlay.sizeMenu(layout);
-          const pose=layout.radial?"radial":"panel";
+          const hitLayout=displayedMenuLayout??layout;
+          buildOverlay.sizeMenu(hitLayout);
+          const pose=hitLayout.radial?"radial":"panel";
           // Keep one world-space anchor through submenu transitions. Never
           // attach the tool surface to a moving controller during selection.
           if(menuPose===null)buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);
@@ -1891,7 +1892,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
         activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
-        const hover=active>=0&&layout?menuTarget(layout):null;
+        const hover=active>=0&&displayedMenuLayout?menuTarget(displayedMenuLayout):null;
         const hostTool=buildState.tool==="door"||buildState.tool==="window"||buildState.tool==="frame"||buildState.tool==="move"||buildState.tool==="stretch"||buildState.tool==="opening-move";
         const canLock=active>=0&&!hover&&(!buildState.tool||hostTool)&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
         if(canLock&&magnetic){
@@ -1926,6 +1927,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(layout){
           const signature=JSON.stringify(layout);
           if((signature!==lastMenuSignature||(hover?.index??-1)!==lastMenuHover)&&(!displayedMenuLayout||now-lastMenuDraw>=80)){
+            buildOverlay.sizeMenu(layout);
             buildOverlay.drawMenu(layout,hover?.index??-1);
             lastMenuSignature=signature;displayedMenuLayout=layout;
             lastMenuDraw=now;lastMenuHover=hover?.index??-1;
@@ -2075,7 +2077,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const distance = Math.max(4, diagonal * 1.15);
           const offset = new THREE.Vector3();
           switch (requestedCamera.mode) {
-            case "plan": offset.set(0.0001, distance, 0); break;
+            case "plan": offset.set(0, distance, 0.0001); break;
             case "north": offset.set(0, diagonal * 0.3, distance); break;
             case "east": offset.set(distance, diagonal * 0.3, 0); break;
             default: offset.set(distance * 0.75, distance * 0.6, distance * 0.75);
@@ -2084,8 +2086,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           controls.mouseButtons.LEFT=requestedCamera.mode==="plan"?THREE.MOUSE.PAN:THREE.MOUSE.ROTATE;
           controls.target.copy(center);
           camera.position.copy(center).add(offset);
-          camera.up.set(0, requestedCamera.mode === "plan" ? 0 : 1,
-            requestedCamera.mode === "plan" ? -1 : 0);
+          // OrbitControls uses the camera up axis captured at construction.
+          // Preserve that axis when switching to plan mode.
+          camera.up.set(0,1,0);
           camera.lookAt(center);
           controls.update();
         }
