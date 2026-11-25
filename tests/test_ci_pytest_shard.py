@@ -21,7 +21,9 @@ def test_partition_is_exhaustive_disjoint_and_order_independent():
 
 
 def rows():
-    return [{**receipt(IDS, 4, index), "exitstatus": 0} for index in range(4)]
+    result = [receipt(IDS, 4, index) for index in range(4)]
+    return [{**row, "exitstatus": 0, "completed": row["selected"],
+             "completed_digest": row["selected_digest"]} for row in result]
 
 
 def test_all_receipts_required():
@@ -33,6 +35,7 @@ def test_all_receipts_required():
 @pytest.mark.parametrize("field,value", [
     ("collection", "different"), ("selected", 999), ("selected_digest", "different"),
     ("index", 0), ("exitstatus", 1), ("total", 999), ("parts", []),
+    ("completed", 0), ("completed", 999), ("completed_digest", "different"),
 ])
 def test_receipt_drift_or_failure_rejected(field, value):
     receipts = rows()

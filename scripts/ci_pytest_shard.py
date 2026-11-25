@@ -57,12 +57,22 @@ def verify_receipts(rows: list[dict], count: int) -> int:
         part = baseline["parts"][row["index"]]
         if part["count"] <= 0 or row["selected"] != part["count"] or row["selected_digest"] != part["digest"]:
             raise ValueError("shard selection mismatch")
+        if (row.get("completed") != part["count"]
+                or row.get("completed_digest") != part["digest"]):
+            raise ValueError("shard execution incomplete or duplicated")
     if sum(part["count"] for part in baseline["parts"]) != baseline["total"]:
         raise ValueError("incomplete partition")
     return baseline["total"]
 
 
 _RECORD: dict | None = None
+_COMPLETED: list[str] = []
+
+
+def pytest_runtest_logreport(report):
+    # Teardown runs even for setup skips/xfails; count every item exactly once.
+    if report.when == "teardown":
+        _COMPLETED.append(report.nodeid)
 
 
 @pytest.hookimpl(trylast=True)
@@ -87,7 +97,9 @@ def pytest_sessionfinish(session, exitstatus):
         return
     # The runner's temporary directory is outside source/evidence archives.
     target = Path(os.environ["PLANREADER_CI_SHARD_RECEIPT"])
-    target.write_text(json.dumps({**_RECORD, "exitstatus": int(exitstatus)},
+    target.write_text(json.dumps({**_RECORD, "exitstatus": int(exitstatus),
+                                 "completed": len(_COMPLETED),
+                                 "completed_digest": digest(_COMPLETED)},
                                  sort_keys=True), encoding="utf-8")
 
 

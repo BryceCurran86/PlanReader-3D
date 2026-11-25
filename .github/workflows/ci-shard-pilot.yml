@@ -36,7 +36,10 @@ jobs:
             requirements.txt
             requirements-ci-v1228.txt
       - name: Install unchanged test dependencies
-        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+          python -m ruff --version
       - name: Execute one isolated complete-collection shard
         env:
           PYTHONPATH: .
