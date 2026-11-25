@@ -2353,6 +2353,9 @@ def build_layered_wall_doorway_room_rings(
 
     ``sliding_leaf_frame_closure`` (default False, its own control) additionally closes an interruption
     that carries a frame box at each end and exactly two overlapping sliding leaves between them.
+    ``door_jamb_returns`` (default False, dark-painted only) adds the short wall
+    pieces bound to a segmented swing's own jamb (``_collect_door_jamb_return_strips``),
+    as topology-only candidate ink.
     ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
     its native endpoints already meet major structural strips. The stroke is not extended.
     That flag is a PDF-point candidate heuristic, not physical wall identity.
@@ -2360,9 +2363,6 @@ def build_layered_wall_doorway_room_rings(
     black axis-aligned stroke as a topology-only wall band, and also a long
     (≥80 pt) medium-width (0.45–1.2) black face. It is not a pair, not a raster
     hull, and not a billed wall.
-    ``door_jamb_returns`` (default False, dark-painted only) adds the short wall
-    pieces bound to a segmented swing's own jamb (``_collect_door_jamb_return_strips``),
-    as topology-only candidate ink.
     """
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
