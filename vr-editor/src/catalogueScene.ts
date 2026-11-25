@@ -310,7 +310,9 @@ export function createCatalogueScene(scene: THREE.Scene) {
       }
       // Stored wall anchors remain on the design centreline. Mount to the selected physical face.
       if(host.target==="wall"&&host.halfThickness)node.position.addScaledVector(normal,host.halfThickness);
-      host.mesh.add(node);
+      // A local leaf finish must follow its swing/slide/overhead transform.
+      const parent=visual.kind==="surface"&&item.group==="doors"&&host.opening?.reviewLeaf&&!designedDoors.has(host.id)?host.opening.reviewLeaf:host.mesh;
+      parent.add(node);
       node.updateWorldMatrix(true, true);
       mounts.push(node);mountedEntries.set(node,placement);
       const lightingRole=previewLightingRole(item);
@@ -373,8 +375,10 @@ export function createCatalogueScene(scene: THREE.Scene) {
     // One explicit controller action, never per-frame catalogue traversal.
     const hostHits=ray.intersectObjects(meshes,false).filter(h=>{
       const host=hosts.get(h.object);
-      return !!host&&host.target!=="site"&&visibleInScene(h.object)&&
-        !(host.target==="roof"||host.target==="ceiling")||!!host&&host.target!=="site"&&visibleInScene(h.object)&&!cutawayKey&&showConstructionSurface(stageKey,host.target as "roof"|"ceiling");
+      if(!host||host.target==="site"||!visibleInScene(h.object))return false;
+      if(host.target==="ceiling"||host.target==="roof")return !cutawayKey&&showConstructionSurface(stageKey,host.target);
+      if(host.target==="floor")return showConstructionSurface(stageKey,"floor");
+      return stageKey!=="slab";
     });
     const picked=ray.intersectObjects(mounts.filter(visibleInScene),true).find(h=>visibleInScene(h.object)&&h.distance<=4);
     if(picked&&picked.distance<=(hostHits[0]?.distance??Infinity)+.10){
