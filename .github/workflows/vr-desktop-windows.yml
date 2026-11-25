@@ -10,6 +10,12 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+
+# Superseded PR installers are disposable; manual packaging runs are not.
+concurrency:
+  group: vr-windows-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   windows-installer:
     runs-on: windows-2022
@@ -21,6 +27,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: vr-editor/package-lock.json
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
