@@ -10,6 +10,25 @@ const parts=["paper","edge","compound","screw"] as const;
 type Project=(x:number,y:number,offset:number)=>THREE.Vector3;
 type Point2=[number,number];
 type Triangle2=[Point2,Point2,Point2];
+const MAX_LINING_VERTICES=150_000;
+const CELL=1.2;
+function spatialIndex<T>(items:readonly T[],bounds:(item:T)=>Rect){
+ const cells=new Map<string,T[]>();
+ const cell=(v:number)=>Math.floor(v/CELL);
+ for(const item of items){
+  const r=bounds(item);
+  for(let x=cell(r.x0);x<=cell(r.x1);x++)for(let y=cell(r.y0);y<=cell(r.y1);y++){
+   const key=x+":"+y,list=cells.get(key);
+   if(list)list.push(item);else cells.set(key,[item]);
+  }
+ }
+ return (r:Rect):T[]=>{
+  const found=new Set<T>();
+  for(let x=cell(r.x0);x<=cell(r.x1);x++)for(let y=cell(r.y0);y<=cell(r.y1);y++)for(const item of cells.get(x+":"+y)??[])found.add(item);
+  return [...found];
+ };
+}
+const triangleBounds=(t:Triangle2):Rect=>({x0:Math.min(t[0][0],t[1][0],t[2][0]),x1:Math.max(t[0][0],t[1][0],t[2][0]),y0:Math.min(t[0][1],t[1][1],t[2][1]),y1:Math.max(t[0][1],t[1][1],t[2][1])});
 const cross=(a:Point2,b:Point2,p:Point2)=>(b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]);
 function clipTriangle(poly:Point2[],tri:Triangle2){
  const sign=Math.sign(cross(tri[0],tri[1],tri[2]));if(!sign)return [];
@@ -39,24 +58,29 @@ export function makeLiningVisual(width:number,height:number,holes:readonly Rect[
  let layout:ReturnType<typeof nominalLiningLayout>;
  try{layout=nominalLiningLayout(width,height,holes);}catch{return null;}
  const positions:number[]=[],samples:number[]=[];
+ const nearbyBoards=spatialIndex(layout.boards,b=>b),nearbyTriangles=triangles?spatialIndex(triangles,triangleBounds):null;
+ let overBudget=false;
  function quad(r:Rect,offset:number,part:"paper"|"edge"|"compound"|"screw",strength:number){
-  if(r.x1-r.x0<1e-7||r.y1-r.y0<1e-7)return;
+  if(overBudget||r.x1-r.x0<1e-7||r.y1-r.y0<1e-7)return;
   const pts:Point2[]=[[r.x0,r.y0],[r.x1,r.y0],[r.x1,r.y1],[r.x0,r.y1]];
   const sample=parts.indexOf(part)*256+Math.round(strength*100);
-  const polygons=triangles?triangles.filter(t=>Math.max(...t.map(p=>p[0]))>=r.x0&&Math.min(...t.map(p=>p[0]))<=r.x1&&Math.max(...t.map(p=>p[1]))>=r.y0&&Math.min(...t.map(p=>p[1]))<=r.y1).map(t=>clipTriangle(pts,t)):[pts];
+  const polygons=nearbyTriangles?nearbyTriangles(r).map(t=>clipTriangle(pts,t)):[pts];
   for(const poly of polygons)for(let i=1;i+1<poly.length;i++){
    if(Math.abs(cross(poly[0],poly[i],poly[i+1]))<1e-10)continue;
+   if(samples.length+3>MAX_LINING_VERTICES){overBudget=true;return;}
    for(const p of [poly[0],poly[i],poly[i+1]]){positions.push(...project(p[0],p[1],offset).toArray());samples.push(sample);}
   }
  }
  // Clip every detail band to the original solid board pieces, including apertures.
  function detail(r:Rect,offset:number,part:"edge"|"compound"|"screw",strength:number){
-  for(const b of layout.boards){
+  if(overBudget)return;
+  for(const b of nearbyBoards(r)){
    quad({x0:Math.max(b.x0,r.x0),x1:Math.min(b.x1,r.x1),y0:Math.max(b.y0,r.y0),y1:Math.min(b.y1,r.y1)},offset,part,strength);
   }
  }
  for(const b of layout.boards)quad(b,.001,"paper",0);
  for(const j of layout.joints){
+  if(overBudget)return null;
   const band=(half:number,offset:number,strength:number,part:"edge"|"compound")=>detail(j.axis==="horizontal"?
     {x0:j.from,x1:j.to,y0:j.at-half,y1:j.at+half}:
     {x0:j.at-half,x1:j.at+half,y0:j.from,y1:j.to},offset,part,strength);
@@ -67,10 +91,11 @@ export function makeLiningVisual(width:number,height:number,holes:readonly Rect[
   band(.0015,.005,.96,"edge");
  }
  for(const f of layout.fixings){
+  if(overBudget)return null;
   detail({x0:f.x-.021,x1:f.x+.021,y0:f.y-.016,y1:f.y+.016},.006,"compound",.55);
   detail({x0:f.x-.009,x1:f.x+.009,y0:f.y-.008,y1:f.y+.008},.007,"screw",.95);
  }
- if(!positions.length)return null;
+ if(overBudget||!positions.length)return null;
  const geometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
  geometry.computeVertexNormals();
  geometry.setAttribute("color",new THREE.BufferAttribute(new Float32Array(positions.length),3));
