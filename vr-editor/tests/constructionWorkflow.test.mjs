@@ -43,7 +43,7 @@ test("ceiling drag and stretch edit only the draft and Undo restores the origina
   assert.deepEqual(act(changed, { kind: "undo" }).ceilings, state.ceilings);
 });
 
-test("construction views hide concealed fittings and keep all five modes accessible in VR", () => {
+test("construction views hide concealed fittings and keep all stages accessible in VR", () => {
   const air = ITEM_CATALOGUE.find(item => item.group === "air-conditioning");
   const roof = ITEM_CATALOGUE.find(item => item.group === "roof-components");
   assert.ok(air && roof);
@@ -55,7 +55,9 @@ test("construction views hide concealed fittings and keep all five modes accessi
   assert.equal(showConstructionSurface("slab"), false);
   const menu = buildMenuLayout(EMPTY_BUILD, level, EMPTY_ITEM_BROWSER, undefined, false, 0, "", "slab", true);
   assert.deepEqual(menu.buttons.map(button => button.action.stage).filter(Boolean),
-    ["finished", "slab", "framing", "rough-in", "lock-up"]);
+    ["finished", "slab", "framing", "rough-in", "lock-up", "insulation", "sheeted", "set", "sanded", "undercoat"]);
+  for(const button of menu.buttons){assert.ok(button.x>=0&&button.y>=0&&button.x+button.w<=menu.width&&button.y+button.h<=menu.height);}
+  assert.equal(showConstructionSurface("set","ceiling"),true);
 });
 
 test("roof accessory targets use shared geometry and ignore internal triangulation seams", () => {
