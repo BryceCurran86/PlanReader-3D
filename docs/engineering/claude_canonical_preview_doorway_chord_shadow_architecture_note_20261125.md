@@ -1,5 +1,7 @@
 # Source-owned doorway chords in the canonical bounded preview (MAX item 3, P2c) - architecture note
 
+**26 November 2026:** the door-stroke exclusion this channel relies on now ships only with `door_jamb_returns`, so the channel calls the builder with that switch on (see `claude_door_jamb_return_architecture_note_20261125.md` section 9).
+
 Date: 2026-11-25 (Brisbane). Status: PROPOSAL. Nothing here is built, merged, pushed or posted. Local branch `claude/preview-chords-note-20261125`, cut from main `d69f8e1a9`. Orders: MAX's review #4135 comment 7111308442 item 2 ("prove the canonical bounded A500 preview produces real doorway chords") and note comment 7116011360; the owner said "Yes, start P2c". It builds on P2a and P2b (merged), P3b (draft #4683: door symbol strokes no longer mint wall strips in the layered ring) and P3a (draft #4686: gate receipts). Shadow only. No repository code was changed for this note: every experiment ran as a monkeypatch in a scratch process and prints counts only. **It corrects the P2 note**, which expected P2c to be producer wiring in the preview's builder (section 1.5 below shows why that cannot meet MAX's request).
 
 ## 0. Compliance (AGENTS.md "Before proposing or changing code")

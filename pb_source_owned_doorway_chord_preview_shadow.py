@@ -22,7 +22,8 @@ from pb_layered_wall_doorway_room_ring_shadow import (
 from pb_migration_contracts import stable_contract_id
 
 SCHEMA_VERSION = "1.0.0"
-PRODUCER = "pb_layered_wall_doorway_room_ring_shadow.build_layered_wall_doorway_room_rings(dark_painted_wall_source=True)"
+PRODUCER = ("pb_layered_wall_doorway_room_ring_shadow.build_layered_wall_doorway_room_rings(dark_painted_wall_source=True, "
+            "door_jamb_returns=True)")
 INPUT_ROWS = "source rows after the outlined-lettering scope (the rows the preview's own source selector receives)"
 REASON_NATIVE_VECTORS_NOT_ARCHITECTURAL = "native_vector_rows_not_architectural_on_raster_underlay_page"
 REASON_UPSTREAM_CHORD_CLAIMS_AUTHORITY = "upstream_doorway_chord_claims_authority"
@@ -150,7 +151,9 @@ def source_owned_doorway_chord_shadow(
             source_sha256=source_sha256, page_index=page_index, boxes=boxes, builder_called=False, builder_status="abstained",
             reason_codes=(REASON_NATIVE_VECTORS_NOT_ARCHITECTURAL,), witness_count=0, chords=[],
         )
-    result = _build_layered_rings(rows, source_sha256=source_sha256, page_index=page_index, dark_painted_wall_source=True)
+    # The paired door change (door-symbol ink out of the wall strips, jamb returns in) is what recovers the raw gaps chords need.
+    result = _build_layered_rings(rows, source_sha256=source_sha256, page_index=page_index, dark_painted_wall_source=True,
+                                  door_jamb_returns=True)
     upstream = list(result.source_owned_doorway_chords)
     if any(chord.get(flag) is not False for chord in upstream for flag in _AUTHORITY_FLAGS):
         return _block(

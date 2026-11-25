@@ -69,7 +69,7 @@ def _scene(width=23.0, *, lo=100.0, y0=43.0, vertical=False, dx=0.0, dy=0.0, dro
 
 def _direct(rows, *, page_index=0, source_sha256=SHA):
     return layered.build_layered_wall_doorway_room_rings(
-        rows, source_sha256=source_sha256, page_index=page_index, dark_painted_wall_source=True,
+        rows, source_sha256=source_sha256, page_index=page_index, dark_painted_wall_source=True, door_jamb_returns=True,
     )
 
 
@@ -262,7 +262,7 @@ def test_the_layered_builder_is_called_on_the_dark_painted_path_and_nothing_else
 
     monkeypatch.setattr(shadow, "_build_layered_rings", spy)
     _block(_scene(), page_index=3)
-    assert seen == {"source_sha256": SHA, "page_index": 3, "dark_painted_wall_source": True}
+    assert seen == {"source_sha256": SHA, "page_index": 3, "dark_painted_wall_source": True, "door_jamb_returns": True}
 
 
 @pytest.mark.parametrize("style", ["true", "missing", "none", "zero"])
