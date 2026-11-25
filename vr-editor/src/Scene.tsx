@@ -23,6 +23,7 @@ import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningSt
 import {setLiningAppearance,LINING_BOARDS,makeShellCeilingLining} from "./constructionLiningVisual";
 import {nominalShellFraming} from "./constructionFrameVisual";
 import {junctionBackingMesh} from "./constructionJunctionVisual";
+import {sourceWallLiningPreview,sourceCeilingLiningPreview} from "./sourceLiningPreview";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
@@ -762,6 +763,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         (mesh.material as THREE.MeshStandardMaterial).color.getHex();
       mesh.userData.originalOpacity = 1;
     }
+    const surfacesById=new Map((manifest.sourceSurfaces??[]).map(s=>[s.surfaceId,s]));
+    const sourceLiningCache=new Map<THREE.Object3D,THREE.Group|null>();
+    let sourceLiningKey:readonly unknown[]=[];
+    let sourceLiningPending:THREE.Object3D[]=[];
+    let sourceLiningCursor=0,sourceLiningVertices=0;
     const sourceGeometry = footprintGeometry([...new Set([
       ...pickables, ...sourceItemHosts.filter(host => host.target !== "site").map(host => host.mesh),
     ])]);
@@ -1763,6 +1769,33 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(now-lastPreviewLighting>=150){(renderer.xr.isPresenting?renderer.xr.getCamera():camera).getWorldPosition(lightEye);itemView.updatePreviewLights(visualSettings.current.previewLights,lightEye);lastPreviewLighting=now;}
       const framing = currentStage === "framing" || currentStage === "rough-in" || currentStage==="insulation";
       const liningStage=isLiningStage(currentStage)?currentStage:null;
+      // Preview only; keep original source surfaces, review openings and all quantity links intact.
+      // Build at most one missing source overlay each frame, bounded in total, and reuse on finish switches.
+      const sourceLiningAllowed=!!liningStage&&!appliedProjection&&layerVisible(construction.current.layers,"lining",true);
+      const sourceLiningInputs=[liningStage,sourceLiningAllowed,construction.current.liningBoard,construction.current.layers,interaction.current.visibleIds,draftMap.current,!!elevatedReturn];
+      const canShowSourceLining=(obj:THREE.Object3D)=>sourceLiningAllowed&&sourceVisible(obj)&&displaySurface(currentStage,obj.userData.surfaceKind)&&!draftMap.current.get(obj.userData.objectId)?.heightM;
+      if(!sourceLiningInputs.every((v,i)=>v===sourceLiningKey[i])){
+        sourceLiningKey=sourceLiningInputs;
+        sourceLiningPending=[];sourceLiningCursor=0;
+        for(const [obj,group] of sourceLiningCache)if(group){
+          group.visible=canShowSourceLining(obj);
+          if(group.visible&&liningStage)for(const child of group.children)if(child instanceof THREE.Mesh)setLiningAppearance(child,liningStage,construction.current.liningBoard);
+        }
+        if(sourceLiningAllowed)sourceLiningPending=pickables.filter(obj=>obj instanceof THREE.Mesh&&!sourceLiningCache.has(obj)&&canShowSourceLining(obj)&&(obj.userData.sourceWitnessedFace||obj.userData.surfaceKind==="ceiling")).slice(0,120);
+      }
+      if(liningStage&&sourceLiningAllowed&&sourceLiningCursor<sourceLiningPending.length&&sourceLiningCache.size<120&&sourceLiningVertices<1_000_000){
+        const obj=sourceLiningPending[sourceLiningCursor++];
+        const row=sourceById.get(obj.userData.objectId),surface=surfacesById.get(obj.userData.surfaceId);
+        const group=surface?sourceCeilingLiningPreview(surface):row?sourceWallLiningPreview(row):null;
+        if(group){
+          let count=0;for(const child of group.children)if(child instanceof THREE.Mesh)count+=child.geometry.getAttribute("position").count;
+          if(sourceLiningVertices+count<=1_000_000){
+            sourceLiningVertices+=count;obj.add(group);group.visible=canShowSourceLining(obj);
+            for(const child of group.children)if(child instanceof THREE.Mesh)setLiningAppearance(child,liningStage,construction.current.liningBoard);
+            sourceLiningCache.set(obj,group);
+          }else{for(const child of group.children)if(child instanceof THREE.Mesh){child.geometry.dispose();(Array.isArray(child.material)?child.material:[child.material]).forEach(m=>m.dispose());}sourceLiningCache.set(obj,null);}
+        }else sourceLiningCache.set(obj,null);
+      }
       junctionLayer.visible=layerVisible(construction.current.layers,"framing",currentStage==="framing"||currentStage==="insulation");
       for(const child of junctionLayer.children)child.visible=junctionLayer.visible;
       const visibilityKey=[currentStage,construction.current.layers,interaction.current.visibleIds,
