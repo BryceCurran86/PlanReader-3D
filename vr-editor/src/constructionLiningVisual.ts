@@ -4,7 +4,9 @@ import type {Rect} from "./constructionDetailLayout.ts";
 export type LiningFinish="sheeted"|"set"|"sanded"|"undercoat";
 export type LiningBoard="standard"|"wet-area"|"fire-rated";
 const paper:Record<LiningBoard,number>={standard:0xb1b3ad,"wet-area":0xa0b7a0,"fire-rated":0xc3a2a2};
+export const LINING_BOARDS=["standard","wet-area","fire-rated"] as const;
 const finishes:LiningFinish[]=["sheeted","set","sanded","undercoat"];
+const parts=["paper","edge","compound","screw"] as const;
 type Project=(x:number,y:number,offset:number)=>THREE.Vector3;
 const palette=(board:LiningBoard,part:"paper"|"edge"|"compound"|"screw",strength:number)=>{
  const base=new THREE.Color(paper[board]);
@@ -20,14 +22,13 @@ const palette=(board:LiningBoard,part:"paper"|"edge"|"compound"|"screw",strength
 export function makeLiningVisual(width:number,height:number,holes:readonly Rect[],project:Project,board:LiningBoard="standard"){
  let layout:ReturnType<typeof nominalLiningLayout>;
  try{layout=nominalLiningLayout(width,height,holes);}catch{return null;}
- const positions:number[]=[],colors=finishes.map(()=>[] as number[]);
+ const positions:number[]=[],samples:number[]=[];
  function quad(r:Rect,offset:number,part:"paper"|"edge"|"compound"|"screw",strength:number){
   if(r.x1-r.x0<1e-7||r.y1-r.y0<1e-7)return;
   const pts=[[r.x0,r.y0],[r.x1,r.y0],[r.x1,r.y1],[r.x0,r.y1]];
-  const shades=palette(board,part,strength);
+  const sample=parts.indexOf(part)*256+Math.round(strength*100);
   for(const i of [0,1,2,0,2,3]){
-   positions.push(...project(pts[i][0],pts[i][1],offset).toArray());
-   shades.forEach((c,j)=>colors[j].push(c.r,c.g,c.b));
+   positions.push(...project(pts[i][0],pts[i][1],offset).toArray());samples.push(sample);
   }
  }
  // Clip every detail band to the original solid board pieces, including apertures.
@@ -54,18 +55,27 @@ export function makeLiningVisual(width:number,height:number,holes:readonly Rect[
  if(!positions.length)return null;
  const geometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
  geometry.computeVertexNormals();
- const attributes=colors.map(c=>new THREE.Float32BufferAttribute(c,3));
- geometry.setAttribute("color",attributes[1]);
+ geometry.setAttribute("color",new THREE.BufferAttribute(new Float32Array(positions.length),3));
  const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,side:THREE.DoubleSide,roughness:.92}));
  mesh.userData.illustrativeLining=true;
- mesh.userData.liningColors=attributes;
- mesh.userData.liningFinish="set";
- mesh.userData.liningBoard=board;
+ mesh.userData.liningSamples=new Uint16Array(samples);
+ setLiningAppearance(mesh,"set",board);
  mesh.visible=false;
  return mesh;
 }
+export function setLiningAppearance(mesh:THREE.Mesh,finish:LiningFinish,board:LiningBoard="standard"){
+ if(!mesh.userData.illustrativeLining||!LINING_BOARDS.includes(board)||!finishes.includes(finish)||
+   (mesh.userData.liningFinish===finish&&mesh.userData.liningBoard===board))return;
+ const samples=mesh.userData.liningSamples,attribute=mesh.geometry.getAttribute("color");
+ if(!(samples instanceof Uint16Array)||!(attribute instanceof THREE.BufferAttribute)||samples.length!==attribute.count)return;
+ const cache=new Map<number,THREE.Color>();
+ for(let i=0;i<samples.length;i++){
+  const sample=samples[i];let shade=cache.get(sample);
+  if(!shade){shade=palette(board,parts[Math.floor(sample/256)],(sample%256)/100)[finishes.indexOf(finish)];cache.set(sample,shade);}
+  attribute.setXYZ(i,shade.r,shade.g,shade.b);
+ }
+ attribute.needsUpdate=true;mesh.userData.liningFinish=finish;mesh.userData.liningBoard=board;
+}
 export function setLiningFinish(mesh:THREE.Mesh,finish:LiningFinish){
- if(!mesh.userData.illustrativeLining||mesh.userData.liningFinish===finish)return;
- const attribute=mesh.userData.liningColors?.[finishes.indexOf(finish)];
- if(attribute instanceof THREE.BufferAttribute){mesh.geometry.setAttribute("color",attribute);mesh.userData.liningFinish=finish;}
+ setLiningAppearance(mesh,finish,mesh.userData.liningBoard??"standard");
 }
