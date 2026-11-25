@@ -159,7 +159,7 @@ export function buildMenuLayout(
     add("Redo",250,358,210,70,{area:"history",action:"redo"},{disabled:!interaction?.canRedo});
     add("Home",476,358,210,70,questAction("home"));
     add("Close",702,358,210,70,questAction("hide-tools"));
-    return {buttons,title:selected?"EDIT WALL":"PLANREADER · QUICK TOOLS",width:936,height:480,note:"Aim at an object, then open tools for its finishes. Grip closes tools."};
+    return {buttons,title:selected?"WALL WORKBENCH":"PLANREADER · TOOL TRAY",width:936,height:480,note:"Left grip: tools · Right grip on an object: finishes · Trigger: choose"};
   }
   if(quest?.layersOpen){
     CONSTRUCTION_LAYERS.forEach(([id,label],i)=>add(label+" · "+(quest.layers?.[id]??"auto").toUpperCase(),20+(i%2)*475,85+Math.floor(i/2)*67,455,58,{area:"layer",layer:id},{active:quest.layers?.[id]==="show"}));
@@ -239,7 +239,7 @@ export function buildMenuLayout(
     return { buttons, title: "Quest 3 · quick controls", width: WIDTH, height: 570,
       note: "Everything here is local draft review until an authenticated save.",
       helpLines: [
-        "Left grip: show/hide tools. Right trigger: edit.",
+        "Left grip: tool tray. Right grip on object: finishes.",
         "Left stick: walk/strafe. Right stick: snap turn.",
         "Trigger: point, select, confirm or place.",
         "Choose Wall, pick start and end; a corner glows when snapped.",
