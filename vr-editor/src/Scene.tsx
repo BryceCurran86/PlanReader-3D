@@ -20,7 +20,7 @@ import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
 import type { DraftGesture } from "./buildScene";
 import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
-import {setLiningAppearance,LINING_BOARDS} from "./constructionLiningVisual";
+import {setLiningAppearance,LINING_BOARDS,makeShellCeilingLining} from "./constructionLiningVisual";
 import {nominalShellFraming} from "./constructionFrameVisual";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
@@ -789,12 +789,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(surface.vertices.flat(),3));geometry.computeVertexNormals();
           const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
           const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;shellGroup.add(mesh);
+          if(surface.kind==="ceiling"){const lining=makeShellCeilingLining(surface.vertices);if(lining)shellGroup.add(lining); }
         }
         if(next)for(const accessory of nominalShellFraming(next).children.slice())shellGroup.add(accessory);
       }
       for(const mesh of shellGroup.children){
         const accessory=mesh.userData.constructionAccessory;
-        mesh.visible=accessory==="roof-frame"||accessory==="ceiling-frame"?!elevatedReturn&&layerVisible(construction.current.layers,accessory,construction.current.stage==="framing"):displaySurface(construction.current.stage,mesh.userData.surfaceKind);
+        if(mesh instanceof THREE.Mesh&&mesh.userData.illustrativeLining){
+          const stage=construction.current.stage;
+          mesh.visible=isLiningStage(stage)&&displaySurface(stage,"ceiling")&&layerVisible(construction.current.layers,"lining",true);
+          if(isLiningStage(stage))setLiningAppearance(mesh,stage,construction.current.liningBoard);
+        }else mesh.visible=accessory==="roof-frame"||accessory==="ceiling-frame"?!elevatedReturn&&layerVisible(construction.current.layers,accessory,construction.current.stage==="framing"):displaySurface(construction.current.stage,mesh.userData.surfaceKind);
       }
     }
     const buildOverlay = createBuildOverlay(scene);
