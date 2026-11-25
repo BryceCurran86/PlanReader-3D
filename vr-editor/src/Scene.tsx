@@ -1195,7 +1195,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const gesture = resizing ? null : draftGesture();
       startPointer = { id: e.pointerId, x: e.clientX, y: e.clientY, gesture, resize: resizing, context: pointerContext() };
       if (gesture || resizing) {
-        if(gesture?.direct&&"previous" in gesture){updateDraftSelection(gesture.previous.proposalId);select(null);}
+        // Do not change the DOM selection bar while a pointer is held: its layout
+        // can move the canvas and invalidate the drag ray. Select on release.
         controls.enabled = false;
         renderer.domElement.setPointerCapture(e.pointerId);
       }
@@ -1226,6 +1227,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         return;
       }
       if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) {
+        if(start.gesture?.direct&&"previous" in start.gesture){updateDraftSelection(start.gesture.previous.proposalId);select(null);}
         if (start.gesture) completeDrag(start.gesture);
         return;
       }

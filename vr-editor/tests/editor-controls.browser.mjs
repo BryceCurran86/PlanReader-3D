@@ -35,12 +35,14 @@ try {
   await page.locator(".header-state").getByText("Editable starter house", {exact:true}).waitFor();
   await canvas.waitFor();
   await page.locator(".build-tools").getByText("Draft walls (7)",{exact:true}).waitFor();
-  const selection=page.getByLabel("Selected object");
+  const selection=page.locator("#selected-draft-object");
   assert.equal(await selection.locator("option").count(),12,"Seven editable walls and four editable ceilings");
   await selection.selectOption("living-ceiling");
-  await page.getByLabel("Ceiling height (mm)").fill("2600");
-  await page.getByLabel("Ceiling height (mm)").press("Tab");
-  assert.equal(await page.getByLabel("Ceiling height (mm)").inputValue(),"2600");
+  await page.getByLabel("Selected ceiling height (mm)",{exact:true}).fill("2600");
+  await page.getByLabel("Selected ceiling height (mm)",{exact:true}).press("Tab");
+  await selection.selectOption("");
+  await selection.selectOption("living-ceiling");
+  assert.equal(await page.getByLabel("Selected ceiling height (mm)",{exact:true}).inputValue(),"2600","Ceiling height must persist when reselected");
   await canvas.evaluate(element=>{window.starterCanvas=element;});
   await page.getByRole("button", { name: "Open example", exact: true }).click();
   await page.locator(".header-state").getByText("Example plan",{exact:true}).waitFor();
@@ -73,16 +75,26 @@ try {
   await walls.waitFor();
   await button(tools,"Done").click();
   await page.getByLabel("Pick",{exact:true}).selectOption("walls");
+  const wallId=await selection.locator("option").nth(1).getAttribute("value");
+  await selection.selectOption(wallId);
+  const position=page.getByLabel("Selected draft position",{exact:true});
+  const originalPosition=await position.textContent();
   await canvas.scrollIntoViewIfNeeded();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const directBox=await canvas.boundingBox();
   await page.mouse.move(directBox.x+directBox.width*.48,directBox.y+directBox.height*.5);
   await page.mouse.down();
   await page.mouse.move(directBox.x+directBox.width*.48,directBox.y+directBox.height*.5+35,{steps:8});
   await page.mouse.up();
-  await page.waitForFunction(()=>document.querySelector('select[aria-label="Selected object"]')?.value||Array.from(document.querySelectorAll("label")).find(e=>e.textContent.startsWith("Selected object"))?.querySelector("select")?.value);
+  await page.waitForFunction(({id,before})=>document.querySelector("#selected-draft-object")?.value===id&&document.querySelector('output[aria-label="Selected draft position"]')?.textContent!==before,{id:wallId,before:originalPosition});
+  const movedPosition=await position.textContent();
+  assert.notEqual(movedPosition,originalPosition,"Direct drag changes geometry, not just selection or camera");
+  await canvas.focus();
   await page.keyboard.press("Control+z");
-  await walls.waitFor(); // undoing a direct drag must retain the original drawn wall
+  await page.waitForFunction(before=>document.querySelector('output[aria-label="Selected draft position"]')?.textContent===before,originalPosition);
+  await walls.waitFor();
   await page.keyboard.press("Control+Shift+z");
+  await page.waitForFunction(after=>document.querySelector('output[aria-label="Selected draft position"]')?.textContent===after,movedPosition);
   await walls.waitFor();
 
   await button(tools, "Items").click();
