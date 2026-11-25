@@ -25,6 +25,7 @@ import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningSt
 import {setLiningAppearance,LINING_BOARDS,makeShellCeilingLining} from "./constructionLiningVisual";
 import {nominalShellFraming} from "./constructionFrameVisual";
 import {junctionBackingMesh} from "./constructionJunctionVisual";
+import {wallCornerJoins} from "./wallCornerJoin";
 import {sourceWallLiningPreview,sourceCeilingLiningPreview} from "./sourceLiningPreview";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
@@ -922,13 +923,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const junctions=junctionBackingMesh(active);if(junctions)junctionLayer.add(junctions);
       itemView.clear();
       draftItemHosts = [];
+      const joins=wallCornerJoins(active);
       const nextMeshes=new Map<string,{signature:string;object:THREE.Object3D}>();
       const nextOpenDoors=new Set<string>();
       for (const wall of active) {
-        const key="wall:"+wall.proposalId,signature=JSON.stringify(wall);
+        const corner=joins.get(wall.proposalId);
+        const key="wall:"+wall.proposalId,signature=JSON.stringify([wall,corner]);
         const previous=draftMeshes.get(key);
         const reused=previous?.signature===signature;
-        const group=reused && previous.object instanceof THREE.Group ? previous.object : displayWallDraft(wall,wallTextures);
+        const group=reused && previous.object instanceof THREE.Group ? previous.object : displayWallDraft(wall,wallTextures,corner);
         if(!reused){
           group.userData.reviewOnlyWallProposal = true;
           group.userData.proposalId = wall.proposalId;
