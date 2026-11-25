@@ -138,7 +138,17 @@ def test_required_ci_uses_no_rename_detection_in_both_v2_diff_pipelines() -> Non
         'git diff --name-only "$BASE_SHA" "$HEAD_SHA" '
         '| python scripts/check_v2_truth_separation.py --nul'
     )
-    assert workflow.count(fixed) == 2
+    # Each automatic shard and the required verification job independently
+    # protect both pull-request and push comparison ranges.
+    shard = workflow.split("\n  shard:\n", 1)[1].split("\n  test:\n", 1)[0]
+    required = workflow.split("\n  test:\n", 1)[1].split("\n  focused:\n", 1)[0]
+    assert workflow.count(fixed) == 4
+    for gate in (shard, required):
+        assert gate.count(fixed) == 2
+        for event in ("pull request", "push"):
+            assert f"Enforce Full Plan V2 truth / production separation ({event})" in gate
+        assert "if: github.event_name == 'pull_request'" in gate
+        assert "if: github.event_name == 'push'" in gate
     assert unsafe not in workflow
     assert "Enforce Full Plan V2 truth / production separation (pull request)" in workflow
     assert "Enforce Full Plan V2 truth / production separation (push)" in workflow
