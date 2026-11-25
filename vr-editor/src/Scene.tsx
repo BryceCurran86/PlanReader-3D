@@ -18,6 +18,8 @@ import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
   displayWallDraft, draftGesturePreview, magneticDraftWalls, directDraftGesture } from "./buildScene";
 import type { DraftGesture, DraftPickKind } from "./buildScene";
+import {createDraftEditHandles,pickDraftEditHandle} from "./draftEditHandles";
+import type {HandleShape} from "./draftEditHandles";
 import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
 import {setLiningAppearance,LINING_BOARDS,makeShellCeilingLining} from "./constructionLiningVisual";
@@ -800,6 +802,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const wallAdditionLayer = new THREE.Group();
     wallAdditionLayer.name = "UnapprovedNewWallStudy";
     scene.add(wallAdditionLayer);
+    const editHandles=createDraftEditHandles();scene.add(editHandles.group);
     const junctionLayer=new THREE.Group();junctionLayer.name="NominalDraftJunctionBacking";scene.add(junctionLayer);
     const shellGroup=new THREE.Group();shellGroup.name="LocalDraftConnectedShell";scene.add(shellGroup);
     let currentShell:DraftShell|null=null;
@@ -1186,10 +1189,23 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     let startPointer: { id: number; x: number; y: number;
       gesture: DraftGesture | null; resize: ResizeDrag | null; context: PointerContext } | null = null;
+    function selectedHandleShape():HandleShape|null{
+      if(!topEditing()||interaction.current.mode!=="inspect"||!selectedDraftId||toolsOpen||multiSelect||
+        resize.current.enabled||resize.current.projection||itemControls.current.active||teleportSettings.current.teleportMode)return null;
+      const {buildState,buildLevel}=build.current;
+      const kind=directSelection.current.kind,stage=construction.current.stage,layers=construction.current.layers;
+      const wall=kind!=="ceilings"?buildState.walls.find(w=>w.proposalId===selectedDraftId&&w.scopeKey===sceneScope&&w.levelId===buildLevel):null;
+      if(wall&&draftWallLayerVisible(stage,layers,profileDetails(wall.assembly).core==="masonry"))return {kind:"wall",object:wall};
+      const ceiling=kind!=="walls"&&displaySurface(stage,"ceiling")?buildState.ceilings.find(c=>c.proposalId===selectedDraftId&&c.scopeKey===sceneScope&&c.levelId===buildLevel):null;
+      return ceiling?{kind:"ceiling",object:ceiling}:null;
+    }
     function draftGesture() {
       const { buildState, buildLevel } = build.current;
       if (resize.current.projection||resize.current.enabled||itemControls.current.active) return null;
       if(interaction.current.mode==="inspect"&&(!renderer.xr.isPresenting||topEditing())){
+        const shape=selectedHandleShape();
+        const handle=shape&&editHandles.group.visible?pickDraftEditHandle(shape,raycaster.ray):null;
+        if(handle)return handle;
         const kind=directSelection.current.kind;
         const stage=construction.current.stage;
         const layers=construction.current.layers;
@@ -2015,6 +2031,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           } else material.color.setHex(selected ? 0x40eed8 : hovered ? 0xf2dc80 : base);
         }
       }
+      editHandles.update(selectedHandleShape());
       // One reusable on-model dimension sprite; no per-frame texture allocation.
       let target:THREE.Object3D|undefined;
       if(dimensions&&renderer.xr.isPresenting&&!toolsOpen){
