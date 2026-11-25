@@ -15,6 +15,7 @@ import {DesignReviewPanel} from "./DesignReviewPanel";
 import {captureAlternative,restoreAlternative} from "./vrDesignReview";
 import type {DesignAlternative} from "./vrDesignReview";
 import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
+import {ArchitecturalPlan} from "./ArchitecturalPlan";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type {LayerOverrides} from "./constructionLayers";
 import {itemLayerVisible,itemLayer} from "./constructionLayers";
@@ -81,6 +82,7 @@ export function App() {
   const [panel, setPanel] = useState<"plan" | "items" | "review" | "settings">("plan");
   const catalogueOpen = panel === "items";
   const [stage, setStage] = useState<ConstructionStage>("finished");
+  const [planPreview,setPlanPreview]=useState(false);
   const [liningBoard,setLiningBoard]=useState<LiningBoard>("standard");
   const [layers,setLayers]=useState<LayerOverrides>({});
   const [resize, setResize] = useState<{
@@ -666,7 +668,7 @@ export function App() {
     "Drag to orbit. Choose a tool to draw or place items.");
   const planKind = isDemo ? "Example plan" : authenticatedSource ? "PlanReader workspace" : "Local scene";
   const cameraOptions: readonly [CameraView, string][] = [
-    ["isometric", "3D"], ["plan", "Plan"], ["north", "Front"], ["east", "Side"],
+    ["isometric", "3D"], ["plan", "Top 3D"], ["north", "Front"], ["east", "Side"],
   ];
   const panels = manifest ? [["plan", "Plan"], ["items", "Items"], ["review", "Review"], ["settings", "Settings"]] as const :
     [["plan", "Plan"], ["settings", "Settings"]] as const;
@@ -701,7 +703,8 @@ export function App() {
             <div className="tool-group" role="group" aria-label="Camera view">
               {cameraOptions.map(([orientation, label]) => <button key={orientation} type="button"
                 aria-pressed={cameraRequest.mode === orientation && cameraRequest.focus === "scene"}
-                onClick={() => requestCamera(orientation)}>{label}</button>)}
+                onClick={() => {setPlanPreview(false);requestCamera(orientation);}}>{label}</button>)}
+              <button type="button" aria-pressed={planPreview} onClick={()=>setPlanPreview(p=>!p)}>{planPreview?"Return to 3D":"Architectural plan (2D)"}</button>
               <button type="button" disabled={!selected} onClick={() => requestCamera(cameraRequest.mode, "selected")}>
                 Focus selection
               </button>
@@ -741,7 +744,7 @@ export function App() {
           {toolMessage && <span className="sr-only" role="status">{toolMessage}</span>}
 
           <div className="viewport">
-            <Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
+            {planPreview?<ArchitecturalPlan scene={manifest} build={buildState} level={level} visible={visibleIds} projection={projection} moves={activeWallMoves?safeWallMoves(activeWallMoves,manifest):[]} extra={[...activeBatchSketches,...(activeAddedWallSketch?[activeAddedWallSketch]:[])]}/>:<Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
@@ -762,7 +765,7 @@ export function App() {
                 onTeleportMessage={setTeleportMessage}
                 onPcVrSessionReport={reportHeadset} onExportLocalDraft={exportLocalVrDraft}
                 onReviewLocalWall={reviewWall} budget={{summary:assemblyStudy.summary,onCapture:assemblyStudy.capture,onClear:assemblyStudy.clear}} />
-            </Suspense>
+            </Suspense>}
           </div>
           <div className="viewer-footer">
             <span>Alt + drag to orbit with a tool active · Esc to finish · Ctrl/⌘ + Z to undo</span>
