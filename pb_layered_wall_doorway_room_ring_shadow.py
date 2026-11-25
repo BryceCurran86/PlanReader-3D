@@ -1389,19 +1389,135 @@ def _place_swings(arcs: Sequence[dict], gaps: Sequence[_Gap]) -> tuple[dict[int,
     return unique, unplaced, ambiguous
 
 
+def _row_viewport_scope(row: Any) -> str:
+    if not isinstance(row, Mapping):
+        return ""
+    return str(row.get("viewport_id") or row.get("source_viewport_id") or "").strip()
+
+
+def _row_explicit_wall_layer(row: Any) -> str:
+    if not isinstance(row, Mapping):
+        return ""
+    layer = str(row.get("layer") or "").strip()
+    return layer if is_explicit_wall_layer_name(layer) else ""
+
+
+def _strip_compatible_provenance(
+    first: _Strip,
+    second: _Strip,
+    drawings: Sequence[Mapping[str, Any] | None] | None,
+) -> bool:
+    """Two host wall strips belong to one source wall only when their declared viewport and explicit wall layer do not conflict."""
+    if drawings is None:
+        return True
+    viewports: set[str] = set()
+    layers: set[str] = set()
+    for strip in (first, second):
+        for index in strip.native_path_indices():
+            if type(index) is not int or not (0 <= index < len(drawings)):
+                continue
+            row = drawings[index]
+            vp = _row_viewport_scope(row)
+            if vp:
+                viewports.add(vp)
+            layer = _row_explicit_wall_layer(row)
+            if layer:
+                layers.add(layer.casefold())
+    return len(viewports) <= 1 and len(layers) <= 1
+
+
+def _same_orientation_host_strips(
+    gap: _Gap,
+    wall_strips: Sequence[_Strip],
+) -> tuple[_Strip, ...]:
+    """Same-orientation wall strips that actually own ``gap``'s band and abut its ends.
+
+    Unlike ``gap.left_path_indices`` / ``right_path_indices`` (which collect all wall ink touching
+    the gap endpoints, including perpendicular cross-walls and unrelated overlapping bands), this
+    selects only the strips whose own band defines ``gap`` (or, for synthetic swing-leaf / jamb-pair
+    seeds whose band comes from the aperture union, same-orientation strips contained in or matching
+    ``gap.band`` at the gap ends).
+    """
+    found: list[_Strip] = []
+    seen: set[int] = set()
+    synthetic = not (gap.left_path_indices or gap.right_path_indices)
+    for strip in wall_strips:
+        if strip.horizontal != gap.horizontal:
+            continue
+        s_lo, s_hi = (strip.x0, strip.x1) if gap.horizontal else (strip.y0, strip.y1)
+        s_b0, s_b1 = (strip.y0, strip.y1) if gap.horizontal else (strip.x0, strip.x1)
+        touches_end = _close(s_hi, gap.lo) or _close(s_lo, gap.hi)
+        if not touches_end:
+            continue
+        if synthetic:
+            # Synthetic swing-leaf / jamb-pair gaps span the wall band at the opening:
+            # accept host strips overlapping the seed band at the opening end.
+            band_ok = min(s_b1, gap.band[1]) - max(s_b0, gap.band[0]) > NOISE_PT
+        else:
+            # Run-derived gaps belong strictly to strips of their own wall-run band.
+            band_ok = _close(s_b0, gap.band[0]) and _close(s_b1, gap.band[1])
+        if band_ok and id(strip) not in seen:
+            seen.add(id(strip))
+            found.append(strip)
+    return tuple(found)
+
+
+def _hosts_share_same_aperture_wall(
+    gap_hosts: Sequence[_Strip],
+    seed_hosts: Sequence[_Strip],
+    *,
+    horizontal: bool,
+    drawings: Sequence[Mapping[str, Any] | None] | None,
+) -> bool:
+    """Prove that ``gap`` and the closed ``seed`` are hosted by one and the same source wall.
+
+    Independent adjacent or parallel walls that merely share a perpendicular cross-wall, overlap
+    in band projection without sharing a wall body, or declare different viewports/explicit wall
+    layers never pass.
+    """
+    if not gap_hosts or not seed_hosts:
+        return False
+    for gs in gap_hosts:
+        g_ids = set(gs.native_path_indices())
+        for ss in seed_hosts:
+            if not _strip_compatible_provenance(gs, ss, drawings):
+                continue
+            if g_ids & set(ss.native_path_indices()):
+                return True
+            if horizontal:
+                along = min(gs.x1, ss.x1) - max(gs.x0, ss.x0)
+                across = min(gs.y1, ss.y1) - max(gs.y0, ss.y0)
+            else:
+                along = min(gs.y1, ss.y1) - max(gs.y0, ss.y0)
+                across = min(gs.x1, ss.x1) - max(gs.x0, ss.x0)
+            if along >= _STROKE_PAIR_THICK_MIN and across >= -NOISE_PT:
+                return True
+    return False
+
+
 def _aperture_complete_evidence(
     gap: _Gap,
     seeds: Sequence[tuple[_Gap, LayeredDoorwayClosure]],
+    *,
+    wall_strips: Sequence[_Strip] | None = None,
+    drawings: Sequence[Mapping[str, Any] | None] | None = None,
 ) -> tuple[int, ...] | None:
     """The native paths of every evidence-closed gap of this gap's own aperture, sorted and merged, else None.
 
     An aperture is one physical opening that several raw gaps describe at once (a wall's body band and its face lines): same orientation,
-    band and interval both overlapping by more than representation noise. A closed ``seed`` qualifies only when the gap is no thicker than
-    the seed's band (it is a face or body line of the same wall, never a thicker structure) and lies within the seed's interval widened at
-    each end by ``_APERTURE_WIDEN_BAND_FACTOR`` of the seed's band thickness. Every qualifying seed is kept; none is chosen over another.
+    band and interval both overlapping by more than representation noise, and — when wall strips are provided — hosted by one and the
+    same source wall (same-orientation host strip overlap or shared native wall path, with compatible viewport and explicit wall layer).
+    A closed ``seed`` qualifies only when the gap is no thicker than the seed's band (it is a face or body line of the same wall, never a
+    thicker structure) and lies within the seed's interval widened at each end by ``_APERTURE_WIDEN_BAND_FACTOR`` of the seed's band
+    thickness. Every qualifying seed is kept; none is chosen over another.
     """
     natives: set[int] = set()
     thickness = gap.band[1] - gap.band[0]
+    gap_hosts: tuple[_Strip, ...] = ()
+    if wall_strips is not None:
+        gap_hosts = _same_orientation_host_strips(gap, wall_strips)
+        if not gap_hosts:
+            return None
     for closed, closure in seeds:
         if closed.horizontal != gap.horizontal:
             continue
@@ -1415,6 +1531,12 @@ def _aperture_complete_evidence(
         reach = _APERTURE_WIDEN_BAND_FACTOR * seed_thickness
         if gap.lo < closed.lo - reach - NOISE_PT or gap.hi > closed.hi + reach + NOISE_PT:
             continue
+        if wall_strips is not None:
+            seed_hosts = _same_orientation_host_strips(closed, wall_strips)
+            if not _hosts_share_same_aperture_wall(
+                gap_hosts, seed_hosts, horizontal=gap.horizontal, drawings=drawings,
+            ):
+                continue
         natives.update(closure.native_path_indices)
     return tuple(sorted(natives)) if natives else None
 
@@ -2475,9 +2597,14 @@ def build_layered_wall_doorway_room_rings(
             break
         if sibling_native is None and aperture_complete_closures and id(gap) not in competing_gap_ids:
             # One physical opening is often several raw gaps (a wall's body band and its face lines). A gap of the same aperture as an
-            # evidence-closed one, no thicker than it and reaching past it by at most one wall stub plus the wall it meets, is closed as an
-            # aperture member carrying every qualifying seed's native paths. Only the primary closures are seeds: a member never seeds another gap.
-            inherited = _aperture_complete_evidence(gap, seed_faces)
+            # evidence-closed one, hosted by the same source wall, no thicker than it and reaching past it by at most one wall stub plus
+            # the wall it meets, is closed as an aperture member carrying every qualifying seed's native paths. Only primary closures are seeds.
+            inherited = _aperture_complete_evidence(
+                gap,
+                seed_faces,
+                wall_strips=strips,
+                drawings=drawings,
+            )
             if inherited is not None:
                 sibling_kind, sibling_native = KIND_APERTURE_MEMBER, inherited
         if sibling_native is None:

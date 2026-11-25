@@ -510,3 +510,92 @@ def test_the_pdf_bytes_entry_point_forwards_the_keyword_and_defaults_it_off(monk
     assert seen[-1]["aperture_complete_closures"] is flag
     assert build_from_pdf_bytes(data, source_sha256=sha, page_index=0) == "sentinel"
     assert seen[-1]["aperture_complete_closures"] is False
+
+
+# ------------------------------------------------------------------------------------------------ same-aperture source ownership proofs
+
+def test_adjacent_independent_parallel_wall_disjoint_along_axis_never_inherits_closure():
+    """An adjacent parallel partition whose strips do not share host wall ownership with the closed door stays open."""
+    # Wall A (BODY y 40..46) has a closed door across x 10.6..58 (host strips: P/J on west, x 58..122 on east).
+    # Independent Wall B (thin band y 45.4..46.6 overlapping BODY by 0.6 pt) has its own un-evidenced gap x 22..44
+    # bounded by independent strips x 12..22 and x 44..54 that never overlap Wall A's host strips.
+    rows = []
+    rows += strip(0.0, -60, 4.0, 140)
+    rows += strip(58.0, BODY[0], 122.0, BODY[1])
+    rows += strip(9.4, -10, 10.6, 46.2)
+    rows += strip(118.0, 46.0, 122.0, 140.0)
+    rows += strip(0.0, 138.0, 122.0, 142.0)
+    rows.append(line((OPENING[0], 43.0), (OPENING[1], 43.0)))
+    # Independent parallel wall strips inside the opening interval, band overlapping BODY by 0.6 pt, disjoint along X:
+    rows += strip(12.0, 45.4, 22.0, 46.6)
+    rows += strip(44.0, 45.4, 54.0, 46.6)
+
+    on = build(rows, on=True)
+    member_closures = [c for c in on.closures if c.kind == KIND_APERTURE_MEMBER]
+    # Wall B's unrelated gap (22..44) must NEVER receive an aperture_member_closure from Wall A's door (10.6..58).
+    assert not any(
+        abs(c.gap_interval[0] - 22.0) < 0.2 and abs(c.gap_interval[1] - 44.0) < 0.2
+        for c in member_closures
+    )
+
+
+def test_independent_parallel_wall_meeting_only_same_perpendicular_wall_never_inherits_closure():
+    """Sharing only a perpendicular cross-wall does not prove two parallel walls own the same aperture."""
+    # Wall A (BODY y 40..46) meets perpendicular wall P (x 0..4), door x 10.6..58, east strip x 58..122.
+    # Independent Wall B (y 45.4..46.6) also touches P at x=4 on the west, with its east strip at x 48..54 (stopping 4 pt short of Wall A's x=58).
+    rows = []
+    rows += strip(0.0, -60, 4.0, 140)  # perpendicular wall P
+    rows += strip(58.0, BODY[0], 122.0, BODY[1])
+    rows += strip(9.4, -10, 10.6, 46.2)
+    rows += strip(118.0, 46.0, 122.0, 140.0)
+    rows += strip(0.0, 138.0, 122.0, 142.0)
+    rows.append(line((OPENING[0], 43.0), (OPENING[1], 43.0)))
+    # Independent parallel strip ending at x=54 (does NOT touch Wall A's x=58..122):
+    rows += strip(48.0, 45.4, 54.0, 46.6)
+
+    on = build(rows, on=True)
+    member_closures = [c for c in on.closures if c.kind == KIND_APERTURE_MEMBER]
+    assert not any(
+        abs(c.gap_interval[0] - 4.0) < 0.5 and abs(c.gap_interval[1] - 48.0) < 0.5
+        for c in member_closures
+    )
+
+
+def test_overlapping_independent_walls_on_different_explicit_wall_layers_never_share_aperture():
+    """An overlapping face strip on a different explicit wall layer (e.g. WallExternal vs WallInternal) is a distinct wall and stays open."""
+    rows = []
+    rows += strip(0.0, -60, 4.0, 140, layer="Enclosure_WallExternal")
+    rows += strip(58.0, BODY[0], 122.0, BODY[1], layer="Enclosure_WallExternal")
+    # Overlapping parallel face strip on a DIFFERENT explicit wall layer:
+    rows += strip(58.0, FACE[0], 122.0, FACE[1], layer="Enclosure_WallInternal")
+    rows += strip(9.4, -10, 10.6, 46.2, layer="Enclosure_WallExternal")
+    rows += strip(118.0, 46.0, 122.0, 140.0, layer="Enclosure_WallExternal")
+    rows += strip(0.0, 138.0, 122.0, 142.0, layer="Enclosure_WallExternal")
+    rows.append(line((OPENING[0], 43.0), (OPENING[1], 43.0), layer="Enclosure_WallExternal"))
+
+    on = build(rows, on=True)
+    assert [c for c in on.closures if c.kind == KIND_APERTURE_MEMBER] == []
+    assert candidates(on) == []
+
+
+def test_overlapping_independent_walls_in_different_declared_viewports_never_share_aperture():
+    """An overlapping face strip declaring a different viewport_id never inherits door evidence from another viewport."""
+    rows = office_analog()
+    for row in rows:
+        row["viewport_id"] = "plan-a"
+    # Move only the FACE strip (index 2 in office_analog) to a different declared viewport:
+    rows[2]["viewport_id"] = "plan-b"
+
+    on = build(rows, on=True)
+    assert [c for c in on.closures if c.kind == KIND_APERTURE_MEMBER] == []
+    assert candidates(on) == []
+
+
+def test_same_wall_face_strip_sharing_layer_viewport_and_host_body_still_closes():
+    """Positive provenance control: same layer, same viewport, and overlapping same-orientation wall body still closes."""
+    rows = office_analog()
+    for row in rows:
+        row["viewport_id"] = "plan-a"
+    on = build(rows, on=True)
+    assert len([c for c in on.closures if c.kind == KIND_APERTURE_MEMBER]) == 1
+    assert len(candidates(on)) == 1
