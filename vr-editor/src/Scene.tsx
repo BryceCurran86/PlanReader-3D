@@ -22,6 +22,7 @@ import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
 import {setLiningAppearance,LINING_BOARDS,makeShellCeilingLining} from "./constructionLiningVisual";
 import {nominalShellFraming} from "./constructionFrameVisual";
+import {junctionBackingMesh} from "./constructionJunctionVisual";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
@@ -778,6 +779,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const wallAdditionLayer = new THREE.Group();
     wallAdditionLayer.name = "UnapprovedNewWallStudy";
     scene.add(wallAdditionLayer);
+    const junctionLayer=new THREE.Group();junctionLayer.name="NominalDraftJunctionBacking";scene.add(junctionLayer);
     const shellGroup=new THREE.Group();shellGroup.name="LocalDraftConnectedShell";scene.add(shellGroup);
     let currentShell:DraftShell|null=null;
     function refreshShell(){
@@ -841,6 +843,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const signature = JSON.stringify([active, ceilings]);
       if (lastAddedWall === signature) return;
       lastAddedWall = signature;
+      // Separate adjacency mesh: rebuilding junctions must not reset unchanged door poses.
+      for(const child of [...junctionLayer.children]){junctionLayer.remove(child);if(child instanceof THREE.Mesh){child.geometry.dispose();(Array.isArray(child.material)?child.material:[child.material]).forEach(m=>m.dispose());}}
+      const junctions=junctionBackingMesh(active);if(junctions)junctionLayer.add(junctions);
       itemView.clear();
       draftItemHosts = [];
       const nextMeshes=new Map<string,{signature:string;object:THREE.Object3D}>();
@@ -1758,6 +1763,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(now-lastPreviewLighting>=150){(renderer.xr.isPresenting?renderer.xr.getCamera():camera).getWorldPosition(lightEye);itemView.updatePreviewLights(visualSettings.current.previewLights,lightEye);lastPreviewLighting=now;}
       const framing = currentStage === "framing" || currentStage === "rough-in" || currentStage==="insulation";
       const liningStage=isLiningStage(currentStage)?currentStage:null;
+      junctionLayer.visible=layerVisible(construction.current.layers,"framing",currentStage==="framing"||currentStage==="insulation");
+      for(const child of junctionLayer.children)child.visible=junctionLayer.visible;
       const visibilityKey=[currentStage,construction.current.layers,interaction.current.visibleIds,
         resize.current.projection,draftMap.current,!!elevatedReturn,lastAddedWall,construction.current.liningBoard,inspectedWall];
       if(!visibilityKey.every((v,i)=>v===surfaceVisibilityKey[i])){
