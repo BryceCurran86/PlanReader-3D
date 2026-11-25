@@ -2193,10 +2193,13 @@ def _without_door_owned_paths(
 _JAMB_CHORD_AXIS_PT = 0.12
 _JAMB_FACE_PT = 0.18
 _JAMB_FACE_MIN_RUN_PT = 1.0
+# A wall thicker than the 8 pt paper-space window (an enlarged view) must be stated by a cap spanning it, and is at
+# most one part in this many of the door's own width. A proportion guard against furniture, not a fitted value.
+_JAMB_THICK_WALL_DOOR_RATIO = 3.0
 
 
 def _jamb_return_extent(
-    end: float, direction: float, chord: float,
+    end: float, direction: float, chord: float, width: float,
     faces: Sequence[tuple[float, float, float, int]], crosses: Sequence[tuple[float, float, float, int]],
 ) -> Optional[tuple[float, tuple[float, float], tuple[int, ...]]]:
     """(far end, wall band, source path ids) of the wall that starts at one chord end, or None when it is not unique."""
@@ -2205,11 +2208,23 @@ def _jamb_return_extent(
         near, far = (hi, lo) if direction < 0 else (lo, hi)
         return abs(near - end) <= _JAMB_FACE_PT and direction * (far - end) > _JAMB_FACE_MIN_RUN_PT
 
-    if not any(abs(perp - chord) <= _JAMB_FACE_PT and starts(lo, hi) for perp, lo, hi, _index in faces):
+    frame = [direction * ((lo if direction < 0 else hi) - end) for perp, lo, hi, _index in faces
+             if abs(perp - chord) <= _JAMB_FACE_PT and starts(lo, hi)]  # how far the first chord-face strokes run
+    if not frame:
         return None
+
+    def capped(low: float, high: float) -> bool:  # one cross stroke from face to face, within the door frame
+        return any(abs(lo - low) <= _JAMB_FACE_PT and abs(hi - high) <= _JAMB_FACE_PT
+                   and -_JAMB_FACE_PT <= direction * (pos - end) <= max(frame) + _JAMB_FACE_PT
+                   for pos, lo, hi, _index in crosses)
+
     seconds: list[float] = []
-    for perp in sorted(p for p, lo, hi, _index in faces
-                       if _STROKE_PAIR_THICK_MIN <= abs(p - chord) <= _STROKE_PAIR_THICK_MAX and starts(lo, hi)):
+    for perp in sorted(p for p, lo, hi, _index in faces if abs(p - chord) >= _STROKE_PAIR_THICK_MIN and starts(lo, hi)):
+        thickness = abs(perp - chord)
+        if thickness > _STROKE_PAIR_THICK_MAX and not (
+            thickness <= width / _JAMB_THICK_WALL_DOOR_RATIO and capped(min(perp, chord), max(perp, chord))
+        ):
+            continue
         if not seconds or perp - seconds[-1] > _JAMB_FACE_PT:
             seconds.append(perp)
     candidates = []
@@ -2255,7 +2270,9 @@ def _collect_door_jamb_return_strips(
 
     * the chord is axis-aligned;
     * black visible face lines start at that end and run away from the door: one on the chord line, and exactly one other
-      1.2 to 8 pt from it that has a black cross stroke at the end between the two (zero or several candidates abstain);
+      1.2 to 8 pt from it that has a black cross stroke at the end between the two (zero or several candidates abstain).
+      A thicker wall, as on an enlarged view, counts only when one cross stroke spans the two faces within the frame and
+      the wall is at most a third of the door's width;
     * both faces run on without a break; the piece ends where the shorter one stops;
     * a strip already collected in the other direction touches that far end, within the face-cluster tolerance;
     * the piece is shorter than the merged-face minimum (longer walls stay with the existing collectors).
@@ -2296,7 +2313,7 @@ def _collect_door_jamb_return_strips(
                 crosses.append(((a[axis] + b[axis]) / 2.0, min(a[across], b[across]), max(a[across], b[across]), index))
         low_end, high_end = sorted((hinge[axis], tip[axis]))
         for end, direction in ((low_end, -1.0), (high_end, 1.0)):
-            extent = _jamb_return_extent(end, direction, chord, faces, crosses)
+            extent = _jamb_return_extent(end, direction, chord, high_end - low_end, faces, crosses)
             if extent is None:
                 continue
             far_end, band, ids = extent
