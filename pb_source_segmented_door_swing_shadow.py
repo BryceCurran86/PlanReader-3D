@@ -255,3 +255,190 @@ def propose_source_owned_doorway_chords(
             "commercial_publishable":False,
         })
     return tuple(proposed)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Measurement only. The receipts below explain, per swing witness, which gate of ``propose_source_owned_doorway_chords``
+# decided it. They re-derive the gates with the proposer's own expressions and constants, take ``chord_proposed`` from a REAL
+# proposer call and flag any disagreement (``agrees_with_proposer``), so a drift between the two is visible and never silently
+# repaired. They never change, wrap or replace the proposer. Every receipt is ``diagnostic_only`` with every authority flag
+# False: a receipt is not a wall, an opening, a closure, a quantity or a score.
+
+GATE_AXIS = "G0_axis_not_horizontal_or_vertical"
+GATE_SUPPORTS = "G1_wall_end_or_jamb_support_missing"
+GATE_NO_PARENT = "G2_no_parent_raw_wall_gap"
+GATE_COMPETING_PARENTS = "G3_competing_parent_raw_wall_gaps"
+GATE_DUPLICATE_INTERVAL = "G4_duplicate_door_interval"
+_REQUIRED_SUPPORTS = ("left", "right", "jamb_left", "jamb_right")
+_SUPPORT_KINDS = _REQUIRED_SUPPORTS + ("threshold",)
+
+
+def _black_single_line_strokes(
+    drawings: Sequence[Mapping[str, Any]],
+) -> list[tuple[int, tuple[float, float], tuple[float, float]]]:
+    """Every unfilled black single-line stroke with finite ends, keyed by its original native path index (as the proposer reads them)."""
+    strokes = []
+    for idx, row in enumerate(drawings):
+        if not isinstance(row, Mapping) or row.get("fill") is not None:
+            continue
+        if not _is_black(row.get("color")):
+            continue
+        items = row.get("items", ())
+        if len(items) != 1 or items[0][0] != "l":
+            continue
+        a, b = _xy(items[0][1]), _xy(items[0][2])
+        if all(math.isfinite(v) for v in (*a, *b)):
+            strokes.append((idx, a, b))
+    return strokes
+
+
+def diagnose_source_owned_doorway_chord_gates(
+    drawings: Sequence[Mapping[str, Any]],
+    swing_witnesses: Sequence[Mapping[str, Any]],
+    original_wall_gaps: Sequence[Any],
+) -> tuple[dict[str, Any], ...]:
+    """One measurement receipt per swing witness, in witness order. Never a closure, an opening, a quantity or a score.
+
+    ``first_failing_gate`` is the first gate of ``propose_source_owned_doorway_chords`` that a witness fails (G0 the axis, G1 the
+    four supports, G2 no parent raw gap, G3 competing parent raw gaps, G4 a duplicate door interval) or ``None`` for a proposed
+    chord. Support counts and native path ids, and the signed miss of every same-axis raw gap on the door's wall line at each end
+    of the door interval, are reported even when an earlier gate already failed (``lo_end_miss`` and ``hi_end_miss`` are positive
+    when the gap STOPS SHORT of that end and negative when it runs beyond it). When the axis gate fails nothing downstream can be
+    measured and those fields are ``None``. ``chord_proposed`` comes from a real proposer call; ``agrees_with_proposer`` says
+    whether the re-derived gate agrees with it.
+    """
+    witnesses = tuple(swing_witnesses)
+    gaps = tuple(original_wall_gaps)
+    strokes = _black_single_line_strokes(drawings)
+    proposed = propose_source_owned_doorway_chords(drawings, witnesses, gaps)
+    next_proposed = 0
+    used_intervals: dict[tuple[bool, float, float, float], int] = {}
+    receipts: list[dict[str, Any]] = []
+    for position, w in enumerate(witnesses):
+        own = tuple(w["native_source_path_indices"])
+        a = tuple(w["source_hinge_point_pdf_pts"])
+        b = tuple(w["source_closed_leaf_tip_pdf_pts"])
+        dx, dy = abs(a[0] - b[0]), abs(a[1] - b[1])
+        horizontal = dy <= .12 and dx > 1
+        vertical = dx <= .12 and dy > 1
+        axis_ok = horizontal != vertical
+        chord_proposed = False
+        if axis_ok:
+            axis = 0 if horizontal else 1
+            perp_axis = 1 - axis
+            lo, hi = sorted((a[axis], b[axis]))
+            perp = (a[perp_axis] + b[perp_axis]) / 2
+            # The proposer emits its chords in witness order, so the next unclaimed chord is this witness's if and only if it carries
+            # this witness's swing paths, orientation and interval (a witness the proposer skipped never matches by accident).
+            if next_proposed < len(proposed):
+                chord = proposed[next_proposed]
+                if (tuple(chord["source_swing_native_path_indices"]) == own and bool(chord["horizontal"]) == bool(horizontal)
+                        and tuple(chord["door_interval_pdf_pts"]) == (lo, hi)):
+                    chord_proposed = True
+                    next_proposed += 1
+        receipt: dict[str, Any] = {
+            "witness_index": position,
+            "witness_native_path_indices": own,
+            "axis": "ambiguous" if horizontal == vertical else ("horizontal" if horizontal else "vertical"),
+            "axis_extent_pdf_pts": (round(dx, 5), round(dy, 5)),
+            "door_interval_pdf_pts": None,
+            "wall_line_perp_pdf_pts": None,
+            "support_counts": None,
+            "support_path_indices": None,
+            "missing_required_supports": None,
+            "gap_count": len(gaps),
+            "same_axis_gap_count": None,
+            "gap_candidates": None,
+            "parent_gap_count": None,
+            "parent_gap_indices": None,
+            "parents_share_one_geometry": None,
+            "duplicate_of_witness_index": None,
+            "first_failing_gate": GATE_AXIS,
+            "chord_proposed": chord_proposed,
+            "agrees_with_proposer": False,
+            "diagnostic_only": True,
+            "candidate_topology_doorway_closure": False,
+            "source_physical_door_host_authenticated": False,
+            "metric_area_issued": False,
+            "commercial_publishable": False,
+        }
+        if axis_ok:
+            support: dict[str, list[int]] = {kind: [] for kind in _SUPPORT_KINDS}
+            for idx, start, end in strokes:
+                if idx in own:
+                    continue
+                along_delta = abs(start[axis] - end[axis])
+                perp_delta = abs(start[perp_axis] - end[perp_axis])
+                if perp_delta < .12 and along_delta >= 1.2:
+                    strand_lo, strand_hi = sorted((start[axis], end[axis]))
+                    if abs(start[perp_axis] - perp) <= 3.0:
+                        if abs(strand_hi - lo) <= .18 and strand_lo < lo - 1.0:
+                            support["left"].append(idx)
+                        if abs(strand_lo - hi) <= .18 and strand_hi > hi + 1.0:
+                            support["right"].append(idx)
+                        if abs(strand_lo - lo) <= .18 and abs(strand_hi - hi) <= .18:
+                            support["threshold"].append(idx)
+                if along_delta < .12 and perp_delta >= 1.2:
+                    if max(abs(start[perp_axis] - perp), abs(end[perp_axis] - perp)) <= 14:
+                        if abs(start[axis] - lo) <= .18:
+                            support["jamb_left"].append(idx)
+                        if abs(start[axis] - hi) <= .18:
+                            support["jamb_right"].append(idx)
+            support_ids = {kind: tuple(sorted(set(support[kind]))) for kind in _SUPPORT_KINDS}
+            missing = tuple(kind for kind in _REQUIRED_SUPPORTS if not support[kind])
+            candidates: list[dict[str, Any]] = []
+            same_axis = 0
+            for gap_index, gap in enumerate(gaps):
+                if gap.horizontal != horizontal:
+                    continue
+                same_axis += 1
+                thickness = gap.band[1] - gap.band[0]
+                if not (gap.band[0] - max(.18, thickness) <= perp <= gap.band[1] + max(.18, thickness)):
+                    continue
+                contains = gap.lo - .18 <= lo and hi <= gap.hi + .18
+                coincides = not (min(abs(gap.lo - lo), abs(gap.hi - hi)) > .18)
+                candidates.append({
+                    "gap_index": gap_index,
+                    "band_pdf_pts": tuple(gap.band),
+                    "gap_interval_pdf_pts": (gap.lo, gap.hi),
+                    "lo_end_miss_pdf_pts": round(gap.lo - lo, 3),
+                    "hi_end_miss_pdf_pts": round(hi - gap.hi, 3),
+                    "contains_interval": contains,
+                    "an_end_coincides": coincides,
+                    "is_parent": contains and coincides,
+                })
+            parent_indices = tuple(c["gap_index"] for c in candidates if c["is_parent"])
+            geometries = {
+                (round(gaps[i].band[0], 3), round(gaps[i].band[1], 3), round(gaps[i].lo, 3), round(gaps[i].hi, 3))
+                for i in parent_indices
+            }
+            key = (horizontal, round(perp, 3), round(lo, 3), round(hi, 3))
+            duplicate_of = used_intervals.get(key)
+            if missing:
+                gate: str | None = GATE_SUPPORTS
+            elif not parent_indices:
+                gate = GATE_NO_PARENT
+            elif len(parent_indices) > 1:
+                gate = GATE_COMPETING_PARENTS
+            elif duplicate_of is not None:
+                gate = GATE_DUPLICATE_INTERVAL
+            else:
+                gate = None
+                used_intervals[key] = position
+            receipt.update({
+                "door_interval_pdf_pts": (lo, hi),
+                "wall_line_perp_pdf_pts": perp,
+                "support_counts": {kind: len(support_ids[kind]) for kind in _SUPPORT_KINDS},
+                "support_path_indices": support_ids,
+                "missing_required_supports": missing,
+                "same_axis_gap_count": same_axis,
+                "gap_candidates": tuple(candidates),
+                "parent_gap_count": len(parent_indices),
+                "parent_gap_indices": parent_indices,
+                "parents_share_one_geometry": len(parent_indices) > 1 and len(geometries) == 1,
+                "duplicate_of_witness_index": duplicate_of,
+                "first_failing_gate": gate,
+            })
+        receipt["agrees_with_proposer"] = (receipt["first_failing_gate"] is None) == chord_proposed
+        receipts.append(receipt)
+    return tuple(receipts)
