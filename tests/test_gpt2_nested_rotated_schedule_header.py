@@ -227,3 +227,135 @@ def test_invalid_grid_without_unique_child_dimension_basis_falls_back_without_pr
     out = parse_schedule_page(_PageWithGrid([rows]), two_level_header=True)
     assert [e.type_mark for e in out] == ["D01"]
     assert out[0].dimension_basis == "leaf"
+
+
+def _second_format_grouped_grid_rows():
+    """Second schedule format: grouped door marks + manufacturer exclusions."""
+    return [
+        ["DOOR SCHEDULE - COMMERCIAL FITOUT", None, None, None, None, None],
+        ["DOOR MARK", "LOCATION", "DOOR LEAF", None, "DOOR FRAME", "NOTES"],
+        [None, None, "WIDTH", "HEIGHT", "MATERIAL", None],
+        ["D01", "Entry", "AS PER MANUFACTURER", "AS PER MANUFACTURER (2400mm)",
+         "Aluminium", "Auto slider by specialist"],
+        ["D02", "Lounge", "900 mm", "2050 mm", "Alum", ""],
+        ["D04-D06", "Cubicles", "600", "1700", "Partition", "Compact laminate"],
+        ["D07, D08, D09", "Amenities", "920", "2040", "Alum", "25mm undercut"],
+        ["D11 & D12", "Ambulant", "820", "2040", "Alum", "AS1428.1"],
+        ["D16 / D17", "Coolroom", "800", "2000", "Insulated", "BY COOLROOM CONTRACTOR"],
+        ["D18 to D20", "Display", "BY OTHERS (900mm)", "TBC 2100",
+         "By lessee", "AS PER MANUFACTURER"],
+        ["D21", "Service", "N/A", "REFER DETAIL 1200mm", "By others", "NIC"],
+    ]
+
+
+def test_second_schedule_format_grouped_doors_and_manufacturer_exclusions_grid():
+    out = parse_schedule_page(
+        _PageWithGrid([_second_format_grouped_grid_rows()]),
+        page_no=14,
+        two_level_header=True,
+    )
+    by_mark = {e.type_mark: (e.width_mm, e.height_mm, e.dimension_basis, e.count_explicit) for e in out}
+    assert [e.type_mark for e in out] == [
+        "D01", "D02",
+        "D04", "D05", "D06",
+        "D07", "D08", "D09",
+        "D11", "D12",
+        "D16", "D17",
+        "D18", "D19", "D20",
+        "D21",
+    ]
+    # Manufacturer/contractor exclusions in dimension cells abstain even when a
+    # stray reference number appears inside the exclusion text.
+    assert by_mark["D01"] == (None, None, "leaf", False)
+    for mark in ("D18", "D19", "D20", "D21"):
+        assert by_mark[mark] == (None, None, "leaf", False)
+    # Explicit numeric leaf sizes stay exact (no 35/50 mm frame adjustment), even
+    # when the separate NOTES column mentions a trade contractor.
+    assert by_mark["D02"] == (900, 2050, "leaf", False)
+    for mark in ("D04", "D05", "D06"):
+        assert by_mark[mark] == (600, 1700, "leaf", False)
+    for mark in ("D07", "D08", "D09"):
+        assert by_mark[mark] == (920, 2040, "leaf", False)
+    for mark in ("D11", "D12"):
+        assert by_mark[mark] == (820, 2040, "leaf", False)
+    for mark in ("D16", "D17"):
+        assert by_mark[mark] == (800, 2000, "leaf", False)
+    assert all(e.parse_source == "source_grid_nested_header" for e in out)
+
+
+def test_second_schedule_format_grouped_rows_text_table_and_frame_basis():
+    rows = [
+        row("WINDOW MARK", "WINDOW FRAME", "WINDOW FRAME", "NOTES"),
+        row("MARK", "WIDTH", "HEIGHT", "NOTES"),
+        row("W01-W03", "1200", "1500", "Fixed aluminium"),
+        row("W04, W05", "BY MANUFACTURER 1800mm", "AS PER MFR", "Shopfront"),
+        row("W06 & W07", "900", "TBC 1200", "Verify on site"),
+    ]
+    out = parse_schedule_rows(rows, page_no=9, two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis, e.count_explicit) for e in out] == [
+        ("W01", 1200, 1500, "frame", False),
+        ("W02", 1200, 1500, "frame", False),
+        ("W03", 1200, 1500, "frame", False),
+        ("W04", None, None, "frame", False),
+        ("W05", None, None, "frame", False),
+        ("W06", 900, None, "frame", False),
+        ("W07", 900, None, "frame", False),
+    ]
+
+
+@pytest.mark.parametrize("bad_mark", [
+    "D06-D04",       # reversed range
+    "D01-W03",       # mixed prefix range
+    "D01-D99",       # oversized range (>50)
+    "D04-D006",      # inconsistent zero-padding width
+    "D04, D04",      # duplicate in same cell
+    "D04-D06, D05",  # overlapping range and explicit duplicate
+    "D01-D02-D03",   # chained malformed range
+    "D01,",          # trailing delimiter
+])
+def test_malformed_grouped_mark_expressions_fail_closed(bad_mark):
+    rows = [
+        ["DOOR MARK", "DOOR LEAF", None],
+        [None, "WIDTH", "HEIGHT"],
+        [bad_mark, "920", "2040"],
+    ]
+    assert parse_schedule_page(_PageWithGrid([rows]), two_level_header=True) == []
+    text_rows = [
+        row("DOOR NO", "DOOR LEAF", "DOOR LEAF"),
+        row("NO", "WIDTH", "HEIGHT"),
+        row(bad_mark, "920", "2040"),
+    ]
+    assert parse_schedule_rows(text_rows, two_level_header=True) == []
+
+
+def test_grouped_mark_overlapping_later_individual_row_fails_closed():
+    rows = [
+        ["DOOR MARK", "DOOR LEAF", None],
+        [None, "WIDTH", "HEIGHT"],
+        ["D04-D06", "600", "1700"],
+        ["D05", "920", "2040"],
+    ]
+    assert parse_schedule_page(_PageWithGrid([rows]), two_level_header=True) == []
+    text_rows = [
+        row("DOOR NO", "DOOR LEAF", "DOOR LEAF"),
+        row("NO", "WIDTH", "HEIGHT"),
+        row("D04-D06", "600", "1700"),
+        row("D05", "920", "2040"),
+    ]
+    assert parse_schedule_rows(text_rows, two_level_header=True) == []
+
+
+def test_strict_combined_dims_column_abstains_on_manufacturer_exclusions():
+    rows = [
+        row("DOOR MARK", "LEAF SIZE", "NOTES"),
+        row("D01-D02", "920 x 2040", "Solid core"),
+        row("D03", "AS PER MANUFACTURER (920 x 2040)", "Coolroom"),
+        row("D04", "BY OTHERS 820x2040", "Tenant"),
+    ]
+    out = parse_schedule_rows(rows, two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis) for e in out] == [
+        ("D01", 920, 2040, "leaf"),
+        ("D02", 920, 2040, "leaf"),
+        ("D03", None, None, "leaf"),
+        ("D04", None, None, "leaf"),
+    ]

@@ -205,6 +205,130 @@ _RATING_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+# Non-authoritative deferral / manufacturer-exclusion wording inside a
+# schedule dimension cell. In strict two-level schedule mode, a dimension
+# cell containing any of these phrases must abstain (None) even if a stray
+# reference number appears in the same cell.
+_SCHEDULE_DIM_EXCLUSION_RE = re.compile(
+    r"(?:\bas\s+per\s+(?:manufacturer|mfr\.?|supplier|contractor|shop|spec\w*)\b"
+    r"|\bby\s+(?:others|manufacturer|mfr\.?|contractor|tenant|lessee|owner|builder|client|specialist)\b"
+    r"|\bnot\s+in\s+contract\b"
+    r"|\b(?:n\.?\s*/\s*a|t\.?b\.?c\.?|t\.?b\.?a\.?|n\.?i\.?c\.?|varies|refer|existing|approx\.?|nominal|nom\.?)\b"
+    r"|\bsee\s+)",
+    re.IGNORECASE,
+)
+
+_STRICT_SINGLE_DIM_CELL_RE = re.compile(
+    r"^\s*(?:(\d{1,5}(?:,\d{3})?)\s*(?:mm)?|(\d{1,3}(?:\.\d{1,3})?)\s*m)\s*$",
+    re.IGNORECASE,
+)
+
+_MARK_PARTS_RE = re.compile(r"^([EI]?[DW]|WD|DW)(\d{1,4})$", re.IGNORECASE)
+_MARK_RANGE_SPLIT_RE = re.compile(r"\s*(?:[-–—]|\bto\b)\s*", re.IGNORECASE)
+_MARK_LIST_SPLIT_RE = re.compile(r"\s*(?:[,/&+\n]|\band\b)\s*", re.IGNORECASE)
+_MAX_GROUPED_MARK_RANGE = 50
+
+
+def _parse_strict_schedule_dimension_cell(text: str) -> Optional[int]:
+    """Parse one explicit dimension cell for strict opt-in schedule parsing.
+
+    Rejects manufacturer/contractor exclusions, deferral wording, and prose
+    containing embedded numbers. Returns None on blank or non-authoritative
+    cells rather than guessing or applying generic frame/leaf adjustments.
+    """
+    if not text or not text.strip():
+        return None
+    t = text.strip()
+    if _SCHEDULE_DIM_EXCLUSION_RE.search(t):
+        return None
+    match = _STRICT_SINGLE_DIM_CELL_RE.fullmatch(t)
+    if not match:
+        return None
+    return parse_single_dimension(t)
+
+
+def _parse_strict_schedule_dims_cell(text: str) -> Tuple[Optional[int], Optional[int]]:
+    """Parse one combined WxH dimension cell for strict opt-in schedule parsing."""
+    if not text or not text.strip():
+        return None, None
+    t = text.strip()
+    if _SCHEDULE_DIM_EXCLUSION_RE.search(t):
+        return None, None
+    return parse_dimension(t, allow_slash=not _has_rating_keywords(t))
+
+
+def _parse_strict_schedule_marks(raw: str) -> Optional[Tuple[str, ...]]:
+    """Parse one strict schedule mark cell into single or grouped opening marks.
+
+    Returns:
+      - None when the cell is empty or plain non-mark text (row skipped);
+      - () when the cell attempts a grouped/range mark expression that is
+        malformed, reversed, mixed-prefix, oversized, or self-duplicating
+        (caller must fail closed on the schedule);
+      - Tuple[str, ...] of uppercase opening marks in printed order otherwise.
+    """
+    text = " ".join(str(raw or "").strip().split())
+    if not text:
+        return None
+    if _is_opening_mark(text):
+        return (text.upper(),)
+    # Only treat a cell as a grouped-mark expression if it contains at least
+    # one opening-mark token AND uses explicit list/range delimiters.
+    if not _MARK_SEARCH_RE.search(text):
+        return None
+    # Pure prose mentioning a mark (e.g. "Check D01" or "See D01 notes") without
+    # being a pure mark/list/range expression is not a mark cell.
+    chunks = [chunk.strip() for chunk in _MARK_LIST_SPLIT_RE.split(text)]
+    if any(not chunk for chunk in chunks):
+        # Trailing/leading delimiter next to a mark is malformed if every
+        # non-empty piece looks like a mark/range.
+        non_empty = [c for c in chunks if c]
+        if non_empty and all(_MARK_SEARCH_RE.search(c) for c in non_empty):
+            return ()
+        return None
+    expanded: List[str] = []
+    seen: set[str] = set()
+    saw_group_syntax = len(chunks) > 1
+    for chunk in chunks:
+        if _is_opening_mark(chunk):
+            mark = chunk.upper()
+            if mark in seen:
+                return ()
+            seen.add(mark)
+            expanded.append(mark)
+            continue
+        range_parts = _MARK_RANGE_SPLIT_RE.split(chunk)
+        if len(range_parts) == 2 and all(_is_opening_mark(p) for p in range_parts):
+            saw_group_syntax = True
+            start_m = _MARK_PARTS_RE.fullmatch(range_parts[0].strip())
+            end_m = _MARK_PARTS_RE.fullmatch(range_parts[1].strip())
+            if not start_m or not end_m:
+                return ()
+            p_start, n_start_raw = start_m.group(1).upper(), start_m.group(2)
+            p_end, n_end_raw = end_m.group(1).upper(), end_m.group(2)
+            if p_start != p_end:
+                return ()
+            n_start, n_end = int(n_start_raw), int(n_end_raw)
+            if n_end <= n_start or (n_end - n_start) > _MAX_GROUPED_MARK_RANGE:
+                return ()
+            # Leading-zero width must stay consistent when zero-padded.
+            if n_start_raw.startswith("0") and len(n_start_raw) != len(n_end_raw):
+                return ()
+            pad_width = len(n_start_raw) if n_start_raw.startswith("0") else 0
+            for num in range(n_start, n_end + 1):
+                token = f"{p_start}{num:0{pad_width}d}" if pad_width else f"{p_start}{num}"
+                if token in seen:
+                    return ()
+                seen.add(token)
+                expanded.append(token)
+            continue
+        # If any piece fails to parse while group syntax is already present or
+        # it looks like a broken range (e.g. "D01-D02-D03"), fail closed.
+        if saw_group_syntax or len(range_parts) > 2:
+            return ()
+        return None
+    return tuple(expanded) if expanded else None
+
 _MIN_PLAUSIBLE_MM = 200
 _MAX_PLAUSIBLE_MM = 6000
 
@@ -584,6 +708,7 @@ def parse_schedule_rows(
     if header_idx < 0:
         return _parse_rows_without_header(rows, page_no)
 
+    strict_marks_seen: set[str] = set()
     for row_idx, row in enumerate(rows[header_idx + 1:], header_idx + 1):
         if two_level_header and row_idx in header_rows:
             continue
@@ -593,30 +718,53 @@ def parse_schedule_rows(
         if not any(cells):
             continue
 
-        mark = ""
-        if "mark" in col_map and col_map["mark"] < len(cells):
-            mark = extract_mark(cells[col_map["mark"]])
-        # The strict opt-in table reader may not rescue a mark from a notes
-        # column or from a row with a missing/wrong mark-cell address.
-        if not mark and not two_level_header:
-            mark = extract_mark(text)
-        if not _is_opening_mark(mark):
-            continue
+        row_marks: List[str] = []
+        if two_level_header:
+            if "mark" not in col_map or col_map["mark"] >= len(cells):
+                continue
+            parsed_marks = _parse_strict_schedule_marks(cells[col_map["mark"]])
+            if parsed_marks is None:
+                continue
+            if not parsed_marks:
+                return []
+            for mk in parsed_marks:
+                if mk in strict_marks_seen:
+                    return []
+                strict_marks_seen.add(mk)
+            row_marks = list(parsed_marks)
+        else:
+            mark = ""
+            if "mark" in col_map and col_map["mark"] < len(cells):
+                mark = extract_mark(cells[col_map["mark"]])
+            # The strict opt-in table reader may not rescue a mark from a notes
+            # column or from a row with a missing/wrong mark-cell address.
+            if not mark:
+                mark = extract_mark(text)
+            if not _is_opening_mark(mark):
+                continue
+            row_marks = [mark]
 
         width_mm: Optional[int] = None
         height_mm: Optional[int] = None
         parse_source = "heuristic"
 
         if "dims" in col_map and col_map["dims"] < len(cells):
-            width_mm, height_mm = parse_dimension(cells[col_map["dims"]])
+            if two_level_header:
+                width_mm, height_mm = _parse_strict_schedule_dims_cell(cells[col_map["dims"]])
+            else:
+                width_mm, height_mm = parse_dimension(cells[col_map["dims"]])
             parse_source = "header_dims"
         elif "width" in col_map and "height" in col_map:
             w_idx = col_map["width"]
             h_idx = col_map["height"]
+            dim_parser = (
+                _parse_strict_schedule_dimension_cell
+                if two_level_header else parse_single_dimension
+            )
             if w_idx < len(cells):
-                width_mm = parse_single_dimension(cells[w_idx])
+                width_mm = dim_parser(cells[w_idx])
             if h_idx < len(cells):
-                height_mm = parse_single_dimension(cells[h_idx])
+                height_mm = dim_parser(cells[h_idx])
             parse_source = "header_separate"
         else:
             has_rating = _has_rating_keywords(text)
@@ -634,7 +782,7 @@ def parse_schedule_rows(
 
         count = 1
         count_explicit = False
-        if "count" in col_map and col_map["count"] < len(cells):
+        if len(row_marks) == 1 and "count" in col_map and col_map["count"] < len(cells):
             try:
                 raw_count = cells[col_map["count"]].lower().replace("x", "").strip()
                 parsed_count = int(raw_count)
@@ -649,19 +797,20 @@ def parse_schedule_rows(
         if "desc" in col_map and col_map["desc"] < len(cells):
             desc = cells[col_map["desc"]].strip()
 
-        entries.append(ScheduleEntry(
-            type_mark=mark,
-            width_mm=width_mm,
-            height_mm=height_mm,
-            description=desc,
-            count=count,
-            count_explicit=count_explicit,
-            page_no=page_no,
-            bbox=tuple(bbox) if len(bbox) >= 4 else (0, 0, 0, 0),
-            parse_source=parse_source,
-            dimension_basis=col_map.get("dimension_basis", ""),
-            basis_source=col_map.get("basis_source", ""),
-        ))
+        for mark in row_marks:
+            entries.append(ScheduleEntry(
+                type_mark=mark,
+                width_mm=width_mm,
+                height_mm=height_mm,
+                description=desc,
+                count=count,
+                count_explicit=count_explicit,
+                page_no=page_no,
+                bbox=tuple(bbox) if len(bbox) >= 4 else (0, 0, 0, 0),
+                parse_source=parse_source,
+                dimension_basis=col_map.get("dimension_basis", ""),
+                basis_source=col_map.get("basis_source", ""),
+            ))
 
     return entries
 
@@ -792,26 +941,28 @@ def _explicit_grid_nested_schedule_entries(
             and max(mark_col, width_col, height_col) < len(cells)
         ):
             return []
-        raw_mark = str(cells[mark_col] or "").strip()
-        if not _is_opening_mark(raw_mark):
+        parsed_marks = _parse_strict_schedule_marks(str(cells[mark_col] or ""))
+        if parsed_marks is None:
             continue
-        mark = raw_mark.upper()
-        if mark in marks_seen:
-            # Duplicate typed schedule rows must remain alternatives; don't
-            # let a "last row wins" dict discard their competing dimensions.
+        if not parsed_marks:
             return []
-        marks_seen.add(mark)
-        width = parse_single_dimension(str(cells[width_col] or ""))
-        height = parse_single_dimension(str(cells[height_col] or ""))
-        entries.append(ScheduleEntry(
-            type_mark=mark,
-            width_mm=width,
-            height_mm=height,
-            page_no=page_no,
-            parse_source="source_grid_nested_header",
-            dimension_basis=basis,
-            basis_source=f"grid:{basis}",
-        ))
+        width = _parse_strict_schedule_dimension_cell(str(cells[width_col] or ""))
+        height = _parse_strict_schedule_dimension_cell(str(cells[height_col] or ""))
+        for mark in parsed_marks:
+            if mark in marks_seen:
+                # Duplicate typed schedule rows must remain alternatives; don't
+                # let a "last row wins" dict discard their competing dimensions.
+                return []
+            marks_seen.add(mark)
+            entries.append(ScheduleEntry(
+                type_mark=mark,
+                width_mm=width,
+                height_mm=height,
+                page_no=page_no,
+                parse_source="source_grid_nested_header",
+                dimension_basis=basis,
+                basis_source=f"grid:{basis}",
+            ))
     return entries
 
 
