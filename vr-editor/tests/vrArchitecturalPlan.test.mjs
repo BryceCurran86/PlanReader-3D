@@ -21,3 +21,13 @@ test("source evidence stays a line, unknown openings remain unlocated and source
  assert.equal(p.lines.some(l=>l.kind==="door"),false);
  assert.equal(architecturalPlan({objects:[row]},{walls:[]},"ground",new Set()).lines.length,0);
 });
+
+test("verified source floor outlines omit internal triangulation and obey level filtering",()=>{
+ const row={objectId:"room",levelId:"ground",objectType:"room",geometry:null};
+ const surface={objectId:"room",kind:"floor",renderState:"verified",vertices:[[0,0,0],[4,0,0],[4,0,3],[0,0,0],[4,0,3],[0,0,3]]};
+ const scene={objects:[row],sourceSurfaces:[surface]};
+ const plan=architecturalPlan(scene,{walls:[]},"ground");
+ assert.equal(plan.lines.filter(l=>l.kind==="floor").length,4);
+ assert.deepEqual(plan.bounds,[0,0,4,3]);
+ assert.equal(architecturalPlan(scene,{walls:[]},"upper").lines.length,0);
+});
