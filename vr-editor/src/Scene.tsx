@@ -1466,10 +1466,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     // Gamepad button #1 is an opt-in semantic fallback (one action per release).
     const inputSources: (PcVrInputSource | null)[] = [null, null];
     const squeezeTracker = new PcVrSqueezeTracker();
-    const report = (presenting = renderer.xr.isPresenting) => {
+    const report = (presenting = renderer.xr.isPresenting, performance?: PcVrSessionReport["performance"]) => {
       const controllerInfos = inputSources.map(inspectPcVrController)
         .filter((item): item is PcVrControllerInfo => item !== null);
-      sessionReportCallback.current({presenting, controllers: controllerInfos});
+      sessionReportCallback.current({presenting, controllers: controllerInfos, ...(performance?{performance}:{})});
     };
     function applyFinishSqueeze() {
       if (toolsBusy() || teleportSettings.current.teleportMode) return;
@@ -1653,6 +1653,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const gripPosition = new THREE.Vector3();
     let indexedMoveState: WallMoveHistory | null | undefined;
     const movesById = new Map<string, ReturnType<typeof safeWallMoves>[number]>();
+    let frameStart=0,previousFrame=0,frameCount=0,worstFrame=0,slowWindows=0,fastWindows=0;
     let sourceAppearanceKey: readonly unknown[] = [];
     let surfaceVisibilityKey: readonly unknown[] = [];
     renderer.setAnimationLoop((now) => {
@@ -2039,6 +2040,31 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       if(!renderer.xr.isPresenting)controls.update();
       renderer.render(scene, camera);
+      // Frame callback cadence is diagnostic, not a compositor/GPU time measurement.
+      // Adjust only WebXR foveation (when supported), never geometry or source authority.
+      if(renderer.xr.isPresenting){
+        if(!frameStart){frameStart=now;previousFrame=now;}
+        else{
+          worstFrame=Math.max(worstFrame,now-previousFrame);previousFrame=now;frameCount++;
+          const elapsed=now-frameStart;
+          if(elapsed>=2000&&frameCount>0){
+            const fps=frameCount*1000/elapsed;
+            const target=(renderer.xr.getSession() as (XRSession & {frameRate?:number})|null)?.frameRate||72;
+            slowWindows=fps<target*.85?slowWindows+1:0;
+            fastWindows=fps>=target*.97?fastWindows+1:0;
+            const foveation=renderer.xr.getFoveation();
+            if(typeof foveation==="number"&&Number.isFinite(foveation)){
+              if(slowWindows>=2){renderer.xr.setFoveation(Math.min(1,foveation+.15));slowWindows=0;}
+              else if(fastWindows>=5){renderer.xr.setFoveation(Math.max(.25,foveation-.1));fastWindows=0;}
+            }
+            report(true,{fps:Math.round(fps),frameMs:elapsed/frameCount,worstMs:worstFrame,
+              drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,
+              geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures,
+              foveation:renderer.xr.getFoveation()??0});
+            frameStart=now;frameCount=0;worstFrame=0;
+          }
+        }
+      }else{frameStart=0;previousFrame=0;frameCount=0;worstFrame=0;slowWindows=0;fastWindows=0;}
       const request = visualSettings.current;
       if (request.captureSerial !== lastCaptureSerial) {
         lastCaptureSerial = request.captureSerial;
