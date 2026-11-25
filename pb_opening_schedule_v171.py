@@ -223,10 +223,25 @@ _STRICT_SINGLE_DIM_CELL_RE = re.compile(
     re.IGNORECASE,
 )
 
+_STRICT_COMBINED_DIM_CELL_RE = re.compile(
+    r"^\s*(?:(\d{1,5}(?:,\d{3})?)\s*(?:mm)?|(\d{1,3}(?:\.\d{1,3})?)\s*m)"
+    r"\s*[×xX/\-–—]\s*"
+    r"(?:(\d{1,5}(?:,\d{3})?)\s*(?:mm)?|(\d{1,3}(?:\.\d{1,3})?)\s*m)\s*$",
+    re.IGNORECASE,
+)
+
 _MARK_PARTS_RE = re.compile(r"^([EI]?[DW]|WD|DW)(\d{1,4})$", re.IGNORECASE)
 _MARK_RANGE_SPLIT_RE = re.compile(r"\s*(?:[-–—]|\bto\b)\s*", re.IGNORECASE)
 _MARK_LIST_SPLIT_RE = re.compile(r"\s*(?:[,/&+\n]|\band\b)\s*", re.IGNORECASE)
 _MAX_GROUPED_MARK_RANGE = 50
+
+
+def _canonical_opening_mark_key(mark: str) -> Optional[Tuple[str, int]]:
+    """Canonical (prefix, integer_number) identity so D1 and D01 cannot silently compete."""
+    match = _MARK_PARTS_RE.fullmatch(mark.strip())
+    if not match:
+        return None
+    return (match.group(1).upper(), int(match.group(2)))
 
 
 def _parse_strict_schedule_dimension_cell(text: str) -> Optional[int]:
@@ -248,13 +263,24 @@ def _parse_strict_schedule_dimension_cell(text: str) -> Optional[int]:
 
 
 def _parse_strict_schedule_dims_cell(text: str) -> Tuple[Optional[int], Optional[int]]:
-    """Parse one combined WxH dimension cell for strict opt-in schedule parsing."""
+    """Parse one strictly formatted combined WxH dimension cell (no prose rescue)."""
     if not text or not text.strip():
         return None, None
     t = text.strip()
-    if _SCHEDULE_DIM_EXCLUSION_RE.search(t):
+    if _SCHEDULE_DIM_EXCLUSION_RE.search(t) or _has_rating_keywords(t):
         return None, None
-    return parse_dimension(t, allow_slash=not _has_rating_keywords(t))
+    match = _STRICT_COMBINED_DIM_CELL_RE.fullmatch(t)
+    if not match:
+        return None, None
+    w_mm_raw, w_m_raw, h_mm_raw, h_m_raw = match.groups()
+    try:
+        w = int(w_mm_raw.replace(",", "")) if w_mm_raw is not None else round(float(w_m_raw) * 1000)
+        h = int(h_mm_raw.replace(",", "")) if h_mm_raw is not None else round(float(h_m_raw) * 1000)
+    except (ValueError, TypeError):
+        return None, None
+    if not _is_plausible_dimension(w, h):
+        return None, None
+    return w, h
 
 
 def _parse_strict_schedule_marks(raw: str) -> Optional[Tuple[str, ...]]:
@@ -263,8 +289,8 @@ def _parse_strict_schedule_marks(raw: str) -> Optional[Tuple[str, ...]]:
     Returns:
       - None when the cell is empty or plain non-mark text (row skipped);
       - () when the cell attempts a grouped/range mark expression that is
-        malformed, reversed, mixed-prefix, oversized, or self-duplicating
-        (caller must fail closed on the schedule);
+        malformed, reversed, mixed-prefix, mixed-padding, oversized, or
+        canonically self-duplicating (caller must fail closed on the schedule);
       - Tuple[str, ...] of uppercase opening marks in printed order otherwise.
     """
     text = " ".join(str(raw or "").strip().split())
@@ -272,33 +298,37 @@ def _parse_strict_schedule_marks(raw: str) -> Optional[Tuple[str, ...]]:
         return None
     if _is_opening_mark(text):
         return (text.upper(),)
-    # Only treat a cell as a grouped-mark expression if it contains at least
-    # one opening-mark token AND uses explicit list/range delimiters.
     if not _MARK_SEARCH_RE.search(text):
         return None
-    # Pure prose mentioning a mark (e.g. "Check D01" or "See D01 notes") without
-    # being a pure mark/list/range expression is not a mark cell.
     chunks = [chunk.strip() for chunk in _MARK_LIST_SPLIT_RE.split(text)]
     if any(not chunk for chunk in chunks):
-        # Trailing/leading delimiter next to a mark is malformed if every
-        # non-empty piece looks like a mark/range.
         non_empty = [c for c in chunks if c]
-        if non_empty and all(_MARK_SEARCH_RE.search(c) for c in non_empty):
+        if non_empty and any(_MARK_SEARCH_RE.search(c) for c in non_empty):
             return ()
         return None
     expanded: List[str] = []
-    seen: set[str] = set()
+    seen_canonical: set[Tuple[str, int]] = set()
     saw_group_syntax = len(chunks) > 1
     for chunk in chunks:
         if _is_opening_mark(chunk):
             mark = chunk.upper()
-            if mark in seen:
+            key = _canonical_opening_mark_key(mark)
+            if key is None or key in seen_canonical:
                 return ()
-            seen.add(mark)
+            seen_canonical.add(key)
             expanded.append(mark)
             continue
         range_parts = _MARK_RANGE_SPLIT_RE.split(chunk)
-        if len(range_parts) == 2 and all(_is_opening_mark(p) for p in range_parts):
+        if len(range_parts) >= 2:
+            # Any hyphen/dash/to expression containing an opening mark is an
+            # attempted range and MUST fail closed if malformed (e.g. D01-X03,
+            # D01-99, D1-D03, D06-D04, D01-D02-D03).
+            if len(range_parts) != 2 or not all(_is_opening_mark(p) for p in range_parts):
+                if any(_is_opening_mark(p) or _MARK_SEARCH_RE.search(p) for p in range_parts):
+                    return ()
+                if saw_group_syntax:
+                    return ()
+                return None
             saw_group_syntax = True
             start_m = _MARK_PARTS_RE.fullmatch(range_parts[0].strip())
             end_m = _MARK_PARTS_RE.fullmatch(range_parts[1].strip())
@@ -311,20 +341,19 @@ def _parse_strict_schedule_marks(raw: str) -> Optional[Tuple[str, ...]]:
             n_start, n_end = int(n_start_raw), int(n_end_raw)
             if n_end <= n_start or (n_end - n_start) > _MAX_GROUPED_MARK_RANGE:
                 return ()
-            # Leading-zero width must stay consistent when zero-padded.
-            if n_start_raw.startswith("0") and len(n_start_raw) != len(n_end_raw):
+            # Reject both forward and reverse mixed zero-padding (e.g. D04-D006, D01-D3, D1-D03).
+            if (n_start_raw.startswith("0") or n_end_raw.startswith("0")) and len(n_start_raw) != len(n_end_raw):
                 return ()
             pad_width = len(n_start_raw) if n_start_raw.startswith("0") else 0
             for num in range(n_start, n_end + 1):
                 token = f"{p_start}{num:0{pad_width}d}" if pad_width else f"{p_start}{num}"
-                if token in seen:
+                key = (p_start, num)
+                if key in seen_canonical:
                     return ()
-                seen.add(token)
+                seen_canonical.add(key)
                 expanded.append(token)
             continue
-        # If any piece fails to parse while group syntax is already present or
-        # it looks like a broken range (e.g. "D01-D02-D03"), fail closed.
-        if saw_group_syntax or len(range_parts) > 2:
+        if saw_group_syntax:
             return ()
         return None
     return tuple(expanded) if expanded else None
@@ -708,7 +737,7 @@ def parse_schedule_rows(
     if header_idx < 0:
         return _parse_rows_without_header(rows, page_no)
 
-    strict_marks_seen: set[str] = set()
+    strict_marks_seen: set[Tuple[str, int]] = set()
     for row_idx, row in enumerate(rows[header_idx + 1:], header_idx + 1):
         if two_level_header and row_idx in header_rows:
             continue
@@ -728,9 +757,10 @@ def parse_schedule_rows(
             if not parsed_marks:
                 return []
             for mk in parsed_marks:
-                if mk in strict_marks_seen:
+                canon_key = _canonical_opening_mark_key(mk)
+                if canon_key is None or canon_key in strict_marks_seen:
                     return []
-                strict_marks_seen.add(mk)
+                strict_marks_seen.add(canon_key)
             row_marks = list(parsed_marks)
         else:
             mark = ""
@@ -934,7 +964,7 @@ def _explicit_grid_nested_schedule_entries(
         "door leaf", "window leaf", "door frame", "window frame"
     ) else basis.replace(" ", "_")
     entries: List[ScheduleEntry] = []
-    marks_seen: set[str] = set()
+    marks_seen: set[Tuple[str, int]] = set()
     for cells in grid[header_idx + 2:]:
         if not (
             isinstance(cells, (tuple, list))
@@ -949,11 +979,12 @@ def _explicit_grid_nested_schedule_entries(
         width = _parse_strict_schedule_dimension_cell(str(cells[width_col] or ""))
         height = _parse_strict_schedule_dimension_cell(str(cells[height_col] or ""))
         for mark in parsed_marks:
-            if mark in marks_seen:
-                # Duplicate typed schedule rows must remain alternatives; don't
-                # let a "last row wins" dict discard their competing dimensions.
+            canon_key = _canonical_opening_mark_key(mark)
+            if canon_key is None or canon_key in marks_seen:
+                # Duplicate or canonically colliding typed schedule rows (e.g. D1 vs D01)
+                # must fail closed rather than silently overwriting competing rows.
                 return []
-            marks_seen.add(mark)
+            marks_seen.add(canon_key)
             entries.append(ScheduleEntry(
                 type_mark=mark,
                 width_mm=width,

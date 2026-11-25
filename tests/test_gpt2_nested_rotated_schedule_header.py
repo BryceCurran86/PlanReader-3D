@@ -307,9 +307,18 @@ def test_second_schedule_format_grouped_rows_text_table_and_frame_basis():
     "D06-D04",       # reversed range
     "D01-W03",       # mixed prefix range
     "D01-D99",       # oversized range (>50)
-    "D04-D006",      # inconsistent zero-padding width
+    "D04-D006",      # forward mixed zero-padding width
+    "D1-D03",        # reverse mixed zero-padding width
+    "D01-D3",        # padded-to-unpadded mixed width
+    "D01-X03",       # malformed range endpoint (non-opening mark)
+    "X01-D03",       # malformed range start (non-opening mark)
+    "D01-99",        # numeric-only range endpoint
+    "D01 to X03",    # malformed 'to' range endpoint
+    "D01, X03",      # malformed list member
     "D04, D04",      # duplicate in same cell
+    "D1, D01",       # canonically duplicate mark in same cell
     "D04-D06, D05",  # overlapping range and explicit duplicate
+    "D04-D06, D5",   # overlapping range and canonically duplicate mark
     "D01-D02-D03",   # chained malformed range
     "D01,",          # trailing delimiter
 ])
@@ -319,6 +328,7 @@ def test_malformed_grouped_mark_expressions_fail_closed(bad_mark):
         [None, "WIDTH", "HEIGHT"],
         [bad_mark, "920", "2040"],
     ]
+    # Grid fail-closed MUST return [] and NEVER fall back to _RotatedPage's word-row D01.
     assert parse_schedule_page(_PageWithGrid([rows]), two_level_header=True) == []
     text_rows = [
         row("DOOR NO", "DOOR LEAF", "DOOR LEAF"),
@@ -328,29 +338,52 @@ def test_malformed_grouped_mark_expressions_fail_closed(bad_mark):
     assert parse_schedule_rows(text_rows, two_level_header=True) == []
 
 
-def test_grouped_mark_overlapping_later_individual_row_fails_closed():
+@pytest.mark.parametrize("second_mark", ["D05", "D5", "d05"])
+def test_grouped_mark_overlapping_later_individual_or_canonical_row_fails_closed(second_mark):
     rows = [
         ["DOOR MARK", "DOOR LEAF", None],
         [None, "WIDTH", "HEIGHT"],
         ["D04-D06", "600", "1700"],
-        ["D05", "920", "2040"],
+        [second_mark, "920", "2040"],
     ]
+    # Must fail closed without falling back to _RotatedPage word rows.
     assert parse_schedule_page(_PageWithGrid([rows]), two_level_header=True) == []
     text_rows = [
         row("DOOR NO", "DOOR LEAF", "DOOR LEAF"),
         row("NO", "WIDTH", "HEIGHT"),
         row("D04-D06", "600", "1700"),
-        row("D05", "920", "2040"),
+        row(second_mark, "920", "2040"),
     ]
     assert parse_schedule_rows(text_rows, two_level_header=True) == []
 
 
-def test_strict_combined_dims_column_abstains_on_manufacturer_exclusions():
+def test_duplicate_canonical_marks_d1_and_d01_across_rows_fail_closed():
+    rows = [
+        ["DOOR MARK", "DOOR LEAF", None],
+        [None, "WIDTH", "HEIGHT"],
+        ["D1", "820", "2040"],
+        ["D01", "920", "2040"],
+    ]
+    assert parse_schedule_page(_PageWithGrid([rows]), two_level_header=True) == []
+    text_rows = [
+        row("DOOR NO", "DOOR LEAF", "DOOR LEAF"),
+        row("NO", "WIDTH", "HEIGHT"),
+        row("D1", "820", "2040"),
+        row("D01", "920", "2040"),
+    ]
+    assert parse_schedule_rows(text_rows, two_level_header=True) == []
+
+
+def test_strict_combined_dims_and_separate_cells_reject_arbitrary_prose_with_numbers():
     rows = [
         row("DOOR MARK", "LEAF SIZE", "NOTES"),
         row("D01-D02", "920 x 2040", "Solid core"),
         row("D03", "AS PER MANUFACTURER (920 x 2040)", "Coolroom"),
         row("D04", "BY OTHERS 820x2040", "Tenant"),
+        row("D05", "Check detail 920 x 2040 before order", "Arbitrary prose"),
+        row("D06", "Door leaf 820 x 2040 pending review", "Arbitrary prose"),
+        row("D07", "920mm x 2040mm", "Valid with units"),
+        row("D08", "0.92 m x 2.04 m", "Valid metres"),
     ]
     out = parse_schedule_rows(rows, two_level_header=True)
     assert [(e.type_mark, e.width_mm, e.height_mm, e.dimension_basis) for e in out] == [
@@ -358,4 +391,19 @@ def test_strict_combined_dims_column_abstains_on_manufacturer_exclusions():
         ("D02", 920, 2040, "leaf"),
         ("D03", None, None, "leaf"),
         ("D04", None, None, "leaf"),
+        ("D05", None, None, "leaf"),
+        ("D06", None, None, "leaf"),
+        ("D07", 920, 2040, "leaf"),
+        ("D08", 920, 2040, "leaf"),
+    ]
+    sep_rows = [
+        row("DOOR NO", "DOOR LEAF", "DOOR LEAF"),
+        row("NO", "WIDTH", "HEIGHT"),
+        row("D01", "Check 920", "Confirm 2040"),
+        row("D02", "920mm", "2040mm"),
+    ]
+    sep_out = parse_schedule_rows(sep_rows, two_level_header=True)
+    assert [(e.type_mark, e.width_mm, e.height_mm) for e in sep_out] == [
+        ("D01", None, None),
+        ("D02", 920, 2040),
     ]
