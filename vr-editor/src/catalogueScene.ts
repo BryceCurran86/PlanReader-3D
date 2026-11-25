@@ -391,7 +391,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
     if(picked&&picked.distance<=(hostHits[0]?.distance??Infinity)+.10){
       for(let p:THREE.Object3D|null=picked.object;p;p=p.parent){
         const entry=mountedEntries.get(p);
-        if(entry)return {hit:entry,entry};
+        if(entry)return {hit:entry,entry,worldPoint:picked.point.toArray() as Vector};
       }
     }
     const first=hostHits[0];
@@ -403,7 +403,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
         host.target==="floor"?i.group==="floors":host.target==="roof"?i.group==="roofing":i.group==="tapware"));
     if(!probe)return null;
     const result=candidate(ray,probe);
-    return result.hit&&result.hit.hostId===host.id?{hit:result.hit}:null;
+    return result.hit&&result.hit.hostId===host.id?{hit:result.hit,worldPoint:first.point.toArray() as Vector}:null;
   }
 
   function aim(hit: ItemHit | null) {
