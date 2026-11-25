@@ -90,6 +90,20 @@ try {
   await button(footprint, "Done").click();
   await button(notice, "Return to source size").click();
 
+  const stage=view.locator(".stage-select select");
+  const board=view.getByLabel("Preview board");
+  for(const value of ["framing","rough-in","lock-up","insulation","sheeted","set","sanded","undercoat","finished"]){
+    await stage.selectOption(value);
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    assert.equal(await canvas.evaluate(element=>window.testCanvas===element&&element.isConnected),true,"Construction stages must preserve the existing 3D renderer");
+  }
+  await stage.selectOption("set");
+  for(const value of ["wet-area","fire-rated","standard"]){
+    await board.selectOption(value);
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    assert.equal(await board.inputValue(),value);
+  }
+  await stage.selectOption("finished");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(() => innerWidth === 390 && document.documentElement.scrollWidth <= 391);
   assert.equal(await layoutClear(), true, "The toolbar obscures the narrow-view canvas");
@@ -106,8 +120,8 @@ try {
   await button(view,"Return to 3D").click();
   await plan.waitFor({state:"hidden"});
   await canvas.waitFor();
-    assert.deepEqual(errors, [], "Browser runtime exceptions");
-  console.log("Browser checks passed: plan opening, tool switching, drawing, undo/redo, filtering, footprint resize and narrow layout.");
+  assert.deepEqual(errors, [], "Browser runtime exceptions");
+  console.log("Browser checks passed: plan opening, tool switching, drawing, undo/redo, filtering, footprint resize, construction stage/board switching, architectural plan and narrow layout.");
 } finally {
   await browser?.close();
   server.closeAllConnections();
