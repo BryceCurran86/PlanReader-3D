@@ -12,6 +12,8 @@ import {wallAssembly,profileDetails} from "./wallProfiles.ts";
 import {chooseWallAim} from "./wallMagnet.ts";
 import type {WallTextureLibrary} from "./wallTextures.ts";
 import {menuButtonAt} from "./toolWheelInput.ts";
+import {nominalFrameLayout} from "./constructionDetailLayout.ts";
+import {makeLiningVisual} from "./constructionLiningVisual.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -38,44 +40,23 @@ export function illustrativeTimberFrame(wall: WallVisual) {
   const openings = (wall.openings ?? []).filter(o => openingFits(wall,o));
   const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
   if(profile.core==="masonry")return group;
-  const thickness = .045, depth = Math.min(profile.frameMm,assembly.thicknessMm)/1000;
+  const depth = Math.min(profile.frameMm,assembly.thicknessMm)/1000;
   const angle = -Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
-  const members:{from:number;to:number;bottom:number;top:number}[]=[];
-  function member(from:number,to:number,bottom:number,top:number) {
-    from=Math.max(0,from);to=Math.min(length,to);bottom=Math.max(0,bottom);top=Math.min(wall.heightM,top);
-    if(to-from<.001||top-bottom<.001)return;
-    members.push({from,to,bottom,top});
-  }
-  function horizontal(y:number) {
-    const cuts=openings.filter(o=>o.sillHeightM<y+thickness&&o.sillHeightM+o.heightM>y).sort((a,b)=>a.offsetM-b.offsetM);
-    let cursor=0;
-    for(const o of cuts){member(cursor,o.offsetM,y,y+thickness);cursor=Math.max(cursor,o.offsetM+o.widthM);}
-    member(cursor,length,y,y+thickness);
-  }
-  horizontal(0);horizontal(wall.heightM-thickness);horizontal(wall.heightM/2);
-  const count=Math.ceil(length/.45);
-  for(let i=0;i<=count;i++){
-    const x=i===count?length-thickness/2:Math.max(thickness/2,i*.45);
-    const cut=openings.filter(o=>o.offsetM<x+thickness/2&&o.offsetM+o.widthM>x-thickness/2);
-    if(!cut.length)member(x-thickness/2,x+thickness/2,thickness,wall.heightM-thickness);
-  }
-  for(const o of openings){
-    member(o.offsetM-thickness,o.offsetM,thickness,wall.heightM-thickness);
-    member(o.offsetM+o.widthM,o.offsetM+o.widthM+thickness,thickness,wall.heightM-thickness);
-    member(o.offsetM,o.offsetM+o.widthM,o.sillHeightM+o.heightM,o.sillHeightM+o.heightM+thickness);
-    if(o.sillHeightM>thickness)member(o.offsetM,o.offsetM+o.widthM,o.sillHeightM-thickness,o.sillHeightM);
-  }
+  const holes=openings.map(o=>({x0:o.offsetM,x1:o.offsetM+o.widthM,y0:o.sillHeightM,y1:o.sillHeightM+o.heightM}));
+  let members:ReturnType<typeof nominalFrameLayout>;
+  try{members=nominalFrameLayout(length,wall.heightM,holes);}catch{return group;}
   // One instanced draw call per wall, rather than a geometry and material per stud.
   if(members.length){
     const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:profile.core==="steel"?0x9aa8ad:0xc99c65,roughness:.88}),members.length);
     const transform=new THREE.Object3D();
     members.forEach((m,i)=>{
-      transform.position.copy(atOffset(wall,(m.from+m.to)/2,(m.bottom+m.top)/2));
+      transform.position.copy(atOffset(wall,(m.x0+m.x1)/2,(m.y0+m.y1)/2));
       transform.rotation.y=angle;
-      transform.scale.set(m.to-m.from,m.top-m.bottom,depth);
+      transform.scale.set(m.x1-m.x0,m.y1-m.y0,depth);
       transform.updateMatrix();
       mesh.setMatrixAt(i,transform.matrix);
     });
+    mesh.userData.nominalFrameRoles=members.map(m=>m.role);
     mesh.instanceMatrix.needsUpdate=true;
     mesh.computeBoundingBox();mesh.computeBoundingSphere();
     mesh.userData.illustrativeFraming=true;
@@ -174,6 +155,14 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary) 
     group.add(mount);
   }
   group.add(illustrativeTimberFrame(wall));
+  if(profile.core!=="masonry"){
+    const holes=openings.map(o=>({x0:o.offsetM,x1:o.offsetM+o.widthM,y0:o.sillHeightM,y1:o.sillHeightM+o.heightM}));
+    const sides=profile.role==="internal"?[1,-1]:[assembly.exteriorSide==="left"?-1:1];
+    for(const side of sides){
+      const lining=makeLiningVisual(length,wall.heightM,holes,(x,y,offset)=>atOffset(wall,x,y).addScaledVector(normal,side*(half+offset)));
+      if(lining)group.add(lining);
+    }
+  }
   // A floor-level guide keeps draft walls visible and selectable from Top view.
   const outline = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
     atOffset(wall, 0, 0.018), atOffset(wall, 0, wall.heightM),
@@ -201,6 +190,9 @@ export function displayCeilingDraft(draft: CeilingDraft) {
   geometry.computeVertexNormals();
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0xf5f2eb,
     side: THREE.DoubleSide, roughness: 0.88 }));
+  const left=Math.min(draft.start[0],draft.end[0]),front=Math.min(draft.start[1],draft.end[1]);
+  const lining=makeLiningVisual(Math.abs(draft.end[0]-draft.start[0]),Math.abs(draft.end[1]-draft.start[1]),[],(x,y,offset)=>new THREE.Vector3(left+x,draft.heightM-offset,front+y));
+  if(lining)mesh.add(lining);
   return mesh;
 }
 
