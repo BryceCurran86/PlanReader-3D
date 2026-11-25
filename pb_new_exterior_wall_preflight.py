@@ -400,15 +400,21 @@ def attempt_source_native_outer_wall_first(
 
     # A mitred corner or junction piece is native wall paint, not a bridge. It
     # joins this topology union only; it never becomes a bar or a path owner.
+    # Scope barrier polygons to the active viewports before contact checks so
+    # out-of-viewport pieces never enter joint detection.
+    scoped_barriers = (
+        tuple(
+            (path_index, polygon)
+            for path_index, polygon in barrier_polygons
+            if getattr(polygon, "is_empty", True) is False
+            and any(_bbox_intersects(polygon.bounds, vp) for vp in viewports)
+        )
+        if viewports is not None else barrier_polygons
+    )
     joint_paint = detect_source_wall_joint_paint(
-        barrier_polygons, source_drawings=wall_ink, wall_bars=bars,
+        scoped_barriers, source_drawings=wall_ink, wall_bars=bars,
         page_index=source_page_index,
     ) if admit_wall_joint_paint else ()
-    if viewports is not None:
-        joint_paint = tuple(
-            j for j in joint_paint
-            if any(_bbox_intersects(j.bounds_pdf_pts, vp) for vp in viewports)
-        )
     counts["source_wall_joint_paint"] = joint_paint
 
     union = unary_union(
