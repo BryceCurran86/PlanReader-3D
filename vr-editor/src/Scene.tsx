@@ -1536,7 +1536,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       xrGestures[index] = null;
       if (gesture && completeDrag(gesture, index)) return;
       if(gesture?.direct&&"previous" in gesture){updateDraftSelection(gesture.previous.proposalId);select(null);reportTool("Selected draft "+gesture.kind+" · hold trigger and drag.");return;}
-      // Menu actions dispatch exclusively on selectstart.
+      // Native selectstart consumes its matching select; runtimes without start can use select.
       if(toolsOpen){activateDisplayedMenu(menuLayout(""));return;}
       if ((toolsOpen&&(itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen)) || resize.current.enabled) return;
       const item = itemControls.current.active;
@@ -1855,7 +1855,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const lightEye=new THREE.Vector3();
     let lastQuality: RenderQuality | null = null;
     let shadowKey:readonly unknown[]=[];let lastShadowRefresh=-Infinity;
-    let shadowHouseBounds:typeof gardenBounds=null;
+    let shadowHouseBounds:{minX:number;maxX:number;minZ:number;maxZ:number}|null=null;
     let materialBudgetKey:readonly unknown[]=[];
     let lastPresenting=false;
     let lastDetail: SurfaceDetail | null = null;
