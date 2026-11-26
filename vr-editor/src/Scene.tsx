@@ -29,6 +29,7 @@ import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
 import {setLiningAppearance,LINING_BOARDS,makeShellCeilingLining} from "./constructionLiningVisual";
 import {nominalShellFraming} from "./constructionFrameVisual";
+import {roofPresentationParts,roofSkinAndGables} from "./roofPresentation";
 import {junctionBackingMesh} from "./constructionJunctionVisual";
 import {wallCornerJoins} from "./wallCornerJoin";
 import {sourceWallLiningPreview,sourceCeilingLiningPreview} from "./sourceLiningPreview";
@@ -930,7 +931,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(manifest.scope.workspaceId==="starter-house-local"&&next){const vertices=next.surfaces.filter(s=>s.kind==="floor").flatMap(s=>s.vertices);if(vertices.length)gardenBounds={minX:Math.min(...vertices.map(v=>v[0])),maxX:Math.max(...vertices.map(v=>v[0])),minZ:Math.min(...vertices.map(v=>v[2])),maxZ:Math.max(...vertices.map(v=>v[2]))};}
         for(const child of [...shellGroup.children]){shellGroup.remove(child);child.traverse(o=>{if(o instanceof THREE.Mesh){o.geometry.dispose();(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());}});}
         for(const surface of next?.surfaces??[]){
-          const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(surface.vertices.flat(),3));geometry.computeVertexNormals();
+          const split=surface.kind==="roof"?roofSkinAndGables(surface.vertices):null;
+          const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute((split?.skin??surface.vertices).flat(),3));geometry.computeVertexNormals();
+          if(split?.gables.length){const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(split.gables.flat(),3));g.computeVertexNormals();const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xbcb8ac,roughness:.85,side:THREE.DoubleSide}));m.userData.surfaceKind="roof";m.castShadow=true;m.receiveShadow=true;shellGroup.add(m);}
           const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
           physicalUV(geometry,surface.kind==="roof"?.3:.5,surface.kind==="roof"?1.4:.5);
           if(surface.kind==="floor"){const maps=details.get("concrete");material.color.setHex(0xc8c5bc);material.map=maps.map;material.bumpMap=maps.bumpMap;material.bumpScale=.0015;material.roughness=.87;}
@@ -939,7 +942,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           if(surface.kind==="floor"&&next){const vertices=surface.vertices.flatMap((_,i)=>i%3===0&&surface.vertices.slice(i,i+3).every(v=>Math.abs(v[1]-.002)<1e-6)?surface.vertices.slice(i,i+3):[]);if(vertices.length){const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(vertices.flat(),3));g.computeVertexNormals();const host=new THREE.Mesh(g,new THREE.MeshBasicMaterial({side:THREE.DoubleSide,visible:false}));host.userData.surfaceKind="floor";shellGroup.add(host);shellFloorHosts=[{id:localFloorHostId(next.levelId),target:"floor",mesh:host}];}}
           if(surface.kind==="ceiling"){const lining=makeShellCeilingLining(surface.vertices);if(lining)shellGroup.add(lining); }
         }
-        if(next)for(const accessory of nominalShellFraming(next).children.slice())shellGroup.add(accessory);
+        if(next){
+          for(const accessory of nominalShellFraming(next).children.slice())shellGroup.add(accessory);
+          for(const part of roofPresentationParts(next)){
+            const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(part.vertices.flat(),3));g.computeVertexNormals();
+            physicalUV(g,.3,1.4);const material=new THREE.MeshStandardMaterial({color:part.kind==="skin"?0x687783:part.kind==="soffit"?0xe5e1d7:0x4c575c,roughness:part.kind==="soffit"?.88:.62,metalness:part.kind==="gutter"?.35:.05,side:THREE.DoubleSide});
+            if(part.kind==="skin"){const maps=details.get("roof");material.map=maps.map;material.bumpMap=maps.bumpMap;material.bumpScale=.003;}
+            const mesh=new THREE.Mesh(g,material);mesh.name="Architectural roof "+part.kind;mesh.userData.surfaceKind="roof";mesh.castShadow=true;mesh.receiveShadow=true;shellGroup.add(mesh);
+          }
+        }
       }
       for(const mesh of shellGroup.children){
         const accessory=mesh.userData.constructionAccessory;

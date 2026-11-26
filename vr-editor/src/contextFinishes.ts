@@ -74,6 +74,7 @@ export function contextTargetKey(context:FinishContext|null):string|null{
 export type LocalContextTarget={kind:"wall"|"ceiling"|"opening";id:string;openingId?:string};
 export function localContextTarget(context:FinishContext):LocalContextTarget|null{
  const {hostId,target}=context.hit;
+ if(typeof hostId!=="string")return null;
  if(target==="wall"&&hostId.startsWith("draft-wall:"))return {kind:"wall",id:hostId.slice(11)};
  if(target==="ceiling"&&hostId.startsWith("draft-ceiling:"))return {kind:"ceiling",id:hostId.slice(14)};
  if(target==="opening"&&hostId.startsWith("opening:"))try{

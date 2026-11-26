@@ -5,7 +5,8 @@ export class HoverToolDwell {
  private since=0;
  private blocked:string|null=null;
  private fired=false;
- constructor(private readonly delayMs=450){}
+ private readonly delayMs:number;
+ constructor(delayMs=450){this.delayMs=delayMs;}
  observe(key:string|null,now:number):boolean{
   if(!Number.isFinite(now))return false;
   if(key!==this.key){this.key=key;this.since=now;this.fired=false;if(key!==this.blocked)this.blocked=null;return false;}

@@ -127,7 +127,7 @@ export function buildMenuLayout(
     if(target?.kind==="wall"&&localWall)editRows.push({label:"Move / stretch / size",action:{area:"context-edit",action:"wall"}});
     if(target?.kind==="opening"&&localWall?.openings.some(o=>o.openingId===target.openingId))editRows.push({label:"Edit frame / opening",action:{area:"context-edit",action:"opening"}});
     if(target?.kind==="ceiling"&&localCeiling)editRows.push({label:"Move ceiling",action:{area:"context-edit",action:"move"}},{label:"Stretch ceiling",action:{area:"context-edit",action:"stretch"}});
-    if(c.hit.hostId.startsWith("draft-floor:"))editRows.push({label:"Concrete slab",action:{area:"context-edit",action:"slab"}});
+    if(c.hit.hostId?.startsWith("draft-floor:"))editRows.push({label:"Concrete slab",action:{area:"context-edit",action:"slab"}});
     if(c.entry)editRows.push({label:"Remove selection…",action:{area:"context-edit",action:"remove"}});
     function contextRows(y:number){editRows.forEach((e,i)=>add(e.label,24+(i%2)*460,y+Math.floor(i/2)*78,440,68,e.action));return editRows.length?Math.ceil(editRows.length/2)*78:0;}
     if(group){
