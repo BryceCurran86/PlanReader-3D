@@ -7,7 +7,7 @@ export function previewLightingRole(item:CatalogueItem):"light"|"switch"|null{
  return item.group==="lights"&&["downlight","batten","pendant","sconce"].includes(v.shape)?"light":null;
 }
 export function nearestPreviewLights<T extends {id:string;position:readonly [number,number,number]}>(fixtures:readonly T[],eye:readonly [number,number,number]):T[]{
- const distance=(p:readonly number[])=>Math.hypot(p[0]-eye[0],p[1]-eye[1],p[2]-eye[2]);
+ const distance=(p:readonly number[])=>(p[0]-eye[0])**2+(p[1]-eye[1])**2+(p[2]-eye[2])**2;
  if(!eye.every(Number.isFinite))return [];
- return fixtures.filter(f=>f.position.every(Number.isFinite)&&distance(f.position)<=10).slice().sort((a,b)=>distance(a.position)-distance(b.position)||a.id.localeCompare(b.id)).slice(0,MAX_PREVIEW_LIGHTS);
+ return fixtures.filter(f=>f.position.every(Number.isFinite)).map(f=>({f,d:distance(f.position)})).filter(x=>x.d<=100).sort((a,b)=>a.d-b.d||a.f.id.localeCompare(b.f.id)).slice(0,MAX_PREVIEW_LIGHTS).map(x=>x.f);
 }
