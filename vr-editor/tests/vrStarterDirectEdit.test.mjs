@@ -40,3 +40,20 @@ test("ceiling pick explicitly ignores walls and moves only ceiling geometry",()=
  assert.deepEqual(next.ceilings[0].start,[.5,0]);
  assert.equal(directDraftGesture(state,STARTER_LEVEL,down(30,30),"walls",true,opts),null);
 });
+
+import {editableSurfaceVisible,draftWallLayerVisible} from "../src/constructionLayers.ts";
+test("top editing respects hidden ceilings and always keeps the roof out of the way",()=>{
+ assert.equal(editableSurfaceVisible("framing","ceiling",{},true,true,true),true);
+ assert.equal(editableSurfaceVisible("framing","ceiling",{ceiling:"hide"},true,true,true),false);
+ assert.equal(editableSurfaceVisible("framing","ceiling",{ceiling:"show"},true,true,false),false);
+ assert.equal(editableSurfaceVisible("framing","roof",{roof:"show"},true,true,true),false);
+ assert.equal(editableSurfaceVisible("framing","ceiling",{ceiling:"show"},false,false,false),true);
+});
+test("direct wall and magnetic targets share visible construction-layer eligibility",()=>{
+ assert.equal(draftWallLayerVisible("framing",{},false),true);
+ assert.equal(draftWallLayerVisible("framing",{wall:"hide",framing:"hide"},false),false);
+ assert.equal(draftWallLayerVisible("slab",{},false),false);
+ assert.equal(draftWallLayerVisible("framing",{framing:"hide"},true),true);
+ assert.equal(draftWallLayerVisible("slab",{wall:"show"},false),true);
+ assert.equal(draftWallLayerVisible("slab",{wall:"hide",framing:"show"},false),true);
+});

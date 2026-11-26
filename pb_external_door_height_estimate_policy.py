@@ -1,9 +1,9 @@
-"""Owner policy: external doors use a *provisional* 2100 mm height when unstated.
+"""Owner policy: external doors use a provisional height when unstated.
 
 This is an estimating decision, NOT source measurement authority. It cannot
 issue a FIRM QuantityEvidence, a source-closed signed measurement or a frozen
 benchmark score. The assumption case may be consumed as a labelled provisional
-customer costing line ("Assumed 2100 mm — verify on site") by the live opening
+customer costing line ("Assumed 2040 mm — verify on site") by the live opening
 issuer. The original producer still authenticates each physical door, width,
 host, frame, schedule/elevation evidence and every downstream commercial
 permission.
@@ -13,11 +13,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM = 2100
+OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM = 2040
 OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS = (
-    "assumed_external_door_height_2100_mm_owner_policy"
+    f"assumed_external_door_height_{OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM}_mm_owner_policy"
 )
-OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL = "Assumed 2100 mm — verify on site"
+OWNER_EXTERNAL_DOOR_ASSUMPTION_REASON = (
+    f"external_door_height_not_specified_owner_{OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM}_assumption"
+)
+OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL = (
+    f"Assumed {OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM} mm — verify on site"
+)
 
 
 @dataclass(frozen=True)
@@ -63,7 +68,7 @@ def resolve_external_door_height_estimate(
     elevation_owned_to_opening: bool = False,
     specific_exception_noted: bool = False,
 ) -> ExternalDoorHeightEstimate:
-    """Schedule > elevation > 2100 mm assumption, for proven external doors.
+    """Prefer source schedule and elevation heights over the owner assumption.
 
     A printed height only counts as a source height when its source-owned
     evidence and *this opening's* unique association are positively supplied.
@@ -132,7 +137,7 @@ def resolve_external_door_height_estimate(
     return ExternalDoorHeightEstimate(
         opening_id, float(OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM),
         OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS,
-        "external_door_height_not_specified_owner_2100_assumption",
+        OWNER_EXTERNAL_DOOR_ASSUMPTION_REASON,
         (external_door_identity_evidence_id.strip(),),
         False, True, True,
         can_issue_labelled_provisional_customer=True,

@@ -1,4 +1,4 @@
-"""Apply the owner 2100 mm external-door height estimate after wall roles exist.
+"""Apply the owner's external-door height estimate after wall roles exist.
 
 An authenticated door hosted on a unique EXTERNAL whole-wall may receive a
 labelled provisional area when the plans print one width and no height. This
@@ -28,6 +28,11 @@ from pb_wall_role_authority import WallRoleClassification
 
 _NON_PERSONNEL_DOOR_RE = re.compile(
     r"\b(?:garage|overhead|roller|joinery|panel\s*lift)\b",
+    re.IGNORECASE,
+)
+_HEIGHT_EXCEPTION_NOTE_RE = re.compile(
+    r"\b(?:as per|refer to|to suit)\s+(?:the\s+)?(?:manufacturer|supplier)\b"
+    r"|\bfull[\s-]+height\b",
     re.IGNORECASE,
 )
 
@@ -91,14 +96,13 @@ def _external_wall_role_record_ids(
 
 def _schedule_height_kwargs(opening: LiveCanonicalOpeningObject) -> dict[str, object]:
     height = opening.schedule_declared_height_mm
-    evidence = opening.schedule_binding_record_id
-    evidence_id = _clean(evidence)
-    claimed = height is not None or bool(evidence_id)
-    if not claimed:
+    if height is None:
+        # A bound schedule row may state only the door's width.
         return {}
+    evidence_id = _clean(opening.schedule_binding_record_id)
     owned = _positive_mm(height) and bool(evidence_id)
     return {
-        "schedule_height_mm": height if type(height) in (int, float) else None,
+        "schedule_height_mm": height,
         "schedule_height_evidence_id": evidence_id or None,
         "schedule_owned_to_opening": owned,
     }
@@ -160,6 +164,9 @@ def _apply_one(
         opening_id=opening.canonical_opening_id,
         external_door_authenticated=True,
         external_door_identity_evidence_id=role_record_id,
+        specific_exception_noted=bool(
+            _HEIGHT_EXCEPTION_NOTE_RE.search(_clean(opening.schedule_row_description))
+        ),
         **_schedule_height_kwargs(opening),
     )
     if (
@@ -192,7 +199,7 @@ def apply_live_external_door_height_estimates(
     composition: LivePhysicalOpeningVoidComposition,
     whole_wall_role_composition: LiveWholeWallRoleComposition,
 ) -> LivePhysicalOpeningVoidComposition:
-    """Stamp labelled 2100 mm provisional areas onto qualifying external doors."""
+    """Stamp labelled provisional areas onto qualifying external doors."""
     if type(composition) is not LivePhysicalOpeningVoidComposition:
         raise TypeError("composition must be LivePhysicalOpeningVoidComposition")
     if type(whole_wall_role_composition) is not LiveWholeWallRoleComposition:

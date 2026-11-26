@@ -288,6 +288,7 @@
       "basis": "supply-install",
       "sourceUrl": "https://www.sumitt.com.au/trade-rates",
       "commercialUse": false
-    }
+    },
+    {"group":"furniture","unit":"each","amountExGstTest":100,"origin":"synthetic","basis":"material","sourceUrl":null,"commercialUse":false}
   ]
 }

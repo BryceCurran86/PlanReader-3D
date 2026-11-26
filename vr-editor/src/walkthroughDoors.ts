@@ -1,3 +1,4 @@
+import {localDoorMotion} from "./localDoorMotion.ts";
 import type {WallVisual} from "./buildPlacement.ts";
 import {openingFits,planLength} from "./buildPlacement.ts";
 import {wallAssembly} from "./wallProfiles.ts";
@@ -18,11 +19,11 @@ export function localNavigationWalls(wall:WallVisual,openDoors:ReadonlySet<strin
  let end=0;
  for(const o of [...(wall.openings??[])].sort((a,b)=>a.offsetM-b.offsetM)){
   if(!openingFits(wall,o)||o.offsetM<end||o.sillHeightM>.01||o.heightM<1.9)continue;
-  const door=o.openingKind==="door",open=door&&openDoors.has(doorKey(wall.proposalId,o.openingId));
+  const door=o.openingKind==="door",motion=localDoorMotion(wall,o,halfThickness),open=door&&motion!==null&&openDoors.has(doorKey(wall.proposalId,o.openingId));
   if(o.openingKind!=="passage"&&!(door&&(open||!showDoors)))continue;
   if(o.offsetM>end)walls.push({start:at(end),end:at(o.offsetM),halfThickness});
   end=o.offsetM+o.widthM;
-  if(open&&showDoors)walls.push(doorSwingSegment(wall,o.offsetM,o.widthM,Math.PI/2));
+  if(open&&showDoors&&motion?.kind==="swing")walls.push(doorSwingSegment(wall,o.offsetM,o.widthM,motion.angle));
  }
  if(end<length)walls.push({start:at(end),end:wall.end,halfThickness});
  return walls;
