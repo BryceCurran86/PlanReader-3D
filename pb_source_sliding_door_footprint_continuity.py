@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -63,6 +64,75 @@ class ExteriorSlidingDoorFootprintBridge:
             "physical_wall_authenticated": False,
             "measurement_authorized": False,
         }
+
+
+# Float slack for turning the gap gate ``far - near >= 8`` into a range on ``far``.
+_RANGE_SLACK = 1e-6
+
+# Positions into the wall list ordered by one wall edge, with those edge values for bisection.
+_EdgeIndex = tuple[tuple[float, ...], tuple[int, ...]]
+
+
+def _edge_index(walls: Sequence[tuple[int, str, Sequence[float]]], positions, edge: int) -> _EdgeIndex:
+    ordered = tuple(sorted(positions, key=lambda p: walls[p][2][edge]))
+    return tuple(walls[p][2][edge] for p in ordered), ordered
+
+
+def _between(index: _EdgeIndex, low: float, high: float) -> tuple[int, ...]:
+    keys, ordered = index
+    return ordered[bisect_left(keys, low - _RANGE_SLACK):bisect_right(keys, high + _RANGE_SLACK)]
+
+
+@dataclass(frozen=True)
+class _LabelWindow:
+    """Wall edge indexes for one printed label, used only to skip pairs the gate below can never accept."""
+
+    lx: float
+    ly: float
+    count: int
+    by_left: _EdgeIndex
+    by_top: _EdgeIndex
+    level_y: frozenset[int]
+    level_x: frozenset[int]
+    level_by_left: _EdgeIndex
+    level_by_top: _EdgeIndex
+
+
+def _label_window(walls, label_rect, by_left: _EdgeIndex, by_top: _EdgeIndex) -> _LabelWindow:
+    lx = (label_rect[0] + label_rect[2]) / 2
+    ly = (label_rect[1] + label_rect[3]) / 2
+    reach_x = 35.0 + abs(label_rect[2] - label_rect[0]) / 2 + _RANGE_SLACK
+    reach_y = 35.0 + abs(label_rect[3] - label_rect[1]) / 2 + _RANGE_SLACK
+    level_y = frozenset(
+        p for p, (_, _, w) in enumerate(walls) if w[1] <= ly + reach_y and w[3] >= ly - reach_y
+    )
+    level_x = frozenset(
+        p for p, (_, _, w) in enumerate(walls) if w[0] <= lx + reach_x and w[2] >= lx - reach_x
+    )
+    return _LabelWindow(
+        lx, ly, len(walls), by_left, by_top, level_y, level_x,
+        _edge_index(walls, level_y, 0), _edge_index(walls, level_x, 1),
+    )
+
+
+def _far_walls(
+    window: _LabelWindow, position: int, a: Sequence[float], h_first: bool, v_first: bool
+) -> Sequence[int]:
+    """Wall list positions that could close an aperture behind wall ``a``, in list order.
+
+    Exact pre-filter of the pair gate, with the same results as trying every wall: the far wall's near edge must
+    lie 8 to 450 pt past ``a`` and inside the label reach, and the aperture, always inside the two walls' union,
+    must come within 35 pt plus half the label of the label's cross axis, so one of the two walls reaches it.
+    """
+    lx, ly = window.lx, window.ly
+    found: set[int] = set()
+    if h_first:
+        index = window.by_left if position in window.level_y else window.level_by_left
+        found.update(_between(index, max(lx - 1.0, a[2] + 8.0), min(lx + 451.0, a[2] + 450.0)))
+    if v_first:
+        index = window.by_top if position in window.level_x else window.level_by_top
+        found.update(_between(index, max(ly - 1.0, a[3] + 8.0), min(ly + 451.0, a[3] + 450.0)))
+    return sorted(found)
 
 
 def _viewport_compatible(
@@ -153,19 +223,22 @@ def detect_exterior_sliding_door_footprint_bridges(
             elif 0.2 <= d <= 16.0 and (dx < 0.2 or dy < 0.2):
                 caps.append((idx, layer, (ln_bb[0], ln_bb[1] - 0.2, ln_bb[2], ln_bb[3] + 0.2)))
     result = []
+    by_left = _edge_index(walls, range(len(walls)), 0)
+    by_top = _edge_index(walls, range(len(walls)), 1)
     for label, label_rect in labels:
-        lx = (label_rect[0] + label_rect[2]) / 2
-        ly = (label_rect[1] + label_rect[3]) / 2
+        window = _label_window(walls, label_rect, by_left, by_top)
+        lx, ly = window.lx, window.ly
         matches = []
         # Existing source rule: gap <=450pt and printed label within 1pt
         # of the aperture ends. Any more distant wall host is impossible;
         # retain all exact native host/cap/track/source competitor proofs.
-        for i, layer, a in walls:
+        for position, (i, layer, a) in enumerate(walls):
             h_first = lx - 451.0 <= a[2] <= lx + 1.0
             v_first = ly - 451.0 <= a[3] <= ly + 1.0
             if not (h_first or v_first):
                 continue
-            for j, otherlayer, b in walls:
+            for other in _far_walls(window, position, a, h_first, v_first):
+                j, otherlayer, b = walls[other]
                 if i == j or (has_wall_layers and otherlayer != layer):
                     continue
                 h_possible = h_first and lx - 1.0 <= b[0] <= lx + 451.0
