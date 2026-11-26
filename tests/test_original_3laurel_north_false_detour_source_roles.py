@@ -59,9 +59,10 @@ def test_original_p3_entire_exterior_has_only_source_proven_outside_roles():
         page = doc[2]
         paths = tuple(page.get_drawings())
         words = tuple(page.get_text("words"))
+    # The app's preview admits mitred corner paint; without it #4623's removal of false windows leaves p3 open.
     attempt = attempt_source_native_outer_wall_first(
         paths, source_words=words, window_source_drawings=paths,
-        source_page_index=2,
+        source_page_index=2, admit_wall_joint_paint=True,
     )
     walk = attempt.source_outside_face_walk
     assert walk is not None
