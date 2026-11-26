@@ -10,7 +10,8 @@ export function openingFrameVisual(wall:WallVisual,o:WallAdditionOpening):THREE.
  const l=planLength(wall.start,wall.end),w=o.widthM,h=o.heightM;
  if(l<.05||w<.25||h<.25)return null;
  const t=Math.min(o.openingKind==="window"?.045:.035,w/8,h/8);
- const depth=Math.min(.16,wallAssembly(wall.assembly).thicknessMm/1000);
+ // Span the nominal assembly, including thick external masonry, rather than leaving a floating jamb.
+ const depth=wallAssembly(wall.assembly).thicknessMm/1000;
  const boxes=[[t/2,h/2,t,h],[w-t/2,h/2,t,h],[w/2,h-t/2,w-2*t,t]];
  if(o.openingKind==="window")boxes.push([w/2,t/2,w-2*t,t]);
  const dx=(wall.end[0]-wall.start[0])/l,dz=(wall.end[1]-wall.start[1])/l;

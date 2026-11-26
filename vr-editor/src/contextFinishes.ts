@@ -21,6 +21,14 @@ export function contextChoices(context:FinishContext,group:CatalogueGroup):Catal
  const old=context.entry&&getCatalogueItem(context.entry.itemId);
  return ITEM_CATALOGUE.filter(i=>i.group===group&&i.targets.includes(context.hit.target)&&(old?.visual.kind==="fixture"?sameFixtureFamily(old,i):i.visual.kind!=="fixture"&&i.visual.kind!=="design-assembly"));
 }
+/** Enter the most likely finish immediately, while retaining Back for all groups. */
+export function initialFinishGroup(context:FinishContext):CatalogueGroup|null {
+ const groups=contextGroups(context);
+ if(context.hit.target==="opening")return null; // retain hardware choices
+ if(groups.length===1)return groups[0];
+ const preferred=preferredFinishGroup(context.hit.target);
+ return preferred&&groups.includes(preferred)?preferred:null;
+}
 export function contextTitle(c:FinishContext){
  const entry=c.entry&&getCatalogueItem(c.entry.itemId);
  return entry?.label??(c.hit.target==="opening"?(c.hit.opening?.door?"Door":"Window"):c.hit.target==="wall"?"Wall finish":c.hit.target==="floor"?"Floor finishes":c.hit.target==="ceiling"?"Ceiling finishes":"Selected "+c.hit.target);

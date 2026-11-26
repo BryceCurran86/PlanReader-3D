@@ -577,6 +577,10 @@ export function createBuildOverlay(scene: THREE.Scene) {
   canvas.height = 228;
   const context = canvas.getContext("2d");
   const texture = new THREE.CanvasTexture(canvas);
+  // UI is near the viewer and frequently edited; avoid regenerating mipmaps.
+  texture.generateMipmaps=false;
+  texture.minFilter=THREE.LinearFilter;
+  texture.magFilter=THREE.LinearFilter;
   texture.colorSpace = THREE.SRGBColorSpace;
   const menu = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
     new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true, depthTest: false, depthWrite: false }));
@@ -649,7 +653,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
   const head = new THREE.Vector3();
   const facing = new THREE.Vector3();
   const right = new THREE.Vector3();
-  let drawn = "";
+  let drawn = "",trayKey="";
   function positionMenu(camera: THREE.Camera, pinned = false, force = false) {
     camera.getWorldPosition(head);
     camera.getWorldDirection(facing);
@@ -715,7 +719,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     const key = JSON.stringify([layout, layout.radial?hover:-1]);
     if (!context || drawn === key) return;
     drawn = key;
-    tray.update(layout);
+    const nextTrayKey=JSON.stringify([layout.width,layout.height,layout.radial,layout.buttons]);
+    if(nextTrayKey!==trayKey){tray.update(layout);trayKey=nextTrayKey;}
     highlightMenu(layout,hover);
     if (canvas.width !== layout.width || canvas.height !== layout.height) {
       canvas.width = layout.width;
