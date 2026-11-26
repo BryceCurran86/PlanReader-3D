@@ -1315,7 +1315,9 @@ class SourceVisibilityProducer:
                 or published.revision.source_sha256 != selector.source_sha256):
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
         source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
-        if not source_bytes or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+        if not source_bytes or not self._producer._store.source_bytes_match_revision(
+            selector.revision_id, source_bytes, selector.source_sha256
+        ):
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
         selected = frozenset(str(i) for i in support_observation_ids)
         if not selected or selector.observation_id not in selected:
@@ -1444,7 +1446,9 @@ class SourceVisibilityProducer:
                 or published.revision.source_sha256 != selector.source_sha256):
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
         source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
-        if not source_bytes or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+        if not source_bytes or not self._producer._store.source_bytes_match_revision(
+            selector.revision_id, source_bytes, selector.source_sha256
+        ):
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
         selected = frozenset(str(i) for i in observation_ids)
         if not selected or selector.observation_id not in selected:
@@ -1542,8 +1546,11 @@ class SourceVisibilityProducer:
             source_bytes = self._producer._store.source_bytes_by_revision.get(
                 published.revision.revision_id
             )
-            if (source_bytes is None or hashlib.sha256(source_bytes).hexdigest()
-                    != published.revision.source_sha256):
+            if source_bytes is None or not self._producer._store.source_bytes_match_revision(
+                published.revision.revision_id,
+                source_bytes,
+                published.revision.source_sha256,
+            ):
                 raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
             first_native = next((
                 obs_id for obs_id, observation in rows
@@ -1711,7 +1718,9 @@ class SourceVisibilityProducer:
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
         segments = {i: tuple(r.geometry) for i, r in records.items() if r.page_id == page_id}
         source_bytes = self._producer._store.source_bytes_by_revision.get(selector.revision_id)
-        if source_bytes is None or hashlib.sha256(source_bytes).hexdigest() != selector.source_sha256:
+        if source_bytes is None or not self._producer._store.source_bytes_match_revision(
+            selector.revision_id, source_bytes, selector.source_sha256
+        ):
             raise RuntimeError(PRODUCER_INTEGRITY_FAILURE)
         # Re-authenticate the exact original PDF bytes on EVERY call above.
         # Only source-native immutable text directions, not decisions or atoms,
@@ -2325,7 +2334,9 @@ class SourceVisibilityProducer:
         )
         if not source_bytes:
             return "unresolved"
-        if hashlib.sha256(source_bytes).hexdigest() != published.revision.source_sha256:
+        if not self._producer._store.source_bytes_match_revision(
+            str(revision_id), source_bytes, published.revision.source_sha256
+        ):
             return "unresolved"
 
         try:
@@ -2376,7 +2387,9 @@ class SourceVisibilityProducer:
         )
         if not source_bytes:
             return True
-        if hashlib.sha256(source_bytes).hexdigest() != published.revision.source_sha256:
+        if not self._producer._store.source_bytes_match_revision(
+            str(revision_id), source_bytes, published.revision.source_sha256
+        ):
             return True
 
         try:
@@ -2892,136 +2905,122 @@ class SourceVisibilityProducer:
                          RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
                          RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION, None)]
             if image_regions and published.raster_opening_primitive_observation_ids:
-                render_args = dict(
-                    document_id=published.revision.document_id,
-                    revision_id=published.revision.revision_id,
-                    source_sha256=published.revision.source_sha256,
-                    snapshot_id=snapshot.snapshot_id, page_id=page_id,
-                    dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
-                    include_native_frame=True,
-                )
-                image_png, image_parent, image_frame = self._producer.render_native_page_png(
-                    **render_args, images_only=True,
-                )
-                full_png, full_parent, full_frame = self._producer.render_native_page_png(**render_args)
-                if image_parent != full_parent or image_frame != full_frame:
-                    raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: raster render frames differ")
-                if int(image_frame.rotation) == 0:
-                    supplemental = detect_unchanged_terminal_band_segments(
-                        image_png, full_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                        registration_scale=(self.raster_opening_registration_scale(
-                            published.revision.revision_id, page_id) or (1.0, 1.0)),
+                # Source nomination is limited to the complete independently
+                # proven raster-opening support inventory. Check that inventory
+                # BEFORE expensive 300-DPI renders & unchanged-band detection:
+                # pages with zero proven flanks/jambs cannot emit any
+                # supplemental segment, so skipping dead 300-DPI renders is
+                # 100% bit-exact with zero semantic or receipt difference.
+                if include_unmeasured_ink_closed_flanks_shadow:
+                    flank_boxes, partial_source_jambs, individual_ink_positive_boxes = self._proven_raster_opening_flank_boxes(
+                        published, page_id,
+                        include_unmeasured_ink_closed_flanks_shadow=True,
+                        include_original_partial_jamb_receipts_shadow=True,
                     )
-                    supplemental = tuple(s for s in supplemental
-                        if _axis_aligned_geometry_fully_covered_by_rect_union(s.geometry_pt, image_regions)
-                        and not band_segment_already_observed(s, segments,
-                            dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI, ordinary_dpi=RASTER_RENDER_DPI))
-                    # Source nomination is limited to the complete independently
-                    # proven raster-opening support inventory. Unrelated raster
-                    # table/furniture bands must not perturb the ordinary W4
-                    # graph simply because they contain solid paint.
-                    if include_unmeasured_ink_closed_flanks_shadow:
-                        flank_boxes, partial_source_jambs, individual_ink_positive_boxes = self._proven_raster_opening_flank_boxes(
-                            published, page_id,
-                            include_unmeasured_ink_closed_flanks_shadow=True,
-                            include_original_partial_jamb_receipts_shadow=True,
-                        )
-                    else:
-                        flank_boxes = self._proven_raster_opening_flank_boxes(
-                            published, page_id,
-                        )
-                        partial_source_jambs = ()
-                        individual_ink_positive_boxes = ()
-                    supplemental = tuple(s for s in supplemental
-                        if any(_unchanged_segment_inside_flank(s, box,
-                            dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI) for box in flank_boxes))
-                    # Keep the existing normal two-ended source band family
-                    # byte-for-byte and index-for-index. Short opening flanks
-                    # have ONE original jamb end, so the ordinary detector's
-                    # second-end closure cannot legitimately nominate them.
-                    extra_one_ended = ()
-                    new_band_duplicate = (
-                        band_segment_exactly_observed
-                        if self._exact_g17_nomination_shadow
-                        else band_segment_already_observed
+                else:
+                    flank_boxes = self._proven_raster_opening_flank_boxes(
+                        published, page_id,
                     )
-                    if include_unmeasured_ink_closed_flanks_shadow:
-                        # IMPORTANT: a compact original HHWW label (e.g.
-                        # 2127 STACKER = 2100 x 2700mm) may authoritatively
-                        # provide nominal dimensions while the actual WALL
-                        # flanks still have just ONE original G17 jamb end.
-                        # Earlier shadow subtracted every already-dimensioned
-                        # opening, making those exact physical openings
-                        # impossible to recover with the new source detector.
-                        # Keep both previously figured source flanks and each
-                        # independently G17-ink-positive unmeasured flank in
-                        # the opt-in SOURCE inventory. Full original RGB and
-                        # local end/role proof remain mandatory below.
-                        source_owned_new_boxes = tuple(sorted(
-                            set(flank_boxes) | set(individual_ink_positive_boxes)
-                        ))
-                        if source_owned_new_boxes:
-                            nominal = detect_original_one_ended_ink_band_segments(
-                                image_png, full_png,
-                                dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                                source_closed_flank_boxes=source_owned_new_boxes,
+                    partial_source_jambs = ()
+                    individual_ink_positive_boxes = ()
+                if flank_boxes or individual_ink_positive_boxes or partial_source_jambs:
+                    render_args = dict(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=snapshot.snapshot_id, page_id=page_id,
+                        dpi=float(RASTER_OPENING_PRIMITIVE_RENDER_DPI),
+                        include_native_frame=True,
+                    )
+                    image_png, image_parent, image_frame = self._producer.render_native_page_png(
+                        **render_args, images_only=True,
+                    )
+                    full_png, full_parent, full_frame = self._producer.render_native_page_png(**render_args)
+                    if image_parent != full_parent or image_frame != full_frame:
+                        raise RuntimeError(f"{PRODUCER_INTEGRITY_FAILURE}: raster render frames differ")
+                    if int(image_frame.rotation) == 0:
+                        if flank_boxes:
+                            supplemental = detect_unchanged_terminal_band_segments(
+                                image_png, full_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                registration_scale=(self.raster_opening_registration_scale(
+                                    published.revision.revision_id, page_id) or (1.0, 1.0)),
                             )
-                            extra_one_ended = tuple(seg for seg in nominal
+                            supplemental = tuple(s for s in supplemental
+                                if _axis_aligned_geometry_fully_covered_by_rect_union(s.geometry_pt, image_regions)
+                                and not band_segment_already_observed(s, segments,
+                                    dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI, ordinary_dpi=RASTER_RENDER_DPI)
+                                and any(_unchanged_segment_inside_flank(s, box,
+                                    dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI) for box in flank_boxes))
+                        else:
+                            supplemental = ()
+                        # Keep the existing normal two-ended source band family
+                        # byte-for-byte and index-for-index. Short opening flanks
+                        # have ONE original jamb end, so the ordinary detector's
+                        # second-end closure cannot legitimately nominate them.
+                        extra_one_ended = ()
+                        new_band_duplicate = (
+                            band_segment_exactly_observed
+                            if self._exact_g17_nomination_shadow
+                            else band_segment_already_observed
+                        )
+                        if include_unmeasured_ink_closed_flanks_shadow:
+                            source_owned_new_boxes = tuple(sorted(
+                                set(flank_boxes) | set(individual_ink_positive_boxes)
+                            ))
+                            if source_owned_new_boxes:
+                                nominal = detect_original_one_ended_ink_band_segments(
+                                    image_png, full_png,
+                                    dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                    source_closed_flank_boxes=source_owned_new_boxes,
+                                )
+                                extra_one_ended = tuple(seg for seg in nominal
+                                    if _axis_aligned_geometry_fully_covered_by_rect_union(
+                                        seg.geometry_pt, image_regions)
+                                    and not new_band_duplicate(
+                                        seg,segments,dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                        ordinary_dpi=RASTER_RENDER_DPI)
+                                    and not band_segment_already_observed(
+                                        seg,supplemental,
+                                        dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                        ordinary_dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI)
+                                    and any(_unchanged_segment_inside_flank(
+                                        seg, box, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI
+                                    ) for box in source_owned_new_boxes))
+                        image_png_sha = hashlib.sha256(image_png).hexdigest()
+                        full_png_sha = hashlib.sha256(full_png).hexdigest()
+                        families.append((supplemental, image_png_sha,
+                            RASTER_OPENING_PRIMITIVE_RENDER_DPI, UNCHANGED_BAND_IDENTITY_VERSION,
+                            UNCHANGED_BAND_DETECTOR_VERSION, full_png_sha))
+                        if extra_one_ended:
+                            families.append((extra_one_ended, image_png_sha,
+                                RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                (ORIGINAL_G17_EXACT_ONE_END_IDENTITY_VERSION
+                                 if self._exact_g17_nomination_shadow
+                                 else ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION),
+                                ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION,
+                                full_png_sha))
+                        if partial_source_jambs:
+                            partial = detect_original_jamb_anchored_ink_segments(
+                                image_png, full_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                original_source_jambs=partial_source_jambs,
+                            )
+                            partial = tuple(seg for seg in partial
                                 if _axis_aligned_geometry_fully_covered_by_rect_union(
                                     seg.geometry_pt, image_regions)
                                 and not new_band_duplicate(
-                                    seg,segments,dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                                    ordinary_dpi=RASTER_RENDER_DPI)
-                                # Historical measured two-ended 300DPI bands
-                                # are already producer-issued source. Never
-                                # create a SECOND W2 identity for the same
-                                # original wall just because this alternate
-                                # G17 detector can see its paint as well.
-                                and not band_segment_already_observed(
-                                    seg,supplemental,
+                                    seg, segments,
                                     dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                                    ordinary_dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI)
-                                and any(_unchanged_segment_inside_flank(
-                                    seg, box, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI
-                                ) for box in source_owned_new_boxes))
-                    families.append((supplemental, hashlib.sha256(image_png).hexdigest(),
-                        RASTER_OPENING_PRIMITIVE_RENDER_DPI, UNCHANGED_BAND_IDENTITY_VERSION,
-                        UNCHANGED_BAND_DETECTOR_VERSION, hashlib.sha256(full_png).hexdigest()))
-                    if extra_one_ended:
-                        # Separate producer-issued family: do not mislabel an
-                        # observed ONE-ended original jamb as a two-end band.
-                        # All previous source identity indices stay unchanged.
-                        families.append((extra_one_ended, hashlib.sha256(image_png).hexdigest(),
-                            RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                            (ORIGINAL_G17_EXACT_ONE_END_IDENTITY_VERSION
-                             if self._exact_g17_nomination_shadow
-                             else ORIGINAL_G17_ONE_END_SOURCE_IDENTITY_VERSION),
-                            ORIGINAL_G17_ONE_END_SOURCE_DETECTOR_VERSION,
-                            hashlib.sha256(full_png).hexdigest()))
-                    if partial_source_jambs:
-                        # Independent original G17 endcaps; a changed pixel
-                        # stops the run. Never bridge the unpainted interval.
-                        partial = detect_original_jamb_anchored_ink_segments(
-                            image_png, full_png, dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                            original_source_jambs=partial_source_jambs,
-                        )
-                        partial = tuple(seg for seg in partial
-                            if _axis_aligned_geometry_fully_covered_by_rect_union(
-                                seg.geometry_pt, image_regions)
-                            and not new_band_duplicate(
-                                seg, segments,
-                                dpi=RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                                ordinary_dpi=RASTER_RENDER_DPI))
-                        if partial:
-                            families.append((
-                                partial, hashlib.sha256(image_png).hexdigest(),
-                                RASTER_OPENING_PRIMITIVE_RENDER_DPI,
-                                (ORIGINAL_G17_EXACT_PARTIAL_IDENTITY_VERSION
-                                 if self._exact_g17_nomination_shadow
-                                 else ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION),
-                                ORIGINAL_G17_JAMB_PARTIAL_DETECTOR_VERSION,
-                                hashlib.sha256(full_png).hexdigest(),
-                            ))
+                                    ordinary_dpi=RASTER_RENDER_DPI))
+                            if partial:
+                                families.append((
+                                    partial, image_png_sha,
+                                    RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+                                    (ORIGINAL_G17_EXACT_PARTIAL_IDENTITY_VERSION
+                                     if self._exact_g17_nomination_shadow
+                                     else ORIGINAL_G17_JAMB_PARTIAL_IDENTITY_VERSION),
+                                    ORIGINAL_G17_JAMB_PARTIAL_DETECTOR_VERSION,
+                                    full_png_sha,
+                                ))
 
             segment_specs: list[dict[str, object]] = []
             visible_specs: list[dict[str, object]] = []
