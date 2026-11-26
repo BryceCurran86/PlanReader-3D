@@ -2,8 +2,8 @@
  * These settings NEVER alter metres, geometry, source authority or quantities.
  * Ground/sky are deliberately marked as presentation context, not source BIM.
  */
-export type LightingMood = "daylight" | "studio" | "dusk";
-export type RenderQuality = "balanced" | "high";
+export type LightingMood = "daylight" | "studio" | "dusk" | "night";
+export type RenderQuality = "performance" | "balanced" | "high";
 export interface VisualPreset {
   label: string;
   background: number;
@@ -29,6 +29,12 @@ export const VISUAL_PRESETS: Readonly<Record<LightingMood, Readonly<VisualPreset
     ambientIntensity: 2.3, sunColor: 0xf7fbff, sunIntensity: 2.0,
     sunPosition: [-8, 17, 11], exposure: 0.92, materialRoughness: 0.83,
   },
+  night: {
+    label: "Night · local fixture preview (illustrative)",
+    background: 0x121b2c, ambientSky: 0x8d9ac2, ambientGround: 0x45424d,
+    ambientIntensity: .24, sunColor: 0xb5c9ff, sunIntensity: .08,
+    sunPosition: [16, 12, 5], exposure: 1.0, materialRoughness: .88,
+  },
   dusk: {
     label: "Warm evening light (illustrative)",
     background: 0x354358, ambientSky: 0x849ac1, ambientGround: 0x574d48,
@@ -41,14 +47,14 @@ export function isLightingMood(v: unknown): v is LightingMood {
   return typeof v === "string" && Object.hasOwn(VISUAL_PRESETS, v);
 }
 export function isRenderQuality(v: unknown): v is RenderQuality {
-  return v === "balanced" || v === "high";
+  return v === "performance" || v === "balanced" || v === "high";
 }
 export function maxRenderPixelRatio(quality: RenderQuality, isXR: boolean): number {
   // Headset compositor controls its own size; don't add an expensive desktop multiplier.
-  return isXR ? 1 : quality === "high" ? 2 : 1.5;
+  return isXR ? 1 : quality === "high" ? 2 : quality==="performance"?1:1.5;
 }
 export function shadowMapSize(quality: RenderQuality): number {
-  return quality === "high" ? 2048 : 1024;
+  return quality === "high" ? 2048 : quality==="performance"?512:1024;
 }
 /** Only authentic existing wall faces with stated heights may be lit as surfaces. */
 export function mayRenderWallFace(
@@ -56,4 +62,8 @@ export function mayRenderWallFace(
 ): boolean {
   return kind === "wallFace" && typeof heightM === "number" &&
     Number.isFinite(heightM) && heightM > 0 && heightM < 1000;
+}
+
+export function realismBudget(quality:RenderQuality,xr:boolean){
+ return {detail:quality!=="performance",landscape:quality!=="performance",shadows:quality!=="performance"&&(!xr||quality==="high"),shadowRefreshMs:xr?1000:100,environmentIntensity:quality==="performance"?.45:quality==="high"?.85:.65};
 }

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_source_closed_run_export import (
-    SealedSourceClosedRun, sealed_source_closed_run_from_dict,
+    SealedSourceClosedRun, _build_sealed_run, sealed_source_closed_run_from_dict,
 )
 from tools.gpt3_original_source_preflight import _stable_original_digest
 from tools.gpt3_safe_original_report_output import (
@@ -216,33 +216,103 @@ def build_signed_v1_physical_drift_report(
     return report
 
 
+def _compare_family_fingerprint_with_witnesses(
+    *, candidate_path: Path, candidate_customer_path: Path,
+    family: str, baseline_fingerprint: str,
+) -> tuple[dict, tuple[Path, ...], tuple[tuple[str, tuple[int, ...]], ...]]:
+    """Compare a verified subset to an archived V1 seal for that family."""
+    paths = (candidate_path, candidate_customer_path)
+    witnesses = tuple(_source_witness(path) for path in paths)
+    candidate = sealed_source_closed_run_from_dict(_json_object(candidate_path))
+    customers = _json_customer_rows(candidate_customer_path, allow_manual=True)
+    verified = verify_sealed_customer_output(candidate, customers)
+    quantities = tuple(row for row in candidate.quantities if row.family == family)
+    candidate_fingerprint = (
+        _build_sealed_run(quantities, project_id=candidate.project_id).fingerprint
+        if quantities else None
+    )
+    matches = candidate_fingerprint == baseline_fingerprint
+    if not quantities:
+        status = "FAMILY_NOT_PRESENT"
+    elif matches:
+        status = "BYTE_IDENTICAL_FAMILY_SEAL"
+    else:
+        status = "DIAGNOSTIC_DRIFT"
+    _assert_source_witnesses(paths, witnesses)
+    report = {
+        "schema_version": "gpt3_signed_v1_family_retention.v1",
+        "publication_status": "UNPUBLISHED",
+        "source_authenticated": False,
+        "official_v2_accuracy": None,
+        "project_id": candidate.project_id,
+        "family": family,
+        "comparison_status": status,
+        "baseline_family_fingerprint": baseline_fingerprint,
+        "candidate_family_fingerprint": candidate_fingerprint,
+        "baseline_family_fingerprint_matches": matches,
+        "candidate_family_quantity_ids": [row.quantity_id for row in quantities],
+        "candidate_verified_customer_count": verified.customer_row_count,
+        "baseline_customer_rows_compared": False,
+        "source_receipt_file_sha256s": {"candidate": witnesses[0][0]},
+        "customer_receipt_file_sha256s": {"candidate": witnesses[1][0]},
+    }
+    return report, paths, witnesses
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline-sealed", type=Path, required=True)
+    baseline = parser.add_mutually_exclusive_group(required=True)
+    baseline.add_argument("--baseline-sealed", type=Path)
+    baseline.add_argument(
+        "--baseline-family-fingerprint",
+        help="Archived V1 fingerprint for a seal containing only the specified family",
+    )
+    parser.add_argument("--family", help="Exact signed family for fingerprint comparison")
     parser.add_argument("--candidate-sealed", type=Path, required=True)
     parser.add_argument("--baseline-customer", type=Path)
     parser.add_argument("--candidate-customer", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
-    if (args.baseline_customer is None) != (args.candidate_customer is None):
-        parser.error("both customer epochs must be provided together")
+    family_comparison = args.baseline_family_fingerprint is not None
+    if family_comparison:
+        digest = args.baseline_family_fingerprint
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            parser.error("--baseline-family-fingerprint must be a lowercase SHA-256 digest")
+        if not args.family or args.family.strip() != args.family:
+            parser.error("--family must name one exact signed family")
+        if args.candidate_customer is None or args.baseline_customer is not None:
+            parser.error("fingerprint comparison requires only --candidate-customer")
+    else:
+        if args.family is not None:
+            parser.error("--family requires --baseline-family-fingerprint")
+        if (args.baseline_customer is None) != (args.candidate_customer is None):
+            parser.error("both customer epochs must be provided together")
     protected = (
         FROZEN_ROOT, args.baseline_sealed, args.candidate_sealed,
         args.baseline_customer, args.candidate_customer,
     )
     preflight_new_diagnostic(args.output, protected_roots=protected)
-    report, paths, witnesses = _build_signed_v1_physical_drift_with_witnesses(
-        baseline_path=args.baseline_sealed, candidate_path=args.candidate_sealed,
-        baseline_customer_path=args.baseline_customer,
-        candidate_customer_path=args.candidate_customer,
-    )
+    if family_comparison:
+        report, paths, witnesses = _compare_family_fingerprint_with_witnesses(
+            candidate_path=args.candidate_sealed,
+            candidate_customer_path=args.candidate_customer,
+            family=args.family,
+            baseline_fingerprint=args.baseline_family_fingerprint,
+        )
+    else:
+        report, paths, witnesses = _build_signed_v1_physical_drift_with_witnesses(
+            baseline_path=args.baseline_sealed,
+            candidate_path=args.candidate_sealed,
+            baseline_customer_path=args.baseline_customer,
+            candidate_customer_path=args.candidate_customer,
+        )
     write_new_diagnostic(
         args.output,
         json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
         protected_roots=protected,
         verify_inputs=lambda: _assert_source_witnesses(paths, witnesses),
     )
-    return 0
+    return int(family_comparison and not report["baseline_family_fingerprint_matches"])
 
 
 if __name__ == "__main__":

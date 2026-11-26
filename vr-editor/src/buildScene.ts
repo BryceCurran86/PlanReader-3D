@@ -2,12 +2,27 @@ import * as THREE from "three";
 import {
   activeStart, aimOpening, buildGuide, MAX_DRAFT_WALLS, nearWall,
   openingFits, planLength, projectOnWall, snappedPoint, snapDraftWallPoint, validWallLength,
-  draftShape, validCeiling, validEditedWall,
+  draftShape, validCeiling, validEditedWall, followDraftCeilingEdges,
 } from "./buildPlacement.ts";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallSnapOptions, WallVisual } from "./buildPlacement.ts";
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
+import {localDoorMotion} from "./localDoorMotion.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
+import { connectedWallEdit } from "./connectedWallEdit.ts";
 import type { MenuLayout } from "./catalogueMenu";
+import {wallAssembly,profileDetails} from "./wallProfiles.ts";
+import {chooseWallAim} from "./wallMagnet.ts";
+import type {WallTextureLibrary} from "./wallTextures.ts";
+import {menuButtonAt} from "./toolWheelInput.ts";
+import {nominalFrameLayout} from "./constructionDetailLayout.ts";
+import {makeLiningVisual} from "./constructionLiningVisual.ts";
+import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameVisual.ts";
+import {nominalTrimMesh} from "./constructionTrimVisual.ts";
+import type {WallCornerJoins} from "./wallCornerJoin.ts";
+import {createPhysicalToolTray} from "./physicalToolTray.ts";
+import {openingFrameVisual,nominalDoorSlab} from "./openingFinishVisual.ts";
+import {physicalUV} from "./materialDetail.ts";
+import type {MaterialDetailLibrary} from "./materialDetail.ts";
 
 function atOffset(wall: WallVisual, offset: number, height: number): THREE.Vector3 {
   const t = offset / planLength(wall.start, wall.end);
@@ -24,25 +39,97 @@ function openingOutline(wall: WallVisual, opening: WallAdditionOpening) {
     atOffset(wall, b, top), atOffset(wall, b, bottom)];
 }
 
-export function displayWallDraft(wall: WallVisual) {
+/** Visual-only nominal timber members, not an engineered or priced assembly. */
+export function illustrativeTimberFrame(wall: WallVisual) {
   const group = new THREE.Group();
-  const faces: number[] = [];
+  group.userData.illustrativeFraming = true;
+  group.visible = false;
+  const length = planLength(wall.start, wall.end);
+  if (!Number.isFinite(length) || length < .05 || length > 200 || !Number.isFinite(wall.heightM) || wall.heightM < .1 || wall.heightM > 20) return group;
+  const openings = (wall.openings ?? []).filter(o => openingFits(wall,o));
+  const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
+  if(profile.core==="masonry")return group;
+  const depth = Math.min(profile.frameMm,assembly.thicknessMm)/1000;
+  const angle = -Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
+  const holes=openings.map(o=>({x0:o.offsetM,x1:o.offsetM+o.widthM,y0:o.sillHeightM,y1:o.sillHeightM+o.heightM}));
+  let members:ReturnType<typeof nominalFrameLayout>;
+  try{members=nominalFrameLayout(length,wall.heightM,holes);}catch{return group;}
+  // One instanced draw call per wall, rather than a geometry and material per stud.
+  if(members.length){
+    const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:profile.core==="steel"?0x9aa8ad:0xc99c65,roughness:.88}),members.length);
+    const transform=new THREE.Object3D();
+    members.forEach((m,i)=>{
+      transform.position.copy(atOffset(wall,(m.x0+m.x1)/2,(m.y0+m.y1)/2));
+      transform.rotation.y=angle;
+      transform.scale.set(m.x1-m.x0,m.y1-m.y0,depth);
+      transform.updateMatrix();
+      mesh.setMatrixAt(i,transform.matrix);
+    });
+    mesh.userData.nominalFrameRoles=members.map(m=>m.role);
+    mesh.instanceMatrix.needsUpdate=true;
+    mesh.computeBoundingBox();mesh.computeBoundingSphere();
+    mesh.userData.illustrativeFraming=true;
+    group.add(mesh);
+  }
+  return group;
+}
+
+export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,joins:WallCornerJoins={},details?:MaterialDetailLibrary) {
+  const group = new THREE.Group();
+  const faces: number[] = [],colors:number[]=[],mountFaces:number[]=[],exteriorFaces:number[]=[],exteriorUV:number[]=[],leftFinish:number[]=[],rightFinish:number[]=[];
+  const texture=textures?.get(wallAssembly(wall.assembly).profile);
+  const assembly=wallAssembly(wall.assembly),profile=profileDetails(assembly);
+  const length=planLength(wall.start,wall.end);
+  if(!Number.isFinite(length)||length<.001)return group;
+  const normal=new THREE.Vector3(-(wall.end[1]-wall.start[1])/length,0,(wall.end[0]-wall.start[0])/length);
+  const half=assembly.thicknessMm/2000;
+  const exterior=new THREE.Color(profile.outerColor),interior=new THREE.Color(0xeeeae1);
+  const left=assembly.exteriorSide==="left"?exterior:interior,rightColor=assembly.exteriorSide==="right"?exterior:interior;
   function panel(points: THREE.Vector3[], vertices: number[]) {
     for (const index of [0, 1, 2, 0, 2, 3]) vertices.push(...points[index].toArray());
   }
   function surface(from: number, to: number, bottom: number, top: number) {
     if (to <= from || top <= bottom) return;
-    panel([atOffset(wall, from, bottom), atOffset(wall, from, top),
-      atOffset(wall, to, top), atOffset(wall, to, bottom)], faces);
+    const p=[atOffset(wall,from,bottom),atOffset(wall,from,top),atOffset(wall,to,top),atOffset(wall,to,bottom)];
+    panel(p,mountFaces);
+    const startJoin=Math.abs(from)<1e-7?joins.start:undefined,endJoin=Math.abs(to-length)<1e-7?joins.end:undefined;
+    const facePoint=(v:THREE.Vector3,i:number,side:"left"|"right")=>{
+      const join=i<2?startJoin:endJoin,point=join?.[side];
+      return point?new THREE.Vector3(point[0],v.y,point[1]):v.clone().addScaledVector(normal,side==="left"?half:-half);
+    };
+    const a=p.map((v,i)=>facePoint(v,i,"left")),b=p.map((v,i)=>facePoint(v,i,"right"));
+    function face(points:THREE.Vector3[],color:THREE.Color){panel(points,faces);for(let k=0;k<6;k++)colors.push(color.r,color.g,color.b);}
+    face([...a].reverse(),left);face(b,rightColor);
+    panel([...a].reverse(),leftFinish);panel(b,rightFinish);
+    if(texture&&profile.role==="external"){
+      const side=assembly.exteriorSide==="left"?1:-1;
+      const points=(side===1?a:b).map(v=>v.clone().addScaledVector(normal,side*.001));
+      const ordered=side===1?[...points].reverse():points;
+      panel(ordered,exteriorFaces);
+      for(const index of [0,1,2,0,2,3]){
+        const v=ordered[index],along=(v.x-wall.start[0])*(wall.end[0]-wall.start[0])/length+(v.z-wall.start[1])*(wall.end[1]-wall.start[1])/length;
+        exteriorUV.push(along/texture.repeat[0],v.y/texture.repeat[1]);
+      }
+    }
+    for(let i=0;i<4;i++){
+      // The adjacent wall owns the matching miter plane: omit buried end
+      // faces instead of overlapping them. Unjoined ends retain a full cap.
+      if((i===0&&startJoin)||(i===2&&endJoin))continue;
+      const j=(i+1)%4;face([a[j],a[i],b[i],b[j]],interior);
+    }
+
   }
   function addMesh(vertices: number[], color: number, opacity: number, wallFace = false, doorId?: string) {
     if (!vertices.length) return;
     const geometry = new THREE.BufferGeometry().setAttribute("position",
       new THREE.Float32BufferAttribute(vertices, 3));
+    if(wallFace)geometry.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
     geometry.computeVertexNormals();
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-      color, side: THREE.DoubleSide, transparent: true, opacity, depthWrite: false,
+    if(wallFace&&details)physicalUV(geometry,.4,.4,[(wall.end[0]-wall.start[0])/length,(wall.end[1]-wall.start[1])/length]);
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+      color:wallFace?0xffffff:color,vertexColors:wallFace, side: THREE.DoubleSide, transparent: opacity < 1, opacity, depthWrite: opacity === 1, roughness: 0.82,
     }));
+    if(wallFace&&details){const material=mesh.material as THREE.MeshStandardMaterial;material.bumpMap=details.get("plaster").bumpMap;material.bumpScale=.0012;material.roughness=.86;mesh.receiveShadow=true;mesh.castShadow=true;}
     mesh.userData.catalogueWallFace = wallFace;
     if (doorId) mesh.userData.catalogueDoorLeaf = doorId;
     group.add(mesh);
@@ -56,24 +143,89 @@ export function displayWallDraft(wall: WallVisual) {
     right = opening.offsetM + opening.widthM;
     surface(opening.offsetM, right, 0, opening.sillHeightM);
     surface(opening.offsetM, right, opening.sillHeightM + opening.heightM, wall.heightM);
+    const frame=openingFrameVisual(wall,opening);if(frame)group.add(frame);
     const points = openingOutline(wall, opening);
-    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),
-      new THREE.LineBasicMaterial({ color: 0xf5d9ad })));
+    const openingGuide=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({ color: 0xf5d9ad }));openingGuide.userData.draftGuide=true;group.add(openingGuide);
+    if(opening.openingKind==="window"){
+      const glass:number[]=[];panel(points,glass);addMesh(glass,0xb5d0d9,.42);
+      const pane=group.children[group.children.length-1];pane.userData.catalogueWindow=true;
+    }
     if (opening.openingKind === "door") {
       const leaf: number[] = [];
       panel(points, leaf);
-      addMesh(leaf, 0xe9bb75, 0.55, false, opening.openingId);
+      addMesh(leaf, 0xb68b60, 1, false, opening.openingId);
+      const door=group.children[group.children.length-1];
+      const slab=nominalDoorSlab(wall,opening);
+      if(slab&&door instanceof THREE.Mesh){
+        slab.updateMatrix();door.geometry.dispose();door.geometry=slab.geometry.applyMatrix4(slab.matrix);
+        (Array.isArray(slab.material)?slab.material:[slab.material]).forEach(m=>m.dispose());door.userData.nominalDoorSlab=true;
+      }
+      door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
+      door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
+      if(opening.doorMechanism!=="garage"&&opening.widthM>=.4&&opening.heightM>=1.2){
+        const colours={chrome:0xc4ced4,"matte-black":0x292c2e,"brushed-brass":0xb99b63,"brushed-nickel":0xaaa9a4};
+        const material=new THREE.MeshStandardMaterial({color:colours[opening.doorHardware??"chrome"],metalness:opening.doorHardware==="matte-black"?.12:.7,roughness:.36});
+        const angle=-Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
+        for(const side of [-1,1]){
+          const position=atOffset(wall,opening.offsetM+opening.widthM-.10,opening.sillHeightM+Math.min(1.02,opening.heightM*.6)).addScaledVector(normal,side*.04);
+          const plate=new THREE.Mesh(new THREE.BoxGeometry(.035,.095,.018),material);
+          plate.position.copy(position);plate.rotation.y=angle;door.add(plate);
+          const lever=new THREE.Mesh(new THREE.BoxGeometry(.105,.024,.035),material);
+          lever.position.copy(position).addScaledVector(normal,side*.025);lever.rotation.y=angle;door.add(lever);
+        }
+      }
     }
   }
   surface(right, planLength(wall.start, wall.end), 0, wall.heightM);
-  addMesh(faces, 0xa589e4, 0.48, true);
+  addMesh(faces, 0xeeeae1, 1, true);
+  const wallFace=group.children.find(c=>c.userData.catalogueWallFace);
+  if(wallFace instanceof THREE.Mesh){const edges=new THREE.LineSegments(new THREE.EdgesGeometry(wallFace.geometry,25),new THREE.LineBasicMaterial({color:0x85dce8,transparent:true,opacity:.85}));edges.userData.selectionEdge=true;edges.visible=false;group.add(edges);}
+  if(texture&&exteriorFaces.length){
+    const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(exteriorFaces,3)).setAttribute("uv",new THREE.Float32BufferAttribute(exteriorUV,2));
+    g.computeVertexNormals();
+    const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:texture.texture,color:profile.outerColor,roughness:.9,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+    mesh.userData.exteriorTexture=true;group.add(mesh);
+  }
+  // Centre-plane witness retains the existing catalogue anchor convention.
+  if(mountFaces.length&&profile.core!=="masonry"){
+    const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
+    g.computeVertexNormals();
+    const insulation=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xd8bb6d,side:THREE.DoubleSide,roughness:1,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1}));
+    insulation.userData.illustrativeInsulation=true;insulation.visible=false;group.add(insulation);
+  }
+  if(mountFaces.length){
+    const mountGeometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(mountFaces,3));
+    mountGeometry.computeVertexNormals();
+    const mount=new THREE.Mesh(mountGeometry,new THREE.MeshBasicMaterial({side:THREE.DoubleSide,visible:false}));
+    mount.userData.catalogueMountFace=true;
+    group.add(mount);
+    // Finish hosts follow the actual solid-face perimeter and opening cuts,
+    // including the miter. The original centre-plane remains the pick anchor.
+    for(const [side,vertices] of [["left",leftFinish],["right",rightFinish]] as const){
+      const geometry=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(vertices,3));
+      geometry.computeVertexNormals();
+      const face=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({visible:false,side:THREE.DoubleSide}));
+      face.userData.draftFinishFace=side;group.add(face);
+    }
+  }
+  const trim=nominalTrimMesh(wall);if(trim)group.add(trim);
+  group.add(illustrativeTimberFrame(wall));
+  for(const accessory of nominalWallConnections(wall).children.slice())group.add(accessory);
+  if(profile.core!=="masonry"){
+    const holes=openings.map(o=>({x0:o.offsetM,x1:o.offsetM+o.widthM,y0:o.sillHeightM,y1:o.sillHeightM+o.heightM}));
+    const sides=profile.role==="internal"?[1,-1]:[assembly.exteriorSide==="left"?-1:1];
+    for(const side of sides){
+      const lining=makeLiningVisual(length,wall.heightM,holes,(x,y,offset)=>atOffset(wall,x,y).addScaledVector(normal,side*(half+offset)));
+      if(lining)group.add(lining);
+    }
+  }
   // A floor-level guide keeps draft walls visible and selectable from Top view.
   const outline = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
     atOffset(wall, 0, 0.018), atOffset(wall, 0, wall.heightM),
     atOffset(wall, planLength(wall.start, wall.end), wall.heightM),
     atOffset(wall, planLength(wall.start, wall.end), 0.018), atOffset(wall, 0, 0.018),
   ]), new THREE.LineBasicMaterial({ color: 0xa589e4 }));
-  group.add(outline);
+  outline.userData.draftGuide=true;group.add(outline);
   return group;
 }
 
@@ -92,8 +244,12 @@ export function displayCeilingDraft(draft: CeilingDraft) {
   const geometry = new THREE.BufferGeometry().setFromPoints([corners[0], corners[1], corners[2],
     corners[0], corners[2], corners[3]]);
   geometry.computeVertexNormals();
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0x9589df,
-    side: THREE.DoubleSide, transparent: true, opacity: 0.35, depthWrite: false }));
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0xf5f2eb,
+    side: THREE.DoubleSide, roughness: 0.88 }));
+  const left=Math.min(draft.start[0],draft.end[0]),front=Math.min(draft.start[1],draft.end[1]);
+  const lining=makeLiningVisual(Math.abs(draft.end[0]-draft.start[0]),Math.abs(draft.end[1]-draft.start[1]),[],(x,y,offset)=>new THREE.Vector3(left+x,draft.heightM-offset,front+y));
+  if(lining)mesh.add(lining);
+  const framing=nominalCeilingFraming(draft);if(framing)mesh.add(framing);
   return mesh;
 }
 
@@ -103,7 +259,7 @@ type DragOpening = {kind:"opening";mode:"opening-move";from:PlanPoint;
   previous:PlacedWall;openingId:string};
 export type DraftGesture = (DragDraw | (DragEdit & (
   { kind: "wall"; previous: PlacedWall } | { kind: "ceiling"; previous: CeilingDraft }
-)) | DragOpening) & { levelId: string; fromController?: PlanPoint; precisionSource?:boolean };
+)) | DragOpening) & { levelId: string; fromController?: PlanPoint; precisionSource?:boolean; direct?:boolean };
 
 function planPoint(ray: THREE.Ray) {
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
@@ -133,7 +289,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   // Recognise that direct wall contact as a valid draft manipulation target.
   const directWall = state.tool === "move" || state.tool === "stretch" ||
     state.tool === "opening-move"
-    ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null) : null;
+    ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null,options) : null;
   const from = planPoint(ray) ?? (directWall && snappedPoint(directWall.point));
   if (!from) return null;
   const mode = state.tool;
@@ -146,7 +302,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   if (mode !== "move" && mode !== "stretch" && mode !== "opening-move") return null;
   const floor = new THREE.Vector3(from[0], 0, from[1]);
   if(mode==="opening-move"){
-    const host=openingHost(state.walls.filter(wall=>wall.levelId===levelId),ray,floor);
+    const host=openingHost(state.walls.filter(wall=>wall.levelId===levelId),ray,floor,options);
     if(!host)return null;
     const projection=projectOnWall(host.wall,host.point);
     const opening=host.wall.openings.filter(item=>
@@ -156,7 +312,7 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
     return opening?{kind:"opening",mode,from,levelId,previous:host.wall,
       openingId:opening.openingId}:null;
   }
-  const wall = openingHost(state.walls.filter(draft => draft.levelId === levelId), ray, floor);
+  const wall = openingHost(state.walls.filter(draft => draft.levelId === levelId), ray, floor,options);
   const ceiling = ceilingHost(state.ceilings, ray, levelId);
   const nearestWall = wall && (mode === "move" || Math.min(
     planLength(wall.wall.start, wall.point), planLength(wall.wall.end, wall.point)) < .4);
@@ -177,8 +333,21 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   return null;
 }
 
+export type DraftPickKind="auto"|"walls"|"ceilings";
+/** Inspect-mode drag: use the existing validated move gesture, not a second
+ * geometry editing path. A top-view wall hit wins over a covering ceiling. */
+export function directDraftGesture(state:BuildState,levelId:string|null,ray:THREE.Ray,
+ kind:DraftPickKind,top:boolean,options:WallSnapOptions={}):DraftGesture|null{
+ const move={...state,tool:"move" as const};
+ const wall=()=>beginDraftGesture({...move,ceilings:[]},levelId,ray,options);
+ const ceiling=()=>beginDraftGesture({...move,walls:[]},levelId,ray,options);
+ const gesture=kind==="walls"||top&&kind==="auto"?wall():kind==="ceilings"?ceiling():
+   beginDraftGesture(move,levelId,ray,options);
+ return gesture?{...gesture,direct:true}:null;
+}
+
 export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray,
-  state?: BuildState, controllerPosition?: PlanPoint, options: WallSnapOptions = {}) {
+  state?: BuildState, controllerPosition?: PlanPoint, options: WallSnapOptions = {}, connected=false) {
   // With Quest controllers, manipulation should follow the hand in X/Z, not
   // require aiming at an imaginary ground plane throughout the drag.
   const current = "previous" in gesture && gesture.fromController && controllerPosition
@@ -231,10 +400,11 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
       ? { ...previous, start: target, end: anchor }
       : draftShape(previous, mode, from, mode === "stretch" ? target : to, anchor);
     if (!shape) return null;
-    valid = validEditedWall(shape);
+    const connectedWalls=connected&&state?connectedWallEdit(state.walls,previous,shape,true):null;
+    valid = validEditedWall(shape)&&(!connected||(connectedWalls!==null&&connectedWalls.every(validEditedWall)&&state!==undefined&&followDraftCeilingEdges(state.ceilings,previous,shape)!==null));
     line = [new THREE.Vector3(shape.start[0], shape.heightM, shape.start[1]),
       new THREE.Vector3(shape.end[0], shape.heightM, shape.end[1])];
-    action = { kind: "adjust", previous, wall: shape };
+    action = { kind: "adjust", previous, wall: shape, ...(connected ? {connected:true,allowTJunctions:true} : {}) };
   } else {
     const { previous, mode, from, anchor } = gesture;
     const corner: PlanPoint = [anchor[0] === Math.min(previous.start[0], previous.end[0])
@@ -249,7 +419,7 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
     line.push(line[0]);
     action = { kind: "adjust-ceiling", previous, ceiling: shape };
   }
-  const hint = !valid ? "Size is invalid or an opening would no longer fit."
+  const hint = !valid ? connected&&"previous" in gesture&&gesture.kind==="wall" ? "Connected edit blocked: junction, wall size or opening conflict. Turn Junctions OFF to edit independently." : "Size is invalid or an opening would no longer fit."
     : gesture.mode === "opening-move" ?
       "Release to slide draft opening along its host wall."
     : gesture.mode === "wall" && !("previous" in gesture)
@@ -263,7 +433,13 @@ export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ra
   return { action: valid ? action : null, aim };
 }
 
-function openingHost(walls: PlacedWall[], ray: THREE.Ray, floor: THREE.Vector3 | null) {
+function openingHost(walls: PlacedWall[], ray: THREE.Ray, floor: THREE.Vector3 | null,options:WallSnapOptions={}) {
+  if(options.magnetic===true){
+    const targets=walls.map(w=>({key:"draft:"+w.proposalId,id:w.proposalId,kind:"draft" as const,start:w.start,end:w.end,heightM:w.heightM,halfThickness:wallAssembly(w.assembly).thicknessMm/2000}));
+    const aim=chooseWallAim(ray,targets,options.preferredDraftId?"draft:"+options.preferredDraftId:null,true);
+    const wall=aim&&walls.find(w=>w.proposalId===aim.target.id);
+    if(aim&&wall)return {wall,point:aim.point,distance:aim.distance*aim.distance};
+  }
   type HostHit = { wall: PlacedWall; point: PlanPoint; distance: number };
   let direct: HostHit | null = null;
   let fromAbove: HostHit | null = null;
@@ -304,6 +480,35 @@ export function pickDraftWalls(state: BuildState, levelId: string | null,
       a.wall.proposalId.localeCompare(b.wall.proposalId))
     .map(hit => hit.wall);
 }
+/** Exact visible draft faces win; near misses use bounded magnetic tolerance.
+ * The previous hover receives a wider release band only when no exact face is hit. */
+export function magneticDraftWalls(state:BuildState,levelId:string|null,ray:THREE.Ray,previous:string|null=null,strength=.15):PlacedWall[]{
+ if(!levelId||!Number.isFinite(strength)||strength<0||strength>.4)return [];
+ const exact:{wall:PlacedWall;distance:number}[]=[],near:{wall:PlacedWall;miss:number;distance:number}[]=[];
+ const floor=ray.intersectPlane(PLAN,new THREE.Vector3());
+ for(const wall of state.walls){
+  if(wall.levelId!==levelId)continue;
+  const length=planLength(wall.start,wall.end);if(length<.05)continue;
+  const normal=new THREE.Vector3(wall.end[1]-wall.start[1],0,wall.start[0]-wall.end[0]).normalize();
+  const plane=new THREE.Plane().setFromNormalAndCoplanarPoint(normal,new THREE.Vector3(wall.start[0],0,wall.start[1]));
+  const hit=ray.intersectPlane(plane,new THREE.Vector3());
+  const tolerance=strength*(wall.proposalId===previous?1.6:1);
+  if(hit){
+   const {offset}=projectOnWall(wall,[hit.x,hit.z]);
+   const miss=Math.hypot(Math.max(0,-offset,offset-length),Math.max(0,-hit.y,hit.y-wall.heightM));
+   if(miss<1e-7){exact.push({wall,distance:ray.origin.distanceToSquared(hit)});continue;}
+   if(miss<=tolerance&&strength>0){near.push({wall,miss,distance:ray.origin.distanceToSquared(hit)});continue;}
+  }
+  if(floor&&strength>0){
+   const projection=projectOnWall(wall,[floor.x,floor.z]);
+   const miss=Math.hypot(projection.distance,Math.max(0,-projection.offset,projection.offset-length));
+   if(miss<=tolerance)near.push({wall,miss,distance:ray.origin.distanceToSquared(floor)});
+  }
+ }
+ if(exact.length)return exact.sort((a,b)=>a.distance-b.distance||a.wall.proposalId.localeCompare(b.wall.proposalId)).map(x=>x.wall);
+ return near.sort((a,b)=>Number(b.wall.proposalId===previous)-Number(a.wall.proposalId===previous)||a.miss-b.miss||a.distance-b.distance||a.wall.proposalId.localeCompare(b.wall.proposalId)).map(x=>x.wall);
+}
+
 export function pickDraftWall(state: BuildState, levelId: string | null,
   ray: THREE.Ray): PlacedWall | null {
   return pickDraftWalls(state,levelId,ray)[0] ?? null;
@@ -315,7 +520,7 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
   if (!state.tool || !levelId) return { hit: null, hint: guide };
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
   if (state.tool === "move" || state.tool === "stretch" || state.tool === "opening-move") {
-    const edit = beginDraftGesture(state, levelId, ray);
+    const edit = beginDraftGesture(state, levelId, ray,options);
     if (!edit || !("previous" in edit)) return { hit: null, hint: guide };
     const { previous } = edit;
     const marker = state.tool === "move" || edit.kind === "opening" ?
@@ -334,7 +539,7 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
     const hit: BuildHit = { kind: state.tool, levelId, point,
       precisionSource:snap?.kind==="verified" };
     if (!start) return { hit, marker: point,
-      hint: snap?.kind === "corner" ? "Place wall start · corner snap" :
+      hint: snap?.kind === "wall-face" ? "Place wall start · magnetic wall snap" : snap?.kind === "corner" ? "Place wall start · corner snap" :
         snap?.kind === "verified" ? "Place wall start · verified source guide (draft only)" : guide };
     if (ceiling) {
       const valid = validCeiling(start, point);
@@ -348,13 +553,13 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
       line: [new THREE.Vector3(start[0], 0.025, start[1]), new THREE.Vector3(point[0], 0.025, point[1])],
       hint: valid
         ? "Place wall end · " + Math.round(length * 1000) + " mm" +
-          (snap?.kind === "corner" ? " · corner snap" :
+          (snap?.kind === "wall-face" ? " · magnetic wall snap" : snap?.kind === "corner" ? " · corner snap" :
            snap?.kind === "verified" ? " · verified source guide (draft only)" :
            snap?.kind === "straight" ? " · straight" : "")
         : "Wall length must be 50 mm to 200 m.",
     };
   }
-  const host = openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, floor);
+  const host = openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, floor,options);
   const result = host && aimOpening(host.wall, host.point, state.tool, sizes);
   if (!host || !result) return { hit: null, hint: guide };
   if (result.error) return { hit: null, hint: result.error };
@@ -374,10 +579,14 @@ export function createBuildOverlay(scene: THREE.Scene) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const menu = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, depthTest: false, depthWrite: false }));
-  menu.renderOrder = 20;
+    new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true, depthTest: false, depthWrite: false }));
+  menu.renderOrder = 23;
   menu.visible = false;
   scene.add(menu);
+  const tray=createPhysicalToolTray(menu);
+  function highlightMenu(layout:MenuLayout,index:number){
+    if(!layout.radial)tray.highlight(index);
+  }
   const mark = new THREE.Mesh(new THREE.RingGeometry(0.037, 0.057, 24),
     new THREE.MeshBasicMaterial({ color: 0x71f7dc, side: THREE.DoubleSide }));
   mark.rotation.x = -Math.PI / 2;
@@ -408,24 +617,31 @@ export function createBuildOverlay(scene: THREE.Scene) {
   scene.add(outline);
   // Local-only 3D moving-wall outline: shows where the entire wall will land
   // before release, including height, without moving any source-backed meshes.
-  const ghostPositions = new THREE.Float32BufferAttribute(new Float32Array(15),3);
+  const ghostPositions = new THREE.Float32BufferAttribute(new Float32Array(72),3);
   const ghostGeometry=new THREE.BufferGeometry().setAttribute("position",ghostPositions);
-  const ghost=new THREE.Line(ghostGeometry,new THREE.LineBasicMaterial({
+  const ghost=new THREE.LineSegments(ghostGeometry,new THREE.LineBasicMaterial({
     color:0x75f7db,transparent:true,opacity:0.9,depthTest:false}));
   ghost.frustumCulled=false;
   ghost.renderOrder=18;
   ghost.visible=false;
   scene.add(ghost);
-  function showWallGhost(shape:{start:PlanPoint;end:PlanPoint;heightM:number}|null){
+  let lastGhost: readonly number[] | null = null;
+  function showWallGhost(shape:{start:PlanPoint;end:PlanPoint;heightM:number;assembly?:WallVisual["assembly"]}|null){
     ghost.visible=!!shape;
     if(!shape)return;
-    const {start,end,heightM}=shape;
-    [[start[0],0.035,start[1]],[end[0],0.035,end[1]],
-      [end[0],heightM,end[1]],[start[0],heightM,start[1]],
-      [start[0],0.035,start[1]]].forEach((point,i)=>
-      ghostPositions.setXYZ(i,point[0],point[1],point[2]));
+    const {start,end,heightM}=shape,length=planLength(start,end);
+    if(length<.001){ghost.visible=false;return;}
+    const half=wallAssembly(shape.assembly).thicknessMm/2000;
+    const key=[start[0],start[1],end[0],end[1],heightM,half];
+    if(lastGhost && key.every((v,i)=>v===lastGhost![i]))return;
+    lastGhost=key;
+    const nx=-(end[1]-start[1])/length*half,nz=(end[0]-start[0])/length*half;
+    const points=[[start[0]+nx,.035,start[1]+nz],[end[0]+nx,.035,end[1]+nz],[end[0]-nx,.035,end[1]-nz],[start[0]-nx,.035,start[1]-nz],
+      [start[0]+nx,heightM,start[1]+nz],[end[0]+nx,heightM,end[1]+nz],[end[0]-nx,heightM,end[1]-nz],[start[0]-nx,heightM,start[1]-nz]];
+    let index=0;
+    for(const [a,b] of [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]])for(const i of [a,b])ghostPositions.setXYZ(index++,points[i][0],points[i][1],points[i][2]);
     ghostPositions.needsUpdate=true;
-    ghostGeometry.setDrawRange(0,5);
+    ghostGeometry.setDrawRange(0,index);
   }
 
   const previousHead = new THREE.Vector3();
@@ -438,7 +654,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     camera.getWorldPosition(head);
     camera.getWorldDirection(facing);
     facing.y = 0;
-    if (facing.lengthSq() < 0.01) return;
+    if (facing.lengthSq() < 0.01) facing.set(0,0,-1);
     facing.normalize();
     // Pinned is world-locked during editing, but auto-recentres if the user
     // walks too far away and would otherwise lose the control surface.
@@ -449,14 +665,39 @@ export function createBuildOverlay(scene: THREE.Scene) {
     previousHead.copy(head);
     previousFacing.copy(facing);
     right.set(-facing.z, 0, facing.x);
-    menu.position.copy(head).addScaledVector(facing, 1.3).addScaledVector(right, 0.32);
-    menu.position.y -= 0.38;
+    // A compact virtual workbench below the sightline, not a screen
+    // covering the building. Stable until explicitly reopened/recentered.
+    menu.position.copy(head).addScaledVector(facing, 1.05).addScaledVector(right,-.18);
+    menu.position.y -= 0.48;
     menu.lookAt(head);
     menu.updateMatrixWorld();
     menu.visible = true;
   }
+  function positionContextMenu(camera:THREE.Camera,point:THREE.Vector3){
+    camera.getWorldPosition(head);
+    const ray=point.clone().sub(head);
+    // Offset beside the target, within comfortable reach and sight. Position
+    // once on explicit selection; no controller- or gaze-following jitter.
+    const distance=ray.length();if(!Number.isFinite(distance)||distance<.05){positionMenu(camera,true,true);return;}
+    ray.normalize();const lateral=new THREE.Vector3(-ray.z,0,ray.x).normalize();
+    menu.position.copy(head).addScaledVector(ray,Math.min(1.25,Math.max(.65,distance-.25))).addScaledVector(lateral,-.35);
+    menu.position.y=Math.max(head.y-.63,Math.min(head.y+.18,menu.position.y));
+    menu.lookAt(head);menu.updateMatrixWorld();menu.visible=true;
+  }
+  function positionHandMenu(camera:THREE.Camera,hand:THREE.Object3D){
+    camera.getWorldPosition(head);
+    hand.getWorldPosition(menu.position);
+    menu.position.y+=.18;
+    // Keep the tool wheel at a comfortable readable distance even if the hand is near the face.
+    const offset=menu.position.clone().sub(head);
+    const distance=offset.length();
+    if(distance<.65||distance>1.0){if(distance<.001)offset.set(0,-.4,-.5);menu.position.copy(head).add(offset.setLength(Math.max(.65,Math.min(1.0,distance))));}
+    menu.lookAt(head);menu.updateMatrixWorld();menu.visible=true;
+  }
   function sizeMenu(layout: MenuLayout) {
-    const width = layout.width / 1030, height = layout.height / 1030;
+    // Larger angular hit targets without changing the menu action mapping.
+    const scale=layout.radial?950:Math.max(900,layout.height/.68,layout.width/.98);
+    const width = layout.width / scale, height = layout.height / scale;
     if (menu.scale.x !== width || menu.scale.y !== height) {
       menu.scale.set(width, height, 1);
       menu.updateMatrixWorld();
@@ -466,23 +707,29 @@ export function createBuildOverlay(scene: THREE.Scene) {
     const uv = menu.visible ? raycaster.intersectObject(menu, false)[0]?.uv : undefined;
     if (!uv) return null;
     const x = uv.x * layout.width, y = (1 - uv.y) * layout.height;
-    const index = layout.buttons.findIndex(button => !button.disabled &&
-      x >= button.x && x <= button.x + button.w && y >= button.y && y <= button.y + button.h);
+    const index=menuButtonAt(layout,x,y);
     return { action: layout.buttons[index]?.action ?? null, index };
   }
   function drawMenu(layout: MenuLayout, hover: number) {
-    const key = JSON.stringify([layout, hover]);
+    highlightMenu(layout,hover);
+    const key = JSON.stringify([layout, layout.radial?hover:-1]);
     if (!context || drawn === key) return;
     drawn = key;
+    tray.update(layout);
+    highlightMenu(layout,hover);
     if (canvas.width !== layout.width || canvas.height !== layout.height) {
       canvas.width = layout.width;
       canvas.height = layout.height;
     }
+    context.clearRect(0,0,canvas.width,canvas.height);
     context.fillStyle = "#13242c";
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    if(layout.radial){context.beginPath();context.arc(canvas.width/2,canvas.height/2,canvas.width/2-2,0,Math.PI*2);context.fill();}
+    // Transparent gaps expose the building between individual physical keys.
+    else {context.fillStyle="rgba(18,30,36,.92)";context.fillRect(10,10,canvas.width-20,54);context.fillRect(10,canvas.height-52,canvas.width-20,44);}
     context.font = "bold 33px sans-serif";
     context.fillStyle = "#f0fbfc";
-    context.fillText(layout.title, 20, 45, layout.width - 40);
+    if(layout.radial){/* title is rendered in the centre below */}
+    else context.fillText(layout.title, 20, 45, layout.width - 40);
     if (layout.subtitle) {
       context.fillStyle = "#ceeceb";
       context.font = "bold 27px sans-serif";
@@ -502,17 +749,31 @@ export function createBuildOverlay(scene: THREE.Scene) {
         context.fillText(line, 28, 95+index*44, layout.width-56);
       });
     }
-    for (const [index, button] of layout.buttons.entries()) {
-      const highlight = index === hover || button.active;
-      context.fillStyle = highlight ? "#69dbca" : "#2a4651";
-      context.fillRect(button.x, button.y, button.w, button.h);
-      const middle = button.y + button.h / 2;
-      if (button.swatch !== undefined) {
-        context.fillStyle = "#" + button.swatch.toString(16).padStart(6, "0");
-        context.fillRect(button.x + 12, middle - 13, 25, 26);
+    if(layout.radial){
+      const cx=layout.width/2,cy=layout.height/2,outer=layout.width/2-4,inner=layout.width*.145;
+      for(let i=0;i<8;i++){
+        const button=layout.buttons[i],angle=i*Math.PI/4-Math.PI/2,half=Math.PI/8-.012;
+        const active=i===hover&&!button.disabled;
+        context.beginPath();context.arc(cx,cy,outer,angle-half,angle+half);
+        context.arc(cx,cy,inner,angle+half,angle-half,true);context.closePath();
+        context.fillStyle=button.disabled?"#203039":active?"#69dbca":"#355463";context.fill();
+        context.strokeStyle="#13242c";context.lineWidth=3;context.stroke();
+        context.font="bold 32px sans-serif";context.fillStyle=active?"#102421":button.disabled?"#8d9aa0":"#fff";context.textAlign="center";context.textBaseline="middle";
+        context.fillText(button.label,cx+Math.cos(angle)*218,cy+Math.sin(angle)*218,162);
       }
-      context.fillStyle = highlight ? "#102421" : button.disabled ? "#a1aeb4" : "#fff";
-      context.font = "bold 25px sans-serif";
+      context.beginPath();context.arc(cx,cy,inner-5,0,Math.PI*2);context.fillStyle=hover===8?"#69dbca":"#142a34";context.fill();
+      context.fillStyle=hover===8?"#102421":"#fff";context.font="bold 27px sans-serif";context.fillText("Close",cx,cy-12,140);
+      context.font="18px sans-serif";context.fillText("Grip / trigger",cx,cy+22,150);
+      context.textAlign="left";context.textBaseline="alphabetic";
+      texture.needsUpdate=true;return;
+    }
+    for (const [index, button] of layout.buttons.entries()) {
+      const highlight = button.active;
+      // The key itself is a batched 3D mesh; this atlas contains text only.
+      const middle = button.y + button.h / 2;
+      // Colour samples are physical swatches, separate from the text atlas.
+      context.fillStyle = button.disabled ? "#a1aeb4" : "#fff";
+      context.font = "bold 28px sans-serif";
       context.textAlign = "center";
       const inset = button.swatch === undefined ? 0 : 38;
       context.fillText(button.label, button.x + (button.w + inset) * 0.5, middle + 9, button.w - 18 - inset);
@@ -520,7 +781,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
     }
     context.fillStyle = "#edf9fc";
     context.font = "27px sans-serif";
-    context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
+    if(layout.radial){context.textAlign="center";context.fillText(layout.note,layout.width/2,layout.height-33,240);context.textAlign="left";}
+    else context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
     texture.needsUpdate = true;
   }
   function showAim(aim: Aim | null, origin: PlanPoint | null) {
@@ -550,13 +812,21 @@ export function createBuildOverlay(scene: THREE.Scene) {
     }
     outline.visible = !!aim?.line;
     if (aim?.line) {
-      aim.line.forEach((point, i) => positions.setXYZ(i, point.x, point.y, point.z));
-      positions.needsUpdate = true;
-      geometry.setDrawRange(0, aim.line.length);
+      let changed=geometry.drawRange.count!==aim.line.length;
+      aim.line.forEach((point,i)=>{
+        if(positions.getX(i)!==Math.fround(point.x)||positions.getY(i)!==Math.fround(point.y)||positions.getZ(i)!==Math.fround(point.z)){
+          positions.setXYZ(i,point.x,point.y,point.z);
+          changed=true;
+        }
+      });
+      if(changed){
+        positions.needsUpdate=true;
+        geometry.setDrawRange(0,aim.line.length);
+      }
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
+  return { positionMenu, positionContextMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, highlightMenu, showAim, showWallGhost,
     hideMenu: () => { menu.visible = false; },
-    dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
+    dispose: () => { tray.dispose();texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }

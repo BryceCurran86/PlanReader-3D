@@ -16,7 +16,10 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
-from pb_external_footprint_first_trace import ExternalFootprintTrace
+from pb_external_footprint_first_trace import (
+    ExternalFootprintTrace,
+    footprint_polygon_in_native_space,
+)
 from pb_layered_wall_doorway_room_ring_shadow import (
     NOISE_PT,
     build_layered_wall_doorway_room_rings,
@@ -364,10 +367,18 @@ def own_exterior_contour_native_paths(
     bridges without a unique axis-aligned native wall owner are classified as
     incorrect geometric bridges, not rooms or doors. A closure that already
     spans the interval stays topology-only.
+
+    The raster polygon is in display space and the source paths are in native page space, so the polygon is
+    compared with them in native space. The returned edges are therefore in NATIVE page space (the space of the
+    paths and closures they are matched with); ``native_points_to_display_space`` maps them onto the displayed
+    page. Identity on an upright page.
     """
     if trace.status != "CANDIDATE" or len(trace.polygon_pdf_pts) < 4:
         return ()
-    points = tuple((float(x), float(y)) for x, y in trace.polygon_pdf_pts)
+    native_polygon = footprint_polygon_in_native_space(trace)
+    if native_polygon is None:
+        return ()
+    points = tuple((float(x), float(y)) for x, y in native_polygon)
     if not all(math.isfinite(v) for xy in points for v in xy):
         return ()
     winding = _polygon_signed_area(points)

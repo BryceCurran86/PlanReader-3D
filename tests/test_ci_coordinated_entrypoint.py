@@ -32,6 +32,10 @@ def test_public_required_ci_trigger_and_check_context_stay_unchanged():
     full = job("test")
     assert "python-version: [\"3.13\", \"3.14\"]" in full
     assert "github.event_name != 'workflow_dispatch'" in full
+    assert "needs: shard" in full
+    assert "always()" in full
+    assert 'run: test "$SHARD_RESULT" = success' in full
+    assert "Verify every collected test executed exactly once across four shards" in full
     # The full suite still runs the whole tests/ tree; "-rs" (list skipped tests) was added with the public-CI
     # private-original policy (#2989), so allow it without allowing a narrower selection.
     assert re.search(r"PYTHONPATH=\. pytest -q(?: -rs)? tests/(?:\s|$)", full)
@@ -65,7 +69,9 @@ def test_source_neutral_readiness_has_no_client_secrets_or_score_claim():
         assert "permissions:\n      contents: read" in section
     assert "ORIGINAL_SOURCES_TOKEN" not in text
     assert "pull_request_target" not in text
-    assert "upload-artifact" not in text
+    assert "upload-artifact" not in job("focused") + job("readiness")
+    assert text.count("uses: actions/upload-artifact@v4") == 1
+    assert "path: ${{ runner.temp }}/receipt.json" in job("shard")
     assert "UNPUBLISHED" in text
     assert "coverage_accuracy" in text
     assert "precision_adjusted_accuracy" in text
@@ -117,3 +123,54 @@ def test_fastpath_still_runs_on_pull_requests_and_main_pushes_only():
     text = FASTPATH.read_text(encoding="utf-8")
     assert "  pull_request:\n    branches: [main]\n  push:\n    branches: [main]\n" in text
     assert "pull_request_target" not in text
+
+def test_parallel_full_ci_keeps_all_tests_and_nightly_release_guard():
+    text = source()
+    full = job("test")
+    assert "  schedule:\n" in text
+    assert "--dist loadfile --durations=30" in full
+    assert "PYTEST_ADDOPTS:" in full
+    assert "options: ['0', '2', '4', '8']" in text
+    assert "PYTHONPATH=. pytest -q -rs tests/" in full
+    assert "requirements-ci-v1228.txt" in full
+    assert "fail-fast: false" in full
+    assert "pytest-xdist>=3.8,<4" in (ROOT / "requirements-ci-v1228.txt").read_text(encoding="utf-8")
+
+
+def test_scoped_development_workflow_cannot_replace_required_ci():
+    dev = (ROOT / ".github/workflows/vr-development-fast-feedback.yml").read_text(encoding="utf-8")
+    assert "name: VR development feedback (not release CI)" in dev
+    assert "branches: ['vr/**']" in dev
+    assert "tests/editable_3d/" in dev
+    assert "git diff --no-renames --name-only -z" in dev
+    assert "pull_request:" not in dev
+    assert "needs.scope.outputs.scope == 'vr-only'" in dev
+    assert "not full regression" in dev
+
+def test_automatic_full_release_requires_complete_isolated_shards():
+    full, shard = job("test"), job("shard")
+    assert "if: ${{ github.event_name != 'workflow_dispatch' }}" in shard
+    assert "python-version: ['3.13', '3.14']" in shard
+    assert "index: [0, 1, 2, 3]" in shard
+    assert "fail-fast: false" in shard
+    assert "python -m pytest -p scripts.ci_pytest_shard -q -rs --durations=20 tests/" in shard
+    assert "check_private_original_source_additions.py" in shard
+    assert "check_v2_truth_separation.py" in shard
+    assert "if-no-files-found: error" in shard
+    assert 'PLANREADER_CI_SHARDS: \'4\'' in shard
+    assert 'pattern: shard-${{ matrix.python-version }}-*' in full
+    assert 'python scripts/ci_pytest_shard.py "$RUNNER_TEMP/shards" 4' in full
+    assert full.index("Require every automatic shard to succeed") < full.index("Download only full-suite shard receipts")
+    assert full.index("Verify every collected test executed exactly once across four shards") < full.index("Smoke test (envelope")
+    assert "if: github.event_name == 'workflow_dispatch'" in full
+
+def test_shared_worker_experiment_is_manual_and_fetches_complete_history():
+    experiment = (ROOT / ".github/workflows/ci-worker-comparison.yml").read_text(encoding="utf-8")
+    assert "workflow_dispatch:" in experiment
+    assert "pull_request:" not in experiment
+    assert "fetch-depth: 0" in experiment
+    assert "workers: [0, 2, 4, 8]" in experiment
+    assert "not release CI" in experiment
+    assert "never a release verdict" in experiment
+    assert "Fast-fail workflow and source integrity contract assertions" in job("shard")
+    assert job("shard").index("Fast-fail workflow") < job("shard").index("Execute one isolated complete-collection shard")

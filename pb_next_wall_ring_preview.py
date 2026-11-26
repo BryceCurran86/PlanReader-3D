@@ -53,8 +53,10 @@ from pb_new_source_dark_ink_scope import is_source_neutral_dark
 # running an obsolete source-painted prototype. These original-producer
 # functions preserve native path indices; their results remain topology-only.
 from pb_layered_wall_doorway_room_ring_shadow import (
+    _ROLE_EVIDENCE as _ORIGINAL_ROLE_EVIDENCE,
     _collect_dark_painted_source_wall_strips as _original_source_dark_bars,
     _source_wall_ink_candidate_drawings as _original_source_wall_ink,
+    _source_wall_ink_role as _original_source_wall_ink_role,
     _unresolved_collinear_gap_breaches_outer_ring as _original_two_end_gap_veto,
 )
 
@@ -88,6 +90,7 @@ KIND_STROKE = "source_stroke_closure"
 KIND_SLIDING_LEAF = "sliding_leaf_frame_closure"
 KIND_CAVITY_SLIDER = "cavity_slider_cs_closure"
 KIND_PANEL_LIFT = "panel_lift_door_topology_closure"
+KIND_SOURCE_OWNED_CHORD = "source_owned_doorway_chord_closure"
 
 _RECORD_SEAL = object()
 
@@ -313,6 +316,34 @@ def _selected_primitive_count(drawings: Sequence[Mapping[str, Any] | None]) -> i
             continue
         items = row.get("items")
         if not items:
+            continue
+        total += len(items)
+        if total > _PRIMITIVE_CAP:
+            return total
+    return total
+
+
+def _entry_primitive_count(drawings: Sequence[Mapping[str, Any] | None]) -> int:
+    """Count the native items the wall-candidate collectors can consume, for the builder's entry cap.
+
+    Every item counts EXCEPT those on evidence-only rows: the unfilled, visible, non-green strokes the source-wall
+    selector retains as doorway/glazing evidence (they are not wall support) whose stroke colour the stroke-pair
+    collector cannot use (``_is_wall_stroke_color``). Those rows stay in the clipped rows with their original path
+    indices for every closure search; they never mint a wall strip, so they do not bound the wall candidate set. A
+    neutral-dark stroke the pair collector does consume keeps counting. Same 20,000 limit as
+    ``_selected_primitive_count``, which still counts every item for the halo functions.
+    """
+    total = 0
+    for row in drawings:
+        if row is None:
+            continue
+        items = row.get("items")
+        if not items:
+            continue
+        if (
+            _original_source_wall_ink_role(row) == _ORIGINAL_ROLE_EVIDENCE
+            and not _is_wall_stroke_color(row.get("color"))
+        ):
             continue
         total += len(items)
         if total > _PRIMITIVE_CAP:
@@ -2129,7 +2160,7 @@ def _split_at_closures(
 
 
 def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRingResult:
-    """Keep per-neighbourhood topology when the union of clips exceeds the 20k cap."""
+    """Keep the rings and failure reasons from separately traced viewports."""
     if not parts:
         return LayeredRoomRingResult(
             EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, 0, 0, 0,
@@ -2143,8 +2174,6 @@ def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRi
     any_strips = any(part.wall_strip_count for part in parts)
     for part in parts:
         for reason in part.reason_codes:
-            if reason == REASON_PRIMITIVE_CAP:
-                continue
             if reason == REASON_NO_WALL_INK and any_strips:
                 continue
             if reason not in reasons:
@@ -2153,9 +2182,6 @@ def _merge_ring_results(parts: Sequence[LayeredRoomRingResult]) -> LayeredRoomRi
         status = EvidenceResolutionStatus.CANDIDATE
         if REASON_RING_CLOSED not in reasons:
             reasons.insert(0, REASON_RING_CLOSED)
-    elif all(part.reason_codes == (REASON_PRIMITIVE_CAP,) for part in parts):
-        status = EvidenceResolutionStatus.ABSTAINED
-        reasons = [REASON_PRIMITIVE_CAP]
     else:
         status = EvidenceResolutionStatus.ABSTAINED
         if not reasons:
@@ -2215,6 +2241,105 @@ def _collect_monotonic_source_stroke_pairs(
     return out
 
 
+@dataclass(frozen=True)
+class _DoorwayChord:
+    horizontal: bool
+    band: tuple[float, float]
+    interval: tuple[float, float]
+    door_path_indices: tuple[int, ...]
+    wall_path_indices: tuple[int, ...]
+
+
+def _validated_doorway_chord(chord: Mapping[str, Any]) -> _DoorwayChord:
+    """One topology-only chord receipt; anything malformed or claiming authority is rejected."""
+    if chord.get("candidate_topology_doorway_closure") is not True or any(
+        chord.get(flag) is not False
+        for flag in ("source_physical_door_host_authenticated", "metric_area_issued", "commercial_publishable")
+    ):
+        raise ValueError("source_owned_doorway_chord_must_be_topology_only")
+    horizontal = chord.get("horizontal")
+    band = tuple(float(v) for v in chord.get("wall_band_pdf_pts", ()))
+    interval = tuple(float(v) for v in chord.get("door_interval_pdf_pts", ()))
+    if (type(horizontal) is not bool or len(band) != 2 or len(interval) != 2
+            or not all(math.isfinite(v) for v in (*band, *interval)) or band[0] >= band[1] or interval[0] >= interval[1]):
+        raise ValueError("source_owned_doorway_chord_geometry_invalid")
+
+    def paths(*names: str) -> tuple[int, ...]:
+        return tuple(sorted({int(i) for name in names for i in chord.get(name, ())}))
+
+    return _DoorwayChord(
+        horizontal, band, interval,
+        paths("source_swing_native_path_indices", "source_threshold_path_indices"),
+        paths("source_wall_end_left_path_indices", "source_wall_end_right_path_indices",
+              "source_jamb_left_path_indices", "source_jamb_right_path_indices"),
+    )
+
+
+def _apply_source_owned_doorway_chords(
+    chords: Sequence[_DoorwayChord],
+    viewports: Sequence[tuple[float, float, float, float]] | None,
+    closures: list[LayeredDoorwayClosure],
+    closure_rects: list[tuple[str, Polygon]],
+    unresolved: Sequence[_Gap],
+    *,
+    source_sha256: str,
+    page_index: int,
+) -> list[_Gap]:
+    """Close each in-view chord doorway the builder did not close itself; return the gaps still unresolved afterwards.
+
+    A chord is only ever held back by the builder's own closures, never by another chord, so no chord outranks another.
+    """
+
+    def overlap(a: tuple[float, float], b: tuple[float, float]) -> float:
+        return min(a[1], b[1]) - max(a[0], b[0])
+
+    own = tuple(closures)
+    added: set[str] = set()
+    remaining = list(unresolved)
+    for chord in sorted(chords, key=lambda c: (c.horizontal, c.band, c.interval, c.door_path_indices, c.wall_path_indices)):
+        gap = _Gap(chord.horizontal, chord.band, *chord.interval, (), ())
+        rect = gap.rect()
+        if viewports is not None and not any(rect.intersection(box(*view)).area > NOISE_PT * NOISE_PT for view in viewports):
+            continue
+        width = chord.interval[1] - chord.interval[0]
+        if any(
+            closure.horizontal == chord.horizontal
+            and overlap(closure.band, chord.band) >= -NOISE_PT
+            and overlap(closure.gap_interval, chord.interval)
+            >= 0.5 * min(width, closure.gap_interval[1] - closure.gap_interval[0])
+            for closure in own
+        ):
+            continue  # this doorway is already closed; one doorway is never two closures
+        native = chord.door_path_indices
+        closure_id = stable_contract_id(
+            "layered_doorway_closure", {
+                "source_sha256": source_sha256, "page_index": page_index,
+                "kind": KIND_SOURCE_OWNED_CHORD, "horizontal": chord.horizontal,
+                "band": [round(v, 3) for v in chord.band],
+                "gap": [round(v, 3) for v in chord.interval],
+                "native": list(native),
+            }, digest_chars=24,
+        )
+        if closure_id in added:
+            continue  # the same receipt passed twice
+        added.add(closure_id)
+        closures.append(LayeredDoorwayClosure(
+            closure_id, KIND_SOURCE_OWNED_CHORD, chord.horizontal, chord.band, chord.interval,
+            native, chord.wall_path_indices,
+        ))
+        closure_rects.append((closure_id, rect))
+        remaining = [
+            g for g in remaining
+            if not (
+                g.horizontal == chord.horizontal
+                and overlap(g.band, chord.band) > NOISE_PT
+                and g.lo >= chord.interval[0] - _STROKE_PAIR_CLUSTER_PT
+                and g.hi <= chord.interval[1] + _STROKE_PAIR_CLUSTER_PT
+            )
+        ]
+    return remaining
+
+
 def build_layered_wall_doorway_room_rings(
     drawings: Sequence[Mapping[str, Any]],
     *,
@@ -2229,6 +2354,7 @@ def build_layered_wall_doorway_room_rings(
     wall_end_stroke_closures: bool = False,
     source_pair_baseline_drawings: Sequence[Mapping[str, Any] | None] | None = None,
     viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
+    source_owned_doorway_chords: Sequence[Mapping[str, Any]] = (),
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
@@ -2238,7 +2364,10 @@ def build_layered_wall_doorway_room_rings(
     Those candidates are not an authenticated wall layer and never a quantity.
     ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
     its native endpoints already meet major structural strips. The stroke is not extended.
+    ``source_owned_doorway_chords`` (default none) are topology-only doorway chords the layered builder proved from the same source
+    rows. Each one in view closes its door interval across its wall band, unless this builder already closed that doorway.
     """
+    chords = tuple(_validated_doorway_chord(item) for item in source_owned_doorway_chords)
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
     if type(panel_lift_label_closure) is not bool:
@@ -2259,7 +2388,7 @@ def build_layered_wall_doorway_room_rings(
         raise ValueError("page_index must be a non-negative int")
     if stroke_pair_wall_faces and viewport_pdf_pts is not None:
         indexed = _clip_drawing_items(drawings, viewport_pdf_pts)
-        if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
+        if _entry_primitive_count(indexed) > _PRIMITIVE_CAP:
             viewports = _as_viewports(viewport_pdf_pts) or []
             if len(viewports) > 1:
                 return _merge_ring_results([
@@ -2276,6 +2405,7 @@ def build_layered_wall_doorway_room_rings(
                         wall_end_stroke_closures=wall_end_stroke_closures,
                         source_pair_baseline_drawings=source_pair_baseline_drawings,
                         viewport_pdf_pts=box,
+                        source_owned_doorway_chords=source_owned_doorway_chords,
                     )
                     for box in viewports
                 ])
@@ -2284,7 +2414,7 @@ def build_layered_wall_doorway_room_rings(
             )
     else:
         indexed = _clip_drawings(drawings, viewport_pdf_pts)
-        if _selected_primitive_count(indexed) > _PRIMITIVE_CAP:
+        if _entry_primitive_count(indexed) > _PRIMITIVE_CAP:
             return LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
             )
@@ -2297,7 +2427,7 @@ def build_layered_wall_doorway_room_rings(
         strict_indexed = _clip_drawing_items(
             source_pair_baseline_drawings, viewport_pdf_pts,
         )
-        if _selected_primitive_count(strict_indexed) > _PRIMITIVE_CAP:
+        if _entry_primitive_count(strict_indexed) > _PRIMITIVE_CAP:
             return LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED,
                 (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
@@ -2592,6 +2722,12 @@ def build_layered_wall_doorway_room_rings(
             native_word_refs=word_refs,
         ))
         closure_rects.append((closure_id, gap.rect()))
+
+    if chords:
+        unresolved = _apply_source_owned_doorway_chords(
+            chords, _as_viewports(viewport_pdf_pts), closures, closure_rects, unresolved,
+            source_sha256=source_sha256, page_index=page_index,
+        )
 
     barrier = _closed_union([*polygons, *(rect for _cid, rect in closure_rects)])
     free = domain.difference(barrier)

@@ -10,9 +10,10 @@ import os
 
 import pytest
 
-from pb_source_closed_run_export import seal_source_closed_run
+from pb_customer_output_verification import CustomerOutputVerificationError
+from pb_source_closed_run_export import _build_sealed_run, seal_source_closed_run
 from tools import gpt3_signed_v1_physical_drift as drift
-from test_customer_output_verification import quantity, trace
+from test_customer_output_verification import quantity, sealed_and_rows, trace
 from tools.gpt3_signed_v1_physical_drift import (
     compare_signed_v1_physical_runs,
     build_signed_v1_physical_drift_report,
@@ -38,6 +39,66 @@ def _files(tmp_path, old, new):
     paths[0].write_text(json.dumps(old.to_dict()), encoding="utf-8")
     paths[1].write_text(json.dumps(new.to_dict()), encoding="utf-8")
     return paths
+
+
+@pytest.mark.parametrize(
+    ("family", "same_receipt", "status", "exit_code"),
+    [
+        ("floor_area", True, "BYTE_IDENTICAL_FAMILY_SEAL", 0),
+        ("floor_area", False, "DIAGNOSTIC_DRIFT", 1),
+        ("ceiling_lining", True, "FAMILY_NOT_PRESENT", 1),
+    ],
+)
+def test_archived_family_fingerprint_checks_signed_body(
+    tmp_path, family, same_receipt, status, exit_code,
+):
+    run, rows = sealed_and_rows()
+    # The benchmark amount is deliberately irrelevant. A seal with a
+    # different quantity ID cannot pass the historic fingerprint check.
+    baseline = run
+    if not same_receipt:
+        baseline = _build_sealed_run(
+            [replace(row, quantity_id="another-id") if row.quantity_id == "qty-1" else row
+             for row in run.quantities],
+            project_id=run.project_id,
+        )
+    _, candidate = _files(tmp_path, baseline, run)
+    customers = tmp_path / "candidate_customers.json"
+    customers.write_text(json.dumps(rows), encoding="utf-8")
+    output = tmp_path / "family_check.json"
+
+    assert main([
+        "--baseline-family-fingerprint", baseline.fingerprint,
+        "--family", family,
+        "--candidate-sealed", str(candidate),
+        "--candidate-customer", str(customers),
+        "--output", str(output),
+    ]) == exit_code
+    report = json.loads(output.read_bytes())
+    assert report["comparison_status"] == status
+    assert report["baseline_family_fingerprint_matches"] is (exit_code == 0)
+    assert report["candidate_verified_customer_count"] == len(rows)
+    assert report["baseline_customer_rows_compared"] is False
+    assert report["publication_status"] == "UNPUBLISHED"
+    assert report["official_v2_accuracy"] is None
+
+
+def test_archived_fingerprint_rejects_missing_candidate_customer_rows(tmp_path):
+    run, rows = sealed_and_rows()
+    _, candidate = _files(tmp_path, run, run)
+    customers = tmp_path / "candidate_customers.json"
+    customers.write_text(json.dumps(rows[:-1]), encoding="utf-8")
+    output = tmp_path / "family_check.json"
+
+    with pytest.raises(CustomerOutputVerificationError):
+        main([
+            "--baseline-family-fingerprint", run.fingerprint,
+            "--family", "floor_area",
+            "--candidate-sealed", str(candidate),
+            "--candidate-customer", str(customers),
+            "--output", str(output),
+        ])
+    assert not output.exists()
 
 
 def test_exact_signed_v1_run_is_identical_without_issuer_promotion():

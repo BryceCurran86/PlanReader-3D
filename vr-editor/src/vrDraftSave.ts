@@ -10,6 +10,7 @@ import { emptyItemDraft } from "./itemPlacement.ts";
 import { getCatalogueItem } from "./itemCatalogue.ts";
 import { scopeKey } from "./reviewDraft.ts";
 import type { SceneManifest } from "./types.ts";
+import {isWallAssembly} from "./wallProfiles.ts";
 
 const record=(v:unknown):v is Record<string,unknown> =>
   typeof v==="object" && v!==null && !Array.isArray(v);
@@ -26,12 +27,13 @@ function readWall(value:unknown,key:string,levels:ReadonlySet<string>):PlacedWal
     !vector(value.start,2) || !vector(value.end,2) || !finite(value.heightM) ||
     !Array.isArray(value.openings) || value.openings.length>100) throw Error("Invalid draft wall");
   const wall=value as unknown as PlacedWall;
+  if(wall.assembly!==undefined&&!isWallAssembly(wall.assembly))throw Error("Invalid wall assembly");
   if(!validEditedWall(wall))throw Error("Invalid draft wall geometry");
   const ids=new Set<string>();
   for(const opening of wall.openings){
     if(!record(opening)||!string(opening.openingId)||ids.has(opening.openingId)||
       !["door","window","passage"].includes(String(opening.openingKind))||
-      !openingFits(wall,opening))throw Error("Invalid draft opening");
+      !openingFits(wall,opening)||(opening.doorHardware!==undefined&&(opening.openingKind!=="door"||!["chrome","matte-black","brushed-brass","brushed-nickel"].includes(opening.doorHardware))))throw Error("Invalid draft opening");
     ids.add(opening.openingId);
   }
   for(let i=0;i<wall.openings.length;i++)for(let j=i+1;j<wall.openings.length;j++){
@@ -41,8 +43,10 @@ function readWall(value:unknown,key:string,levels:ReadonlySet<string>):PlacedWal
   }
   return {scopeKey:key,proposalId:wall.proposalId,levelId:wall.levelId,
     start:[...wall.start],end:[...wall.end],heightM:wall.heightM,
+    ...(wall.assembly?{assembly:{...wall.assembly}}:{}),
     openings:wall.openings.map(x=>({openingId:x.openingId,openingKind:x.openingKind,
-      offsetM:x.offsetM,widthM:x.widthM,heightM:x.heightM,sillHeightM:x.sillHeightM}))};
+      offsetM:x.offsetM,widthM:x.widthM,heightM:x.heightM,sillHeightM:x.sillHeightM,
+      ...(x.doorMechanism!==undefined?{doorMechanism:x.doorMechanism}:{}),...(x.doorHardware!==undefined?{doorHardware:x.doorHardware}:{})}))};
 }
 function readCeiling(value:unknown,key:string,levels:ReadonlySet<string>):CeilingDraft {
   if(!record(value)||value.scopeKey!==key||!string(value.proposalId)||

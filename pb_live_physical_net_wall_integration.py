@@ -446,6 +446,7 @@ def _collect_live_physical_net_wall_claim(
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
+    viewport_wall_identity_links: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -498,6 +499,8 @@ def _collect_live_physical_net_wall_claim(
         )
     if type(layered_wall_end_stroke_closures) is not bool:
         raise ValueError("layered wall end stroke closures must be an explicit boolean")
+    if type(viewport_wall_identity_links) is not bool:
+        raise ValueError("viewport wall identity links must be an explicit boolean")
     if layered_wall_end_stroke_closures and not layered_dark_painted_wall_source:
         raise ValueError(
             "layered wall end stroke closures need layered dark painted wall source"
@@ -670,6 +673,8 @@ def _collect_live_physical_net_wall_claim(
            if layered_dark_painted_wall_source else {}),
         **({"layered_wall_end_stroke_closures": True}
            if layered_wall_end_stroke_closures else {}),
+        **({"viewport_wall_identity_links": True}
+           if viewport_wall_identity_links else {}),
     )
     canonical_space_core = compose_live_canonical_spaces(canonical_rooms)
     canonical_floors = compose_live_canonical_floor_surfaces(
@@ -1636,6 +1641,7 @@ def collect_live_physical_net_wall_claim(
     layered_finished_face_statement_pages: Optional[Sequence[int]] = None,
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
+    viewport_wall_identity_links: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1685,6 +1691,8 @@ def collect_live_physical_net_wall_claim(
         )
     if type(layered_wall_end_stroke_closures) is not bool:
         raise ValueError("layered wall end stroke closures must be an explicit boolean")
+    if type(viewport_wall_identity_links) is not bool:
+        raise ValueError("viewport wall identity links must be an explicit boolean")
     if layered_wall_end_stroke_closures and not layered_dark_painted_wall_source:
         raise ValueError(
             "layered wall end stroke closures need layered dark painted wall source"
@@ -1732,6 +1740,8 @@ def collect_live_physical_net_wall_claim(
            if layered_dark_painted_wall_source else {}),
         **({"layered_wall_end_stroke_closures": True}
            if layered_wall_end_stroke_closures else {}),
+        **({"viewport_wall_identity_links": True}
+           if viewport_wall_identity_links else {}),
     )
     if recovery_page_id is None:
         return claim

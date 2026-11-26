@@ -2,12 +2,15 @@ import * as THREE from "three";
 import { nearestRoofEdge } from "./roofComponents.ts";
 import type { RoofEdge } from "./roofComponents.ts";
 import { roofComponentMesh } from "./roofComponentGeometry.ts";
-import { showConstructionItem, showConstructionSurface } from "./constructionStages.ts";
+import { showConstructionSurface } from "./constructionStages.ts";
 import type { ConstructionStage } from "./constructionStages.ts";
+import {itemLayerVisible,EMPTY_LAYERS} from "./constructionLayers.ts";
+import type {LayerOverrides} from "./constructionLayers.ts";
 import type { CeilingDraft } from "./buildPlacement.ts";
 import { openingFits, planLength } from "./buildPlacement.ts";
 import type { PlanPoint, WallVisual } from "./buildPlacement.ts";
-import { getCatalogueItem } from "./itemCatalogue.ts";
+import { getCatalogueItem,ITEM_CATALOGUE } from "./itemCatalogue.ts";
+import type {FinishContext} from "./contextFinishes.ts";
 import type { CatalogueItem, ItemTarget, ItemVisual } from "./itemCatalogue.ts";
 import { makeItemHostId, openingFitMessage, openingHostId, timberFitsWall, worktopId } from "./itemPlacement.ts";
 import type { ItemHit, OpeningSize, PlacedItem, Vector, WallSection } from "./itemPlacement.ts";
@@ -16,6 +19,7 @@ import { finishMesh, trimRun } from "./catalogueGeometry.ts";
 import { createEntryAssembly, createTimberSection } from "./exteriorGeometry.ts";
 import { createDesignAssembly, createOpeningStyle } from "./extensionGeometry.ts";
 import { SITE_HOST_ID } from "./itemPlacement.ts";
+import {wallAssembly} from "./wallProfiles.ts";
 
 type WallRun = WallSection & { gaps: [number, number][] };
 type Opening = { start: PlanPoint; end: PlanPoint; bottom: number; top: number; size: OpeningSize;
@@ -29,6 +33,8 @@ export type CatalogueHost = {
   opening?: Opening;
   roofEdges?: RoofEdge[];
   ceilingDraft?: CeilingDraft;
+  halfThickness?:number;
+  finishFaces?:{left:THREE.Mesh;right:THREE.Mesh};
 };
 
 export function catalogueWallHost(id: string, mesh: THREE.Mesh, start: PlanPoint, end: PlanPoint, heightM: number): CatalogueHost {
@@ -41,7 +47,7 @@ function xy(point: PlanPoint, y = 0) {
 
 export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): CatalogueHost[] {
   const hosts: CatalogueHost[] = [];
-  const face = group.children.find(child => child.userData.catalogueWallFace);
+  const face = group.children.find(child=>child.userData.catalogueMountFace) ?? group.children.find(child => child.userData.catalogueWallFace);
   const floorGaps: [number, number][] = [];
   const apertures: WallSection["apertures"] = [];
   const leaves = new Map(group.children.flatMap(child => child instanceof THREE.Mesh &&
@@ -73,7 +79,9 @@ export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): Catal
     hosts.push({ id: openingHostId(wall.proposalId, opening.openingId), target: "opening", mesh, opening: outline });
   }
   if (face instanceof THREE.Mesh) {
-    hosts.push({ id: makeItemHostId("draft-wall", wall.proposalId), target: "wall", mesh: face,
+    const left=group.children.find(c=>c.userData.draftFinishFace==="left"),right=group.children.find(c=>c.userData.draftFinishFace==="right");
+    const finishFaces=left instanceof THREE.Mesh&&right instanceof THREE.Mesh?{left,right}:undefined;
+    hosts.push({ id: makeItemHostId("draft-wall", wall.proposalId), target: "wall", mesh: face, finishFaces,halfThickness:wallAssembly(wall.assembly).thicknessMm/2000,
       run: { start: wall.start, end: wall.end, heightM: wall.heightM, gaps: floorGaps, apertures } });
   }
   return hosts;
@@ -148,7 +156,7 @@ function dispose(root: THREE.Object3D) {
     for (const material of faces) materials.add(material);
   });
   for (const material of materials) {
-    if (material instanceof THREE.MeshStandardMaterial) material.map?.dispose();
+    if (material instanceof THREE.MeshStandardMaterial) {material.map?.dispose();material.bumpMap?.dispose();material.roughnessMap?.dispose();}
     material.dispose();
   }
 }
@@ -157,8 +165,26 @@ function surfaceKey(entry: PlacedItem) {
   return JSON.stringify([entry.hostId, entry.target === "wall" || entry.target === "opening" ? entry.side : 1]);
 }
 
+import {MAX_PREVIEW_LIGHTS,nearestPreviewLights,previewLightingRole} from "./lightingPreview.ts";
+
 export function createCatalogueScene(scene: THREE.Scene) {
   const mounts: THREE.Object3D[] = [];
+  const mountedEntries=new Map<THREE.Object3D,PlacedItem>();
+  const previewFixtures: {id:string;node:THREE.Object3D}[]=[];
+  const previewSwitches: THREE.Object3D[]=[];
+  const previewPool=Array.from({length:MAX_PREVIEW_LIGHTS},()=>{
+    const light=new THREE.PointLight(0xffe5c4,0,8,2);light.castShadow=false;scene.add(light);return light;
+  });
+  const previewPoint=new THREE.Vector3();
+  function visibleInScene(node:THREE.Object3D){for(let p:THREE.Object3D|null=node;p;p=p.parent)if(!p.visible)return false;return !!node.parent;}
+  function updatePreviewLights(enabled:boolean,eye:THREE.Vector3){
+    const fixtures=enabled?previewFixtures.filter(f=>visibleInScene(f.node)).map(f=>{f.node.getWorldPosition(previewPoint);return {id:f.id,position:previewPoint.toArray()};}):[];
+    const nearest=nearestPreviewLights(fixtures,eye.toArray());
+    previewPool.forEach((light,i)=>{const f=nearest[i];light.intensity=f?18:0;if(f)light.position.set(...f.position);});
+  }
+  function previewSwitchDistance(ray:THREE.Raycaster){
+    const hit=ray.intersectObjects(previewSwitches.filter(visibleInScene),true)[0];return hit?.distance??Infinity;
+  }
   const coveredLeaves = new Map<THREE.Mesh, boolean>();
   const hosts = new Map<THREE.Object3D, CatalogueHost>();
   let meshes: THREE.Object3D[] = [];
@@ -166,6 +192,8 @@ export function createCatalogueScene(scene: THREE.Scene) {
   let draftKey: readonly CatalogueHost[] | null = null;
   let itemKey: readonly PlacedItem[] | null = null;
   let stageKey: ConstructionStage = "finished";
+  let layersKey:LayerOverrides=EMPTY_LAYERS;
+  let cutawayKey=false;
   const marker = new THREE.Mesh(new THREE.RingGeometry(0.036, 0.047, 22),
     new THREE.MeshBasicMaterial({ color: 0x78ffe1, side: THREE.DoubleSide, depthWrite: false }));
   marker.visible = false;
@@ -178,23 +206,24 @@ export function createCatalogueScene(scene: THREE.Scene) {
     coveredLeaves.clear();
     for (const root of mounts) root.removeFromParent();
     for (const root of mounts) dispose(root);
-    mounts.length = 0;
+    mounts.length = 0;mountedEntries.clear();previewFixtures.length=0;previewSwitches.length=0;
+    for(const light of previewPool)light.intensity=0;
     hosts.clear();
     meshes = [];
     sourceKey = draftKey = itemKey = null;
   }
 
   function sync(source: readonly CatalogueHost[], drafts: readonly CatalogueHost[], items: readonly PlacedItem[],
-    stage: ConstructionStage = "finished") {
-    if (sourceKey === source && draftKey === drafts && itemKey === items && stageKey === stage) return;
+    stage: ConstructionStage = "finished",layers:LayerOverrides=EMPTY_LAYERS,cutaway=false) {
+    if (sourceKey === source && draftKey === drafts && itemKey === items && stageKey === stage&&layersKey===layers&&cutawayKey===cutaway) return;
     clear();
     sourceKey = source;
     draftKey = drafts;
     itemKey = items;
-    stageKey = stage;
+    stageKey = stage;layersKey=layers;cutawayKey=cutaway;
     items = items.filter(placement => {
       const item = getCatalogueItem(placement.itemId);
-      return !!item && showConstructionItem(stage, item);
+      return !!item && itemLayerVisible(stage,item,layers)&&!(cutaway&&(placement.target==="roof"||placement.target==="ceiling"));
     });
     const byId = new Map<string, CatalogueHost>();
     function addHost(host: CatalogueHost) {
@@ -225,6 +254,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
       const { visual } = item;
       if (host.target === "opening" && openingFitMessage(item, host.opening?.size)) continue;
       let node: THREE.Object3D;
+      let actualFinishFace=false;
       if (visual.kind === "roof-component") {
         const edge = host.roofEdges?.find(row => row.key === placement.roofEdgeKey);
         if (!edge) continue;
@@ -232,7 +262,9 @@ export function createCatalogueScene(scene: THREE.Scene) {
       } else if (visual.kind === "surface") {
         if (item.group === "doors" && designedDoors.has(host.id)) continue;
         if (visual.slot === "lining" && visibleFinishes.has(surfaceKey(placement))) continue;
-        node = finishMesh(host.mesh, visual, host.target, normal, placement.side);
+        const face=host.finishFaces&&host.run?((host.run.end[0]-host.run.start[0])*normal.z-(host.run.end[1]-host.run.start[1])*normal.x>0?host.finishFaces.left:host.finishFaces.right):null;
+        actualFinishFace=!!face;
+        node = finishMesh(face??host.mesh, visual, host.target, normal, face?1:placement.side);
       } else if (visual.kind === "trim") {
         node = trimMount(host, item, normal);
       } else if (visual.kind === "entry" || visual.kind === "opening-style") {
@@ -282,9 +314,17 @@ export function createCatalogueScene(scene: THREE.Scene) {
         if (worktop) addHost({ id: worktopId(placement.id), target: "worktop", mesh: worktop });
         node = group;
       }
-      host.mesh.add(node);
+      // Stored wall anchors remain on the design centreline. Mount to the selected physical face.
+      if(host.target==="wall"&&host.halfThickness&&!actualFinishFace)node.position.addScaledVector(normal,host.halfThickness);
+      // A local leaf finish must follow its swing/slide/overhead transform.
+      const parent=visual.kind==="surface"&&item.group==="doors"&&host.opening?.reviewLeaf&&!designedDoors.has(host.id)?host.opening.reviewLeaf:host.mesh;
+      if(parent.userData.nominalDoorSlab&&visual.kind==="surface")node.position.addScaledVector(normal,.019);
+      parent.add(node);
       node.updateWorldMatrix(true, true);
-      mounts.push(node);
+      mounts.push(node);mountedEntries.set(node,placement);
+      const lightingRole=previewLightingRole(item);
+      if(lightingRole==="light")previewFixtures.push({id:placement.id,node});
+      if(lightingRole==="switch")previewSwitches.push(node);
     }
     meshes = [...hosts.keys()];
   }
@@ -338,16 +378,44 @@ export function createCatalogueScene(scene: THREE.Scene) {
     return { hit: null };
   }
 
+  function contextAt(ray:THREE.Raycaster):FinishContext|null{
+    // One explicit controller action, never per-frame catalogue traversal.
+    const hostHits=ray.intersectObjects(meshes,false).filter(h=>{
+      const host=hosts.get(h.object);
+      if(!host||host.target==="site"||!visibleInScene(h.object))return false;
+      if(host.target==="ceiling"||host.target==="roof")return !cutawayKey&&showConstructionSurface(stageKey,host.target);
+      if(host.target==="floor")return showConstructionSurface(stageKey,"floor");
+      return stageKey!=="slab";
+    });
+    const picked=ray.intersectObjects(mounts.filter(visibleInScene),true).find(h=>visibleInScene(h.object)&&h.distance<=4);
+    if(picked&&picked.distance<=(hostHits[0]?.distance??Infinity)+.10){
+      for(let p:THREE.Object3D|null=picked.object;p;p=p.parent){
+        const entry=mountedEntries.get(p);
+        if(entry)return {hit:entry,entry,worldPoint:picked.point.toArray() as Vector};
+      }
+    }
+    const first=hostHits[0];
+    if(!first||first.distance>4)return null;
+    const host=hosts.get(first.object)!;
+    const probe=ITEM_CATALOGUE.find(i=>i.targets.includes(host.target)&&
+      (host.target==="opening"?i.group===(host.opening?.size.door?"doors":"windows"):
+        host.target==="wall"||host.target==="ceiling"?i.group==="paint":
+        host.target==="floor"?i.group==="floors":host.target==="roof"?i.group==="roofing":i.group==="tapware"));
+    if(!probe)return null;
+    const result=candidate(ray,probe);
+    return result.hit&&result.hit.hostId===host.id?{hit:result.hit,worldPoint:first.point.toArray() as Vector}:null;
+  }
+
   function aim(hit: ItemHit | null) {
     marker.visible = false;
     if (!hit) return;
     const host = [...hosts.values()].find(entry => entry.id === hit.hostId);
     if (!host) return;
     const normal = new THREE.Vector3(...hit.normal).applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(host.mesh.matrixWorld));
-    marker.position.copy(host.mesh.localToWorld(new THREE.Vector3(...hit.point))).addScaledVector(normal, 0.015);
+    marker.position.copy(host.mesh.localToWorld(new THREE.Vector3(...hit.point))).addScaledVector(normal, 0.015+(host.halfThickness??0));
     marker.quaternion.setFromUnitVectors(front, normal);
     marker.visible = true;
   }
 
-  return { sync, clear, candidate, aim };
+  return { sync, clear, candidate, aim, contextAt, updatePreviewLights, previewSwitchDistance };
 }
