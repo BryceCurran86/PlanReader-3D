@@ -825,9 +825,8 @@ def _generate_project_handoff_locked(
             **({"source_glyph_ledger_text_trust": True}
                if source_glyph_ledger_text_trust else {}),
         )
-        stage_started = _runtime_checkpoint(stage_started, "physical_claim")
         _gc_stage_boundary()
-        stage_started = _runtime_checkpoint(stage_started, "physical_claim_gc")
+        stage_started = _runtime_checkpoint(stage_started, "physical_claim_and_gc")
     except Exception as exc:
         _runtime_checkpoint(stage_started, "physical_claim_failed")
         summary["status"] = "production_failed"
