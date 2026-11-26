@@ -9,8 +9,9 @@ import random
 
 import pytest
 
+import pb_next_wall_ring_preview as tracer
 from pb_user_assisted_review_topology import BarrierRecorder, plan_review
-from tests.test_user_assisted_review_topology_v1 import _bar, _mark, _missing_wall_room, _packet, _trace
+from tests.test_user_assisted_review_topology_v1 import _assisted, _bar, _mark, _missing_wall_room, _packet, _trace
 
 
 def _second_room(dx=500):
@@ -102,20 +103,45 @@ def test_a_mark_changes_only_the_room_it_touches(marks, changed):
         assert marked.rings == ()
 
 
-@pytest.mark.xfail(strict=True, reason="room record ids hash the corner list as shapely returns it; #4764 report, no fix yet")
 def test_an_untouched_room_keeps_its_record_id_after_a_mark_elsewhere():
     recorder, automatic = _recorded(ROWS)
     marked = _trace(ROWS, barrier_view=plan_review(_packet(GAP_WALL), recorder))
     assert {ring.record_id for ring in automatic.rings} <= {ring.record_id for ring in marked.rings}
 
 
-@pytest.mark.xfail(strict=True, reason="the same corner-order dependence; reordering input lines changes the ids")
-def test_room_record_ids_do_not_depend_on_input_order():
-    ids = {ring.record_id for ring in _trace(ROWS).rings}
-    for seed in range(8):
-        rows = list(ROWS)
-        random.Random(seed).shuffle(rows)
-        assert {ring.record_id for ring in _trace(rows).rings} == ids
+def test_the_review_block_keeps_an_untouched_room_as_the_automatic_one():
+    _automatic, _user, block = _assisted(ROWS, GAP_WALL)
+    assert sorted(room["same_as_automatic"] for room in block["rooms"]) == [False, True]
+
+
+def _notched_room(dx=900):
+    """A closed L-shaped room, so its corner list has more than four places to start."""
+    return [_bar(dx, 100, dx + 200, 106), _bar(dx, 106, dx + 6, 300), _bar(dx + 194, 106, dx + 200, 200),
+            _bar(dx + 100, 194, dx + 194, 200), _bar(dx + 100, 200, dx + 106, 300), _bar(dx + 6, 294, dx + 100, 300)]
+
+
+def test_room_corner_lists_do_not_depend_on_input_order():
+    rows = ROWS + _notched_room()
+    shapes = sorted((r.polygon_pdf_pts, r.status.value, r.reason_codes) for r in _trace(rows).rings)
+    assert len(shapes) == 2
+    for seed in range(12):
+        shuffled = list(rows)
+        random.Random(seed).shuffle(shuffled)
+        assert sorted((r.polygon_pdf_pts, r.status.value, r.reason_codes) for r in _trace(shuffled).rings) == shapes
+
+
+def test_a_ring_starts_at_its_smallest_corner_and_turns_one_way():
+    rng = random.Random(20261127)
+    for _ in range(500):
+        count = rng.randrange(3, 12)  # few distinct values, so the smallest corner often appears twice
+        ring = tuple((rng.choice((0.0, 5.0, 10.0)), rng.choice((0.0, 5.0, 10.0, 15.0))) for _ in range(count))
+        expected = tracer._canonical_ring(ring)
+        assert sorted(expected) == sorted(ring) and expected[0] == min(ring)
+        turn = rng.randrange(count)
+        assert tracer._canonical_ring(ring[turn:] + ring[:turn]) == expected
+        if abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(ring, ring[1:] + ring[:1]))) > 1e-9:
+            backwards = ring[::-1]
+            assert tracer._canonical_ring(backwards[turn:] + backwards[:turn]) == expected
 
 
 def test_the_order_of_marks_does_not_matter():

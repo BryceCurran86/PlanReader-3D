@@ -45,9 +45,13 @@ Never:
 
 Confirmed on synthetic pages: the pieces offered to the marks do not depend on them; pieces recorded once give the same rooms as a fresh run for every later packet, including undo; marks that are not barriers leave rooms unchanged; a mark changes only the room it touches (compared by geometry); mark order does not matter.
 
-**Open defect (two strict xfail tests):** a room's `record_id` hashes its corner list as shapely returns it, so closing a gap in one room changes an untouched room's id, and reordering the input lines changes ids (40 of 40 shuffles on a one-room page). Consequences: per-room invalidation by id is not possible, and the review block reports `same_as_automatic: false` for unchanged rooms. Until fixed, dependents must key on canonical geometry or treat every receipt as stale. Proposed, not built (needs review): start each room's corner list at its smallest corner in `pb_next_wall_ring_preview` (ids change once; geometry unchanged), or only compare canonical geometry in the review block.
+**Fixed (2026-11-27, owner approved):** a room's `record_id` hashed its corner list as shapely returned it, so closing a gap in one room changed an untouched room's id, and the review block reported `same_as_automatic: false` for unchanged rooms. `pb_next_wall_ring_preview` now writes every ring turning the same way and starting at its smallest corner, before the edge owners and the id are computed. Geometry is unchanged; preview room ids change once. Dependents may now invalidate per room id.
 
-C08 stays open until the API is agreed and the id defect is decided.
+Limits:
+- ids still name source paths by their position in the drawing list, so reordering the same lines changes ids (corner lists do not change); one source file always lists them in one order.
+- `pb_layered_wall_doorway_room_ring_shadow` has the same corner-order pattern. It feeds the benchmark handoff, so it is not changed here: its receipts would change.
+
+C08 stays open until the API is agreed.
 
 ## One measurement (one residential floor plan page: one tracer pass, 18 rooms)
 

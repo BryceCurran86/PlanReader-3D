@@ -2144,6 +2144,23 @@ def _dedupe_ring(coords: Sequence[tuple[float, float]]) -> tuple[tuple[float, fl
     return tuple(out)
 
 
+def _canonical_ring(coords: Sequence[tuple[float, float]]) -> tuple[tuple[float, float], ...]:
+    """The same ring, always turning the same way (shoelace sum not positive) and starting at its smallest corner.
+
+    The geometry library may start a ring at any corner, and which corner it picks changes when unrelated barriers are
+    added or the source rows are reordered. A room's record id hashes its corner list, so it must not depend on that.
+    """
+    ring = tuple(coords)
+    if len(ring) < 3:
+        return ring
+    twice_area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(ring, ring[1:] + ring[:1]))
+    if twice_area > 0:
+        ring = ring[::-1]
+    smallest = min(ring)
+    start = min((i for i, point in enumerate(ring) if point == smallest), key=lambda i: ring[i:] + ring[:i])
+    return ring[start:] + ring[:start]
+
+
 def _split_at_closures(
     coords: Sequence[tuple[float, float]], closures: Sequence[tuple[bool, tuple[float, float], float, float]],
 ) -> tuple[tuple[float, float], ...]:
@@ -2792,7 +2809,9 @@ def build_layered_wall_doorway_room_rings(
         if adjacent_open:
             reasons.append(REASON_OPEN_GAP)
         base = _dedupe_ring(tuple((round(x, 4), round(y, 4)) for x, y in list(part.exterior.coords)[:-1]))
-        coords = _dedupe_ring(_split_at_closures(base, [(c.horizontal, c.band, c.gap_interval[0], c.gap_interval[1]) for c in closures]))
+        coords = _canonical_ring(_dedupe_ring(
+            _split_at_closures(base, [(c.horizontal, c.band, c.gap_interval[0], c.gap_interval[1]) for c in closures])
+        ))
         closure_edges = 0
         wall_edges = 0
         unowned_edges = 0
