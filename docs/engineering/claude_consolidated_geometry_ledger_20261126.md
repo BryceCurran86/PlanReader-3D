@@ -1,6 +1,6 @@
 # Claude consolidated geometry release: ledger (26 Nov 2026)
 
-One pull request for the ten speed tasks (owner work order #4764 7192370711, three-merge rule 7192384436) and the register areas assigned to Claude (`OWNER_100_AREA_RECOVERY_REGISTER_20261126.md` at 17914a59b). Draft until the one combined before/after check; nothing here is a release claim.
+One pull request for the ten speed tasks (owner work order #4764 7192370711, three-merge rule 7192384436) and the register areas assigned to Claude (`OWNER_100_AREA_RECOVERY_REGISTER_20261126.md` at 17914a59b). Draft; nothing here is a release claim. The one combined before/after check is recorded below.
 
 ## Profile used for C03-C07
 
@@ -19,12 +19,29 @@ One cProfile of one residential original on the combined branch with C01 and C02
 | C07 room-ring assembly | built | plain-float shortcut for the room-edge check (parity over 40,000 shapes; 1.15 to 0.27 microseconds per check) |
 | C08 recalculation after corrections | blocked | needs the correction contract (MAX M02) |
 | C09 historical geometry donors | audited | register table below; #4166 recovered (owner approved 26 Nov) |
-| C10 geometry test speed, exclusive replay | open | the one combined before/after check; CI sharding is MAX M06/M07 |
+| C10 geometry test speed, exclusive replay | done | the combined before/after check below; CI sharding is MAX M06/M07 |
 
 Not done, found by the profile: the opening label step re-reads page words for every opening (about 2% of the profiled run; the C01 reuse pattern would apply).
 
 Tests: the 168 test files that import a changed module: 3,589 passed, 5 skipped (17 of them need an original at its repository path and passed where it is present).
 The 123 other test files of the register areas: 3,319 passed, 7 skipped; 2 fail the same way on `main` (the Banksia exterior-loop census and the pinned window candidate set of one residential original, both reported earlier).
+With #4166 and its counted check: the 287 test files touching the opening or source-visibility code: 5,558 passed (10 that need an original rerun where it is present), 92 skipped, 3 xfailed.
+
+## Combined before/after check
+
+`main` 4cbf46356 against this branch, all four originals through the all-source-role handoff, one run at a time, on one shared desktop. The first check (code 895568828) kept every output identical but showed one step repeatably slower: a brochure page in the Q5446 set, +40 s of 69 s profiled. Cause: the recovered #4166 check compared every raster receipt on every proof, so cost grew with the square of the page's primitive count. Fixed (b5e07b28e) by counting writes to the producer's receipt table; any other mapping is still compared entry by entry. The check below is a new after-side run of all four on the final code against the same before outputs.
+
+| Original | Before (s) | Final code (s) |
+|---|---:|---:|
+| Q5446 | 94 (repeat 85) | 85 |
+| Lot16 | 695 | 492 |
+| 3Laurel | 408 | 320 |
+| Maryborough | 904 | 727 |
+| All four | 2101 | 1624 |
+
+- All JSON outputs identical on all four originals (statuses, sealed receipts, summaries, customer rows); verified customer rows 65 before and 65 after.
+- Peak private memory within 20 MB of `main` or lower on every role (largest rise: Maryborough, 0.5%); 3Laurel working set +123 MB.
+- Timing caveat: my hub checks and a few short tests overlapped the before runs of the first two originals, so the 3Laurel (-22%) and Maryborough (-20%) figures are the cleanest.
 
 ## Register areas assigned to Claude
 
@@ -45,9 +62,9 @@ The 123 other test files of the register areas: 3,319 passed, 7 skipped; 2 fail 
 | 23 | Sliding door hosts | `pb_source_sliding_door_footprint_continuity` (app, extractor, preview) | current; tests pass; C02 speeds it |
 | 24 | G17 W2 ownership #4215 | donor not on main | closed unmerged; 16 new definitions absent; 3 donor test files cannot import |
 | 25 | Disconnected frame veto #4186 | alternate path still in `_shared_host_frame` | closed unmerged; 6 of 29 donor tests fail on main; needs original replay |
-| 27 | Opening source invalidation #4166 | `pb_physical_opening_authority` (all) | recovered in this release: on `main` a cached raster opening proof stays corroborated after a supporting receipt is removed or changed (9 of its 10 tests fail there; all 10 pass here) |
+| 27 | Opening source invalidation #4166 | `pb_physical_opening_authority` (all) | recovered in this release: on `main` a cached raster opening proof stays corroborated after a supporting receipt is removed or changed (9 of its 10 tests fail there; all pass here), with the receipt table's writes counted so the check is constant time |
 | 28 | Door frame height | `pb_door_height_owner_gate_shadow` (all); #4211 merged | current; tests pass; default-off |
-| 30 | Door ancestry #4153 | `pb_gpt2_original_source_geometry_bridge` (benchmark) | definitions on main; 22 of 369 donor tests differ (main offers a material candidate where the donor expected abstention): refer to MAX |
+| 30 | Door ancestry #4153 | `pb_gpt2_original_source_geometry_bridge` (benchmark) | definitions on main; 22 of 369 donor tests differ: in the 20 behaviour cases main grants no quantity or authority (8 abstain with another reason, 12 offer a diagnostic material candidate where the donor abstained, including a mark on the room edge), 2 are stale test stubs. MAX 7194290495 accepts candidates as diagnostic only; reply 7194441147 |
 | 35 | Schedule census | `pb_schedule_opening_instance_binding_authority` | C01, in this release |
 | 42 | Local room geometry reuse | `pb_source_room_face_authority` | C07, in this release (room-edge check) |
 | 51 | Wet/dry classes #4242 | module not on main | blocked: finished-face receipts unresolved (frame thickness, wall fill, external lining), per the archive note |
@@ -70,6 +87,6 @@ The 123 other test files of the register areas: 3,319 passed, 7 skipped; 2 fail 
 Uncommitted changes in 142 Claude worktrees (line endings ignored; definitions checked against `main`):
 - Superseded or on `main`: preview and ring work-in-progress trees, glyph mapping, text clip polygon, scale block bar, review-1275, the canonical wall room model, the dictionary-flags fix, and the figured-unit mismatch fix (`main` abstains too, with a different reason code: 84 of 86 of its tests pass).
 - Not on `main`, for the owning lane (not changed here):
-  - Clip association with non-clip groups (`pb_vector_geometry_v130.py`, AntiGravity A01): 4 of 23 tests fail on `main`.
-  - Page-scale mapper (MAX scale): returns FIRM for a hand-built VALID record of any non-title-block source, and for USER_APPROVED with a blank approver; 20 of 72 tests fail on `main`. `main`'s resolver does not itself build such records for unknown sources, and `approve_page_scale_calibration` has no caller, so no live path was found.
+  - Clip association with non-clip groups (`pb_vector_geometry_v130.py`, AntiGravity A01): 4 of 23 tests fail on `main`. Pushed as donor `claude/vector-clip-group-scopes-20261017` (96e88fa289); AntiGravity reports it reconciled into #4807.
+  - Page-scale mapper (MAX scale): returns FIRM for a hand-built VALID record of any non-title-block source, and for USER_APPROVED with a blank approver; 20 of 72 tests fail on `main`. `main`'s resolver does not itself build such records for unknown sources, and `approve_page_scale_calibration` has no caller, so no live path was found. Pushed as donor `claude/page-scale-tie-order-20261017` (5196a42f19) for MAX.
 - Kept as parked research, not recovered: Ghazi raster wall network evidence, finish-definition shadow, U1 lineage tracing script.
