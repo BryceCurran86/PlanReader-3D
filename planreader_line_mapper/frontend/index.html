@@ -45,7 +45,8 @@
     imageKey: null, revision: -1, pxPerM: 0, lines: [], rows: [],
     activeRowId: null, tool: 'line', drawing: null,
     selectedId: null, hover: null, natW: 0, natH: 0, cw: 0, ch: 0, imgEl: null, review: false,
-    zoom: 1, fitW: 1100, labels: false, drag: null
+    zoom: 1, fitW: 1100, labels: false, drag: null,
+    snapMode: false, snapEnabled: true, snapTargets: [], snapHit: null
   };
 
   function post(type, payload) {
@@ -357,6 +358,14 @@
       }
       ctx.restore();
     }
+    if (state.snapMode && state.snapHit) {
+      ctx.save();
+      ctx.strokeStyle = '#00d1b2'; ctx.lineWidth = 2;
+      var sx = state.snapHit.x / 100 * w, sy = state.snapHit.y / 100 * h;
+      ctx.beginPath(); ctx.arc(sx, sy, 9, 0, 2 * Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx-13, sy); ctx.lineTo(sx+13, sy);
+      ctx.moveTo(sx, sy-13); ctx.lineTo(sx, sy+13); ctx.stroke(); ctx.restore();
+    }
   }
 
   function toPct(ev) {
@@ -366,6 +375,45 @@
       x: clamp01((ev.clientX - rect.left) / rect.width) * 100,
       y: clamp01((ev.clientY - rect.top) / rect.height) * 100
     };
+  }
+
+  // Review-only: constant screen-pixel radius, no ambiguous snap.
+  function nearestReviewSnap(p, targets, width, height, radius) {
+    var best = null, bestD = Infinity, secondD = Infinity;
+    var seen = new Set();
+    targets.forEach(function (t) {
+      if (!t || !Number.isFinite(t.x) || !Number.isFinite(t.y) ||
+          t.x < 0 || t.x > 100 || t.y < 0 || t.y > 100) return;
+      var k = t.x.toFixed(7) + ',' + t.y.toFixed(7);
+      if (seen.has(k)) return;
+      seen.add(k);
+      var d = Math.hypot((t.x - p.x) * width / 100, (t.y - p.y) * height / 100);
+      if (d > radius) return;
+      if (d < bestD) { secondD = bestD; bestD = d; best = t; }
+      else if (d < secondD) secondD = d;
+    });
+    return best && secondD - bestD > 1.5 ? {x: best.x, y: best.y} : null;
+  }
+
+  function reviewPoint(ev, p, excludeId) {
+    state.snapHit = null;
+    if (!state.snapMode || !state.snapEnabled || ev.altKey) return p;
+    var rect = canvasEl().getBoundingClientRect();
+    if (!rect.width || !rect.height) return p;
+    var targets = state.snapTargets.slice();
+    state.lines.forEach(function (ln) {
+      if (ln.id === excludeId) return;
+      var pts = ln.kind === 'polygon' ? (ln.points || []) : [[ln.x1, ln.y1], [ln.x2, ln.y2]];
+      pts.forEach(function (q) { targets.push({x:q[0], y:q[1]}); });
+    });
+    if (state.drawing && state.drawing.type === 'line' && state.drawing.p1) {
+      var a = state.drawing.p1;
+      targets = targets.filter(function (t) {
+        return Math.hypot((t.x-a[0])*rect.width/100, (t.y-a[1])*rect.height/100) > 0.5;
+      });
+    }
+    state.snapHit = nearestReviewSnap(p, targets, rect.width, rect.height, 10);
+    return state.snapHit || p;
   }
 
   function distToSeg(px, py, ax, ay, bx, by) {
@@ -411,6 +459,7 @@
   function canvasClick(ev) {
     var p = toPct(ev);
     if (state.tool === 'select') return;
+    p = reviewPoint(ev, p, null);
     if (state.tool === 'line') {
       if (!state.drawing) {
         state.drawing = { type: 'line', p1: [p.x, p.y], rowId: state.activeRowId };
@@ -478,6 +527,11 @@
 
   function canvasMove(ev) {
     state.hover = toPct(ev);
+    if (state.tool !== 'select' || (state.drag && state.drag.type === 'vertex')) {
+      state.hover = reviewPoint(ev, state.hover, state.drag ? state.drag.id : null);
+    } else {
+      state.snapHit = null;
+    }
     if (state.drag) {
       var ln = lineById(state.drag.id);
       if (ln) {
@@ -588,7 +642,7 @@
         txt = row2 ? ('Drawing for · ' + (row2.label || 'row') + ' · ' + (row2.unit || '')) : 'Pick a take-off row to draw';
       }
     }
-    el.textContent = txt;
+    el.textContent = txt + (state.snapHit ? ' · Snapped to review candidate' : '');
   }
 
   function closeOutline() {
@@ -619,7 +673,7 @@
     rowPick.className = 'row-pick';
     var rowLabel = document.createElement('span');
     rowLabel.className = 'hint';
-    rowLabel.textContent = 'Take-off row:';
+    rowLabel.textContent = state.snapMode ? 'Correction:' : 'Take-off row:';
     rowPick.appendChild(rowLabel);
     var sel = document.createElement('select');
     sel.id = 'pr_row_select';
@@ -686,6 +740,17 @@
     selBtn.className = state.tool === 'select' ? 'active' : '';
     selBtn.addEventListener('click', function () { state.tool = 'select'; state.drawing = null; render(); });
     btns.appendChild(selBtn);
+    if (state.snapMode) {
+      var snapBtn = document.createElement('button');
+      snapBtn.type = 'button';
+      snapBtn.textContent = state.snapEnabled ? 'Snap: ON' : 'Snap: OFF';
+      snapBtn.className = state.snapEnabled ? 'active' : '';
+      snapBtn.title = 'Snap to candidate endpoints and your drawn vertices. Hold Alt to bypass.';
+      snapBtn.addEventListener('click', function () {
+        state.snapEnabled = !state.snapEnabled; state.snapHit = null; render();
+      });
+      btns.appendChild(snapBtn);
+    }
     var reviewBtn = document.createElement('button');
     reviewBtn.type = 'button';
     reviewBtn.textContent = state.review ? 'Review map: ON' : 'Review map (coverage)';
@@ -805,8 +870,8 @@
       cv.addEventListener('pointerdown', canvasDown);
       cv.addEventListener('pointerup', canvasUp);
       cv.addEventListener('pointermove', canvasMove);
-      cv.addEventListener('pointerleave', function () { state.hover = null; updateLive(); draw(); });
-      cv.addEventListener('pointercancel', function () { if (state.drag) { state.drag = null; postValue(); } state.hover = null; updateLive(); draw(); });
+      cv.addEventListener('pointerleave', function () { state.hover = null; state.snapHit = null; updateLive(); draw(); });
+      cv.addEventListener('pointercancel', function () { if (state.drag) { state.drag = null; postValue(); } state.hover = null; state.snapHit = null; updateLive(); draw(); });
       cv.addEventListener('touchstart', function (ev) { if (ev.touches.length === 1) ev.preventDefault(); }, { passive: false });
       state.fitW = Math.min(1100, state.cw);
       applyZoom();
@@ -909,6 +974,11 @@
     var revision = num(args.revision, 0);
     var newPx = num(args.px_per_m, 0);
     var newActive = parseInt(args.active_row_id, 10);
+    var newSnapMode = args.review_snap_mode === true;
+    if (newSnapMode !== state.snapMode) { state.snapEnabled = true; state.snapHit = null; }
+    state.snapMode = newSnapMode;
+    state.snapTargets = newSnapMode && Array.isArray(args.review_snap_targets) ?
+      args.review_snap_targets.slice(0, 2048) : [];
     if (!state.imageKey || image !== state.imageKey || revision !== state.revision) {
       state.imageKey = image;
       state.revision = revision;
