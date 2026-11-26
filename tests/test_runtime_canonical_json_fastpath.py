@@ -78,3 +78,22 @@ def test_seeded_nested_payloads_preserve_wire_bytes_and_mutation_semantics():
         payload["changed"] = 1
         assert canonical_contract_json(payload) == reference(payload)
         assert canonical_contract_json(payload) != first
+
+
+def test_stable_id_prefix_fast_path_preserves_original_normalization():
+    import re
+    from hashlib import sha256
+    from pb_migration_contracts import stable_contract_id, canonical_contract_json
+
+    payload = {"b": 4, "a": [2, "wall"]}
+    digest = sha256(canonical_contract_json(payload).encode("utf-8")).hexdigest()
+    for prefix in ("source_observation", "a", "0", "a__b", " A-B ",
+                   "_a_", "Éwall", "Ａ", "x\n", "x y", 123):
+        expected = re.sub(r"[^a-z0-9_]+", "_",
+                          str(prefix or "").strip().lower()).strip("_")
+        if expected:
+            for width in (8, 20, 64):
+                assert stable_contract_id(prefix, payload, digest_chars=width) == f"{expected}_{digest[:width]}"
+        else:
+            with pytest.raises(ValueError, match="prefix"):
+                stable_contract_id(prefix, payload)
