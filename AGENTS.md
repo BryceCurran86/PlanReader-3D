@@ -26,16 +26,21 @@ coordination reports, review checklists and agent handoffs. Do not recreate
 `ORIGINAL_SOURCES_TOKEN`, source-provisioning workflows or self-hosted
 private GitHub Actions jobs to get a score.
 
-**Official original benchmark:** use the existing Windows app checkout and
-`RUN_PLANREADER_WINDOWS.bat benchmark --check-only`, followed by
-`RUN_PLANREADER_WINDOWS.bat benchmark` under its local execution guards.
-Use already-supplied originals (including the owner's existing Windows
-`documents/sources` directory or verified ChatGPT Library archive) and four
-independent identity maps, with private results outside the repository.
-GitHub Actions is source-free Python 3.13/3.14 and security/regression CI only.
-Historical requests for "protected/private original replay" mean the
-**local original-source-to-signed-customer acceptance on this Windows path**,
-not a separate private hosted runner or an excuse to request files again.
+**Official original benchmark:** use the Windows app checkout or a fresh,
+SHA-256-pinned app ZIP on an authorized isolated execution environment.
+No PC connectivity is required. Run `python -B -m tools.run_frozen120_owner_benchmark`
+with `--input-bundle` pointing to an external root containing `sources/` and
+`identity-maps/`; the runner also discovers a sibling `benchmark-inputs` root
+or `~/PlanReader/benchmark-inputs`. Explicit paths/configuration remain supported.
+For ZIP execution supply `--app-archive` and independently pinned
+`--archive-sha256`; a ZIP comment alone does not prove a Git revision. The
+archive and extracted bytes must match throughout execution. First use
+`--check-only`, then execute with the existing disconnected-network guard
+(e.g. a network namespace on Linux, or `--linux-process-isolation` with
+libseccomp installed to deny sockets in the trusted benchmark process tree). Private results stay outside the app tree.
+GitHub Actions remains source-free Python 3.13/3.14 and regression/security CI only.
+Historical protected replay means original-source-to-signed-customer acceptance
+in the authorized isolated environment, not a hosted private runner.
 
 Retiring the runner does **not** certify replay or relax source identity,
 physical/metric authority, signed/customer byte retention, security or the

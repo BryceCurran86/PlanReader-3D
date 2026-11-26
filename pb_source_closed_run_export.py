@@ -241,7 +241,13 @@ class SealedSourceClosedQuantity:
         ).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
-        return {**self.payload(), "fingerprint": self.fingerprint}
+        # Hash the exact freshly constructed wire payload instead of rebuilding
+        # it through the fingerprint property. No cached trust survives calls.
+        payload = self.payload()
+        fingerprint = hashlib.sha256(
+            canonical_contract_json(payload).encode("utf-8")
+        ).hexdigest()
+        return {**payload, "fingerprint": fingerprint}
 
 
 def sealed_source_closed_run_from_dict(
@@ -523,7 +529,13 @@ class SealedSourceClosedRun:
         ).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
-        return {**self.payload(), "fingerprint": self.fingerprint}
+        # Hash the exact freshly constructed wire payload instead of rebuilding
+        # it through the fingerprint property. No cached trust survives calls.
+        payload = self.payload()
+        fingerprint = hashlib.sha256(
+            canonical_contract_json(payload).encode("utf-8")
+        ).hexdigest()
+        return {**payload, "fingerprint": fingerprint}
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"

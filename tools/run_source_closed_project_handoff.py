@@ -12,6 +12,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import cProfile
+import io
+import pstats
+import sys
+from time import perf_counter
 from dataclasses import replace
 import gc
 import hashlib
@@ -76,6 +81,42 @@ from pb_source_closed_run_export import (
     SealedSourceClosedRun,
     combine_source_closed_runs,
 )
+
+
+def _runtime_log(message: str) -> None:
+    """Best-effort counts/timings only; diagnostics never grant source authority."""
+    try:
+        print(message, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
+def _runtime_checkpoint(previous: float, stage: str) -> float:
+    now = perf_counter()
+    if os.environ.get("PB_SOURCE_HANDOFF_PROFILE") in {"stages", "cpu"}:
+        _runtime_log(f"SOURCE_STAGE {stage} elapsed_seconds={now - previous:.6f}")
+    return now
+
+
+@contextlib.contextmanager
+def _profile_source_handoff():
+    """Opt-in private process CPU profile, including unsuccessful source runs."""
+    if os.environ.get("PB_SOURCE_HANDOFF_PROFILE") != "cpu":
+        yield
+        return
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        yield
+    finally:
+        profiler.disable()
+        # Never dump PDF text, geometry, arguments or customer data.
+        # Function names, line numbers, call counts and timings only.
+        stream = io.StringIO()
+        pstats.Stats(profiler, stream=stream).strip_dirs().sort_stats(
+            "cumulative"
+        ).print_stats(40)
+        _runtime_log("SOURCE_CPU_PROFILE\n" + stream.getvalue())
 
 
 def _clean(value: object) -> str:
@@ -568,6 +609,7 @@ def _generate_project_handoff_locked(
     owner_door_height_approvals: Optional[Any] = None,
     owner_door_approvals_template: bool = False,
 ) -> dict[str, Any]:
+    stage_started = perf_counter()
     clean_family_group = _validate_source_handoff_inputs(
         pdf_path, project_id, workspace_id, family_group,
     )
@@ -765,6 +807,7 @@ def _generate_project_handoff_locked(
     # Keep the claim and both optional owner-review lanes on the same source
     # policy. Another door's page height cannot supply a target's second axis.
     single_width_uniform_page_door_height_shadow = False
+    stage_started = _runtime_checkpoint(stage_started, "source_preflight_and_scope")
     try:
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
@@ -783,7 +826,9 @@ def _generate_project_handoff_locked(
                if source_glyph_ledger_text_trust else {}),
         )
         _gc_stage_boundary()
+        stage_started = _runtime_checkpoint(stage_started, "physical_claim_and_gc")
     except Exception as exc:
+        _runtime_checkpoint(stage_started, "physical_claim_failed")
         summary["status"] = "production_failed"
         summary["production_error_type"] = type(exc).__name__
         summary["production_error_message"] = str(exc)
@@ -844,6 +889,7 @@ def _generate_project_handoff_locked(
             "official_benchmark_scored": False,
         }
 
+    stage_started = _runtime_checkpoint(stage_started, "claim_diagnostics")
     family_runs: list[tuple[str, SealedSourceClosedRun]] = []
 
     if clean_family_group in {"all", "surfaces", "floor_area"}:
@@ -1052,6 +1098,7 @@ def _generate_project_handoff_locked(
 
     new_ceiling_quantities: tuple[QuantityEvidence, ...] = ()
     legacy_ceiling_quantities: tuple[QuantityEvidence, ...] = ()
+    stage_started = _runtime_checkpoint(stage_started, "floor_wall_opening_families")
     ceiling_result = None
     if clean_family_group in {"all", "surfaces"}:
         new_ceiling_quantities = _non_abstained(
@@ -1198,6 +1245,7 @@ def _generate_project_handoff_locked(
         )
         family_runs.append(("ceiling_area", ceiling_run))
 
+    stage_started = _runtime_checkpoint(stage_started, "ceiling_families")
     # The extractor may reread the file across page/source passes. Reject
     # replaced input PDFs before writing *any* family/customer seal artifact.
     try:
@@ -1309,6 +1357,7 @@ def _generate_project_handoff_locked(
             _write_json(output_dir / "production_summary.json", summary)
             raise RuntimeError("combined sealed run has conflicting source SHA envelope")
 
+    stage_started = _runtime_checkpoint(stage_started, "source_and_family_reconciliation")
     verified_partial_customer_rows = None
     if combined is not None and (clean_family_group == "floor_area" or (
         clean_family_group == "core" and source_plan_page_index is not None
@@ -1613,6 +1662,7 @@ def _generate_project_handoff_locked(
                 f"SURFACES_CUSTOMER_UNVERIFIED:{type(exc).__name__}"
             )
 
+    stage_started = _runtime_checkpoint(stage_started, "customer_verification")
     for family, run in family_runs:
         run_path = _write_run(output_dir, family, run)
         summary["family_run_ids"][family] = run.run_id
@@ -1731,6 +1781,7 @@ def _generate_project_handoff_locked(
             },
         )
     _write_json(output_dir / "production_summary.json", summary)
+    _runtime_checkpoint(stage_started, "publish_and_review")
     return summary
 
 
@@ -1976,7 +2027,7 @@ def generate_project_handoff(
         lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600,
     )
     try:
-        with _bulk_source_gc_regime():
+        with _bulk_source_gc_regime(), _profile_source_handoff():
             return _generate_project_handoff_locked(
                 pdf_path=pdf_path,
                 project_id=project_id,
