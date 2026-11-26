@@ -36,7 +36,8 @@ import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type {CatalogueGroup} from "./itemCatalogue";
-import {contextGroups,contextChoices,initialFinishGroup} from "./contextFinishes";
+import {contextGroups,contextChoices,initialFinishGroup,refreshFinishContext,activeContextFinish} from "./contextFinishes";
+import {applyMaterialDetailBudget} from "./materialQuality";
 import type {FinishContext} from "./contextFinishes";
 import {createOutdoorEnvironment} from "./outdoorEnvironment";
 import type { ControlMode, HistoryAction } from "./editorControls";
@@ -509,11 +510,13 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function menuLayout(hint: string) {
       const { buildState, buildLevel } = build.current;
       const { active, canUndo, turn } = itemControls.current;
+      const liveContext=finishContext&&refreshFinishContext(finishContext,itemControls.current.items);
+      const activeFinishId=liveContext?activeContextFinish(liveContext,finishGroup,itemControls.current.items):undefined;
       const layout=buildMenuLayout(buildState, buildLevel, itemBrowser, active, canUndo, turn, hint,
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
-          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext,finishGroup,finishPage,
+          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext:liveContext,finishGroup,finishPage,activeFinishId,
            selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, angleTools, feedback:interaction.current.toolFeedback, gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
@@ -534,6 +537,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(choice.action==="close"){closeTools();return;}
         if(choice.action==="back"){if(finishGroup){finishGroup=null;finishPage=0;}else finishContext=null;return;}
         if(!finishContext)return;
+        const liveContext=refreshFinishContext(finishContext,itemControls.current.items);
+        if(!liveContext){closeTools();reportTool("Selected fitting is no longer available. Aim at a current object.");return;}
+        finishContext=liveContext;
         if(choice.action==="hardware"&&choice.hardware){
           const hit=finishContext.hit;
           if(hit.target!=="opening"||!hit.opening?.door||!hit.hostId.startsWith("opening:"))return;
@@ -2038,6 +2044,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       let activeDimensionRay=false;
       if (renderer.xr.isPresenting) {
         // Cache the menu model and avoid large canvas uploads on every XR frame.
+        if(toolsOpen&&finishContext&&!refreshFinishContext(finishContext,itemControls.current.items)){closeTools();reportTool("Selected fitting is no longer available. Aim at a current object.");}
         if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=100)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
         const layout=toolsOpen?cachedMenu:null;
         if(layout){
@@ -2197,7 +2204,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items,renderer.xr.isPresenting];
       if(!nextMaterialKey.every((v,i)=>v===materialBudgetKey[i])){
         materialBudgetKey=nextMaterialKey;
-        for(const layer of [wallAdditionLayer,shellGroup])layer.traverse(obj=>{if(obj instanceof THREE.Mesh&&obj.material instanceof THREE.MeshStandardMaterial){const m=obj.material;const original=m.userData.originalBump??m.bumpMap;if(original)m.userData.originalBump=original;const map=budget.detail?original??null:null;if(m.bumpMap!==map){m.bumpMap=map;m.needsUpdate=true;}const originalNormal=m.userData.originalNormal??m.normalMap;if(originalNormal)m.userData.originalNormal=originalNormal;const normal=budget.detail?originalNormal??null:null;if(m.normalMap!==normal){m.normalMap=normal;m.needsUpdate=true;}}});
+        for(const layer of [wallAdditionLayer,shellGroup])applyMaterialDetailBudget(layer,budget.detail);
+        itemView.setDetailEnabled(budget.detail);
       }
       grid.visible = activeInspection.showGrid&&!outdoor;
       const useShadows=activeInspection.showShadows&&budget.shadows;

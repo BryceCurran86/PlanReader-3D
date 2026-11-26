@@ -41,6 +41,7 @@ export function displayedMenuAction(shown:MenuLayout|null,current:MenuLayout,ind
 
 /** Move one enabled rectangular key in the requested direction; stay at an edge. */
 export function adjacentMenuButton(layout:MenuLayout,index:number,dx:number,dy:number):number{
+ if(!Number.isFinite(dx)||!Number.isFinite(dy))return index;
  const enabled=layout.buttons.map((b,i)=>({b,i})).filter(({b})=>!b.disabled);
  if(!enabled.length)return -1;
  const current=layout.buttons[index];if(!current||current.disabled)return enabled[0].i;

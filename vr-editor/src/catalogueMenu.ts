@@ -58,7 +58,7 @@ export type MenuLayout = { title: string; width: number; height: number;
 export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
-  simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;
+  simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;activeFinishId?:string;
   rotationPivot?:WallRotationPivot; connectedRotation?:boolean; angleTools?:boolean; feedback?:string;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
@@ -118,7 +118,7 @@ export function buildMenuLayout(
     const page=Math.max(0,quest.finishPage??0);
     if(group){
       const choices=contextChoices(c,group),max=Math.max(0,Math.ceil(choices.length/6)-1),p=Math.min(page,max);
-      choices.slice(p*6,p*6+6).forEach((item,i)=>add(item.label,24+(i%2)*460,88+Math.floor(i/2)*84,440,74,{area:"finish",action:"apply",itemId:item.id},{active:c.entry?.itemId===item.id,swatch:item.visual.color}));
+      choices.slice(p*6,p*6+6).forEach((item,i)=>add(item.label,24+(i%2)*460,88+Math.floor(i/2)*84,440,74,{area:"finish",action:"apply",itemId:item.id},{active:(quest.activeFinishId??c.entry?.itemId)===item.id,swatch:item.visual.color}));
       add("Back",24,354,210,68,{area:"finish",action:"back"});
       add("Previous",250,354,210,68,{area:"finish",action:"page",step:-1},{disabled:p===0});
       add("Next",476,354,210,68,{area:"finish",action:"page",step:1},{disabled:p===max});

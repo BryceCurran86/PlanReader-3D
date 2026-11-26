@@ -2,6 +2,9 @@ import * as THREE from "three";
 export type ArchitecturalMap="wood-colour.jpg"|"wood-normal.jpg"|"wood-rough.jpg"|"plaster-normal.jpg"|"plaster-rough.jpg"|"grass-colour.jpg";
 export const architecturalAssetUrl=(name:ArchitecturalMap|"outdoor.hdr")=>new URL("architectural-assets/"+name,document.baseURI).href;
 const images=new Map<string,Promise<HTMLCanvasElement>>();
+// Separate Texture wrappers retain per-material disposal/UV ownership, while
+// Three can share the actual GPU allocation for identical Source+sampler keys.
+const sharedSources=new WeakMap<HTMLCanvasElement,THREE.CanvasTexture["source"]>();
 function sourceFor(name:ArchitecturalMap){
  let pending=images.get(name);
  if(!pending){
@@ -30,6 +33,8 @@ function sourceFor(name:ArchitecturalMap){
    image.src=architecturalAssetUrl(name);
   });
   images.set(name,pending);
+  const requested=pending;
+  void requested.catch(()=>{if(images.get(name)===requested)images.delete(name);});
  }
  return pending;
 }
@@ -51,7 +56,10 @@ export function photoTexture(name:ArchitecturalMap):THREE.Texture|null{
   texture.removeEventListener("dispose",onDispose);
   texture.dispose();
   texture.addEventListener("dispose",onDispose);
-  texture.image=source;texture.needsUpdate=true;
+  const shared=sharedSources.get(source);
+  if(shared)texture.source=shared;
+  else{texture.image=source;sharedSources.set(source,texture.source);}
+  texture.needsUpdate=true;
   document.documentElement.setAttribute("data-photo-"+name.replace(".jpg",""),"loaded");
  }).catch(error=>{console.error("Local photographic map unavailable",name,error);});
  return texture;
