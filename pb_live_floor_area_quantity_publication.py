@@ -129,6 +129,14 @@ def publish_live_floor_area_quantities(
         qid = _clean(quantity.quantity_id)
         if not qid:
             continue
+        # A FIRM geometric measurement can still explicitly forbid
+        # commercial projection. Preserve that upstream veto and quarantine
+        # contradictory FIRM replays of the same source identity.
+        metadata = quantity.metadata
+        if isinstance(metadata, Mapping) and metadata.get("commercial_projection_allowed") is False:
+            source_quantities.pop(qid, None)
+            conflicting_quantity_ids.add(qid)
+            continue
         if qid in conflicting_quantity_ids:
             continue
         previous = source_quantities.get(qid)
