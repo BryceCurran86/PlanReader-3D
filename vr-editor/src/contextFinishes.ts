@@ -35,3 +35,31 @@ export function contextTitle(c:FinishContext){
 }
 export function finishGroupLabel(group:CatalogueGroup){return group==="electrical"?"Power points / switches":group==="facades"?"External finishes":catalogueGroupLabel(group);}
 export function preferredFinishGroup(target:ItemTarget){return target==="wall"?"paint":target==="floor"?"floors":target==="opening"?"doors":target==="ceiling"?"paint":null;}
+
+/** Do not keep editing a removed or rehosted fixture from an old grip selection. */
+export function refreshFinishContext(context:FinishContext,items:readonly PlacedItem[]):FinishContext|null{
+ const old=context.entry&&getCatalogueItem(context.entry.itemId);
+ if(old?.visual.kind!=="fixture")return context;
+ const live=items.find(p=>p.id===context.entry!.id);
+ const next=live&&getCatalogueItem(live.itemId);
+ if(!live||!next||!sameFixtureFamily(old,next)||live.hostId!==context.hit.hostId||live.target!==context.hit.target)return null;
+ return live===context.entry?context:{...context,hit:live,entry:live};
+}
+/** Read the actual committed draft, not the palette's original selection snapshot. */
+export function activeContextFinish(context:FinishContext,group:CatalogueGroup|null,items:readonly PlacedItem[]):string|undefined{
+ if(!group)return;
+ const refreshed=refreshFinishContext(context,items);
+ if(!refreshed)return;
+ const selected=refreshed.entry&&getCatalogueItem(refreshed.entry.itemId);
+ if(selected?.visual.kind==="fixture")return selected.group===group?selected.id:undefined;
+ const hit=refreshed.hit;
+ const sideSensitive=hit.target==="wall"||hit.target==="opening";
+ return [...items].reverse().find(p=>{
+  const i=getCatalogueItem(p.itemId);
+  if(p.hostId!==hit.hostId||p.target!==hit.target||i?.group!==group)return false;
+  if(i.visual.kind==="fixture"||i.visual.kind==="design-assembly")return false;
+  // Opening styles covering both sides share one slot; coverings retain side.
+  const shared=hit.target==="opening"&&(i.visual.kind==="entry"||i.visual.kind==="opening-style"&&i.visual.type!=="covering");
+  return !sideSensitive||shared||p.side===hit.side;
+ })?.itemId;
+}
