@@ -138,7 +138,37 @@ def render_guided_plan_review(st, *, workspace, page, native_trace, doc_path,
              "Reference / explanation": v["note"], "Dimension (mm)": v["dimension_mm"]}
             for k, v in saved["answers"].items()
         ], hide_index=True, use_container_width=True)
+    st.markdown("**Prepare corrected geometry for the measurement engine**")
+    if saved["revision"] > 0:
+        from pb_guided_plan_review_native import build_native_review_packet
+        packet_key = f"guided_native_packet_{scope.key}"
+        packet = st.session_state.get(packet_key)
+        if packet is None or packet.get("review_revision") != saved["revision"]:
+            st.session_state.pop(packet_key, None)
+            try:
+                packet = build_native_review_packet(
+                    scope=scope, pdf_path=doc_path, image_bytes=image, saved=saved,
+                    canonical_report=report if overlay_matches else None,
+                )
+                st.session_state[packet_key] = packet
+            except (ValueError, OSError, RuntimeError, TypeError, KeyError) as exc:
+                packet = None
+                st.warning(f"Native correction handoff blocked: {exc}")
+        if packet is not None:
+            st.caption(
+                f"{len(packet['corrections'])} source-page correction marks prepared. "
+                "Affected stages: "
+                + (", ".join(packet["affected_stage_candidates"]) or "none proposed")
+                + ". Geometry and quantities have not yet been regenerated."
+            )
+            import json
+            st.download_button(
+                "Export private correction packet (JSON)",
+                data=json.dumps(packet, indent=2, sort_keys=True),
+                file_name=f"plan-review-page-{pdf_page}-r{saved['revision']}.json",
+                mime="application/json", key=prefix + "_packet",
+            )
     st.caption("Drafts are stored locally against this exact registered PDF, page and displayed "
                "image. A changed image or revision does not silently inherit old correction geometry. "
-               "Automatic re-closure, affected-quantity recalculation and VR handoff require the "
-               "separate validated correction consumer.")
+               "The prepared native marks require the existing topology/quantity consumers to "
+               "validate them before any automatic re-closure, recalculation or VR handoff.")
