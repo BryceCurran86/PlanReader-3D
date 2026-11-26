@@ -45,9 +45,22 @@ export function wallCornerJoins(walls:readonly WallVisual[]):Map<string,WallCorn
   const k=JSON.stringify([w.scopeKey,w.levelId]),g=groups.get(k)??[];g.push(i);groups.set(k,g);
  }
  for(const group of groups.values()){
-  if(group.length>1024)continue;
+  // Spatial buckets retain exact distance checks and avoid quadratic scans.
+  const buckets=new Map<string,number[]>();
+  const cell=(p:PlanPoint)=>[Math.floor(p[0]/EPS),Math.floor(p[1]/EPS)] as const;
+  for(let j=0;j<group.length;j++){
+   const [x,y]=cell(group[j].p),key=x+":"+y;
+   const ids=buckets.get(key)??[];ids.push(j);buckets.set(key,ids);
+  }
   for(let index=0;index<group.length;index++){
-   const a=group[index],peers=group.map((b,j)=>({b,j})).filter(({b,j})=>j!==index&&length(sub(a.p,b.p))<=EPS);
+   const a=group[index],[x,y]=cell(a.p);
+   const peers:{b:Incident;j:number}[]=[];
+   for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+    for(const j of buckets.get((x+dx)+":"+(y+dy))??[]){
+     if(j!==index&&length(sub(a.p,group[j].p))<=EPS)peers.push({b:group[j],j});
+     if(peers.length>1)break;
+    }
+   }
    if(peers.length!==1||peers[0].j<index)continue;
    const b=peers[0].b;
    if(a.w.proposalId===b.w.proposalId||Math.abs(a.w.heightM-b.w.heightM)>EPS||profileDetails(a.w.assembly).role!==profileDetails(b.w.assembly).role)continue;

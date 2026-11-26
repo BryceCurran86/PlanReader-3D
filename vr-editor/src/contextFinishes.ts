@@ -7,11 +7,12 @@ export function sameFixtureFamily(a:CatalogueItem,b:CatalogueItem){
  const x=a.visual,y=b.visual;
  return a.group===b.group&&x.kind==="fixture"&&y.kind==="fixture"&&x.shape===y.shape&&x.widthM===y.widthM&&x.heightM===y.heightM&&x.depthM===y.depthM&&x.count===y.count;
 }
+const finishCandidates=ITEM_CATALOGUE.filter(i=>i.visual.kind!=="fixture"&&i.visual.kind!=="design-assembly");
 export function contextGroups(context:FinishContext):CatalogueGroup[]{
  const old=context.entry&&getCatalogueItem(context.entry.itemId);
  if(old?.visual.kind==="fixture")return [old.group];
  const t=context.hit.target;
- const groups=priority.filter(g=>ITEM_CATALOGUE.some(i=>i.group===g&&i.targets.includes(t)&&i.visual.kind!=="fixture"&&i.visual.kind!=="design-assembly"));
+ const groups=priority.filter(g=>finishCandidates.some(i=>i.group===g&&i.targets.includes(t)));
  if(t==="opening")return groups.filter(g=>context.hit.opening?.door?["doors","entry","sliding-doors"].includes(g):context.hit.opening?.window?["windows","window-coverings"].includes(g):false);
  return groups;
 }
