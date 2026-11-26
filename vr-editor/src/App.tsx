@@ -29,15 +29,16 @@ import { isRoughIn } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { ItemCataloguePanel } from "./ItemCataloguePanel";
 import { getCatalogueItem, itemCanRotate } from "./itemCatalogue";
-import { currentItemPlacements, emptyItemDraft, itemGuide, placeItem, redoItem, removeItem, undoItem } from "./itemPlacement";
+import { currentItemPlacements, emptyItemDraft, itemGuide, placeItem, replaceItemFinish, redoItem, removeItem, undoItem } from "./itemPlacement";
 import type { ItemDraft, ItemHit, PlacedItem } from "./itemPlacement";
 import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
 import type { BuildAction, BuildState, WallVisual } from "./buildPlacement";
 import { LocalOutlinePanel } from "./LocalOutlinePanel";
 import {PreciseCommandPanel} from "./PreciseCommandPanel";
-import {connectedDraftShell,DEFAULT_SHELL} from "./connectedDraftShell";
-import {starterManifest,starterBuild,starterBounds,starterShell,STARTER_SHELL} from "./starterHouse";
+import {localBuildingShell,DEFAULT_SHELL} from "./connectedDraftShell";
+import {starterManifest,starterBuild,starterBounds,STARTER_SHELL} from "./starterHouse";
+import {starterFurnishings} from "./starterFurnishings";
 import type {DraftPickKind} from "./buildScene";
 import type {ShellSettings} from "./connectedDraftShell";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
@@ -102,10 +103,11 @@ export function App() {
   const [moveError, setMoveError] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
+  const [outdoor,setOutdoor]=useState(true);
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
   const [previewLights,setPreviewLights]=useState(true);
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
-  const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("smooth");
+  const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("subtle");
   const [inspection, setInspection] = useState<InspectionSettings>({ ...DEFAULT_INSPECTION });
   const [sourceSheet, setSourceSheet] = useState("");
   const [cameraRequest, setCameraRequest] = useState<{mode: CameraView; focus: FocusTarget; serial: number}>({mode:"isometric",focus:"scene",serial:0});
@@ -197,7 +199,7 @@ export function App() {
     setDraftState(freshDrafts(result)); setReviewNotes(freshReviewNotes(result));
     setWallMoveState(freshWallMoves(result)); setMoveMode("inspect"); setMoveError(null);
     setTeleportMode(false); setTeleportMessage(null);
-    setPlaced(origin==="starter"?{scene:result,build:starterBuild(result)}:null); setCatalogueSession(null); setResize(null);
+    setPlaced(origin==="starter"?{scene:result,build:starterBuild(result)}:null); setCatalogueSession(origin==="starter"?{scene:result,itemId:null,turn:0,draft:starterFurnishings(result)}:null); setResize(null);
     setShellStore(origin==="starter"?{scene:result,settings:STARTER_SHELL}:null);
     setAddedWallSketch(null); setAddedWallBatchSketches([]); setWallReview(null);
     setSelectedId(null); setClipboardMessage(null); setCaptureStatus(null);
@@ -324,9 +326,13 @@ export function App() {
   const scopedResize = resize?.scene === manifest ? resize : null;
   const projection = scopedResize?.projection ?? null;
   const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
-  const assemblyStudy=useAssemblyStudy(studyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const shellSettings=shellStore&&shellStore.scene===manifest?shellStore.settings:DEFAULT_SHELL;
-  const shell=useMemo(()=>manifest&&buildLevel?(isStarter?starterShell(studyGeometry.walls,shellSettings):!studyGeometry.ceilings.some(c=>c.levelId===buildLevel)?connectedDraftShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),shellSettings):null):null,[manifest,buildLevel,studyGeometry,shellSettings,isStarter]);
+  const shell=useMemo(()=>manifest&&buildLevel?localBuildingShell(studyGeometry.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest)),studyGeometry.ceilings.filter(c=>c.levelId===buildLevel&&c.scopeKey===scopeKey(manifest)),shellSettings):null,[manifest,buildLevel,studyGeometry,shellSettings]);
+  const pricedStudyGeometry=useMemo(()=>{
+    if(!shell||!manifest||!buildLevel||[...studyGeometry.walls,...studyGeometry.ceilings].some(o=>o.scopeKey!==scopeKey(manifest)||o.levelId!==buildLevel))return studyGeometry;
+    return {...studyGeometry,shellMetrics:{floorM2:shell.floorM2,roofM2:shell.roofM2,slabM3:shell.slabM3,ceilingM2:shell.surfaces.some(s=>s.kind==="ceiling")?shell.floorM2:0}};
+  },[shell,manifest,buildLevel,studyGeometry]);
+  const assemblyStudy=useAssemblyStudy(pricedStudyGeometry,manifest?JSON.stringify(manifest.scope):null);
   const resizeEnabled = scopedResize?.enabled ?? false;
   const activeFootprint = projection?.draft ?? baseFootprint;
   const sourceCommandsEnabled = authenticatedSource && !projection && !resizeEnabled;
@@ -426,6 +432,26 @@ export function App() {
   }
 
   function onItemAction(action: ItemAction) {
+    if(action.kind==="apply-finish"){
+      if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect")return;
+      const item=getCatalogueItem(action.itemId);
+      if(!item)return;
+      const key=scopeKey(manifest);
+      const id=newPlacementId("item");
+      const apply=(draft:ItemDraft)=>action.replaceId?replaceItemFinish(draft,key,action.replaceId!,action.itemId):placeItem(draft,key,id,action.itemId,action.hit,0);
+      const next=apply(catalogue.draft);
+      const walls=[...activeBatchSketches,...buildState.walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])];
+      const targetId=action.replaceId??id;
+      if(next===catalogue.draft||!currentItemPlacements(next.items,manifest,walls,isDemo,buildState.ceilings).some(i=>i.id===targetId)){
+        setToolMessage("Finish unchanged or not compatible with this design object.");return;
+      }
+      setLastEdit("place");
+      if(!itemLayerVisible(stage,item,layers))setStage("finished");
+      if(layers[itemLayer(item)]==="hide")setLayers(current=>({...current,[itemLayer(item)]:"auto"}));
+      changeCatalogue(current=>({...current,draft:apply(current.draft)}));
+      setToolMessage("Applied "+item.label+" · local design only.");
+      return;
+    }
     if (action.kind === "choose") {
       const item = getCatalogueItem(action.itemId);
       if (!item) return;
@@ -703,6 +729,7 @@ export function App() {
         {manifest ? <>
           <div className="view-toolbar" aria-label="Scene views">
             <ConstructionView stage={stage} onStage={onStage} />
+            <button type="button" aria-pressed={outdoor} onClick={()=>setOutdoor(v=>!v)}>{outdoor?"Grass & sky: on":"Grass & sky: off"}</button>
             <label>Preview board <select value={liningBoard} onChange={e=>setLiningBoard(e.currentTarget.value as LiningBoard)} title="Visual board colour only, not a certified assembly"><option value="standard">Standard</option><option value="wet-area">Wet-area</option><option value="fire-rated">Fire-rated</option></select></label>
             <ConstructionLayerPanel layers={layers} onLayers={setLayers}/>
             <label><input type="checkbox" checked={allDimensions} onChange={e=>setAllDimensions(e.currentTarget.checked)}/> Persistent dimensions (up to 40 labels)</label>
@@ -744,7 +771,7 @@ export function App() {
             {shellSettings.roof==="gable"&&<><label>Fixed ridge direction<input type="checkbox" checked={shellSettings.ridgeDeg!==undefined} onChange={e=>setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:e.currentTarget.checked?0:undefined}})}/></label>
             {shellSettings.ridgeDeg!==undefined&&<label>Ridge angle (degrees, +X toward +Z)<input type="number" min="0" max="360" step="1" value={shellSettings.ridgeDeg} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=0&&n<=360)setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:n}});}}/></label>}</>}
             <label>Slab thickness (mm) <input type="number" min="50" max="600" step="10" value={shellSettings.slabMm} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=50&&n<=600)setShellStore({scene:manifest,settings:{...shellSettings,slabMm:n}});}}/></label>
-            {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the outline, wall heights or existing local ceiling.</p>:null}
+            {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the exterior outline and wall heights.</p>:null}
           </details>}
           <PreciseCommandPanel key={scopeKey(manifest)} state={buildState} level={buildLevel} blocked={!!projection||resizeEnabled||mode!=="inspect"} onAction={onBuildAction}/>
           <div className="tool-group" aria-label="Direct object editing">
@@ -768,7 +795,7 @@ export function App() {
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
+                outdoor={outdoor} onOutdoor={setOutdoor} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
@@ -1001,7 +1028,7 @@ export function App() {
             <label><input type="checkbox" checked={previewLights} onChange={e=>setPreviewLights(e.currentTarget.checked)}/> Local fixture lights (preview)</label>
             <label htmlFor="render-quality">Render quality
               <select id="render-quality" value={renderQuality} onChange={event => setRenderQuality(event.currentTarget.value as RenderQuality)}>
-                <option value="balanced">Balanced</option><option value="high">High fidelity</option>
+                <option value="performance">Performance · lightest</option><option value="balanced">Realistic · recommended</option><option value="high">Ultra · PC VR</option>
               </select>
             </label>
             <label htmlFor="surface-detail">Wall surface detail

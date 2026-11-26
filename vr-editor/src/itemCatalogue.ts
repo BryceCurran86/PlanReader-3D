@@ -15,7 +15,7 @@ export const CATALOGUE_GROUPS = [
   ["air-conditioning", "Air conditioning"],
   ["stairs", "Stairs"], ["balustrading", "Balustrading"], ["sliding-doors", "Sliding doors"],
   ["windows", "Windows"], ["window-coverings", "Curtains and blinds"],
-  ["flyovers", "Patio flyovers"], ["pools", "Pools and spas"], ["landscaping", "Landscaping"],
+  ["flyovers", "Patio flyovers"], ["pools", "Pools and spas"], ["landscaping", "Landscaping"], ["furniture","Furniture"],
 ] as const;
 export type CatalogueGroup = typeof CATALOGUE_GROUPS[number][0];
 export type ItemTarget = "wall" | "floor" | "ceiling" | "roof" | "opening" | "worktop" | "site";
@@ -26,7 +26,8 @@ export type FixtureShape =
   | "mixer" | "gooseneck" | "square-spout" | "wall-spout" | "outdoor-tap" | "shower"
   | "socket" | "switch" | "port" | "isolator" | "alarm"
   | "downlight" | "batten" | "pendant" | "sconce" | "fan"
-  | "basin" | "toilet" | "bath" | "vanity" | "cabinet" | "bench" | "rail" | "service-box";
+  | "basin" | "toilet" | "bath" | "vanity" | "cabinet" | "bench" | "rail" | "service-box"
+  | "sofa" | "bed" | "coffee-table";
 
 type SurfaceVisual = { kind: "surface"; slot: "finish" | "lining"; pattern: Pattern;
   color: number; roughness: number; repeatM?: readonly [number, number] };
@@ -261,6 +262,7 @@ export const ITEM_CATALOGUE: readonly CatalogueItem[] = [
   ...fixtureItems("electrical", electrical, plates, "electrical outlet gpo power point socket switch"),
   ...fixtureItems("lights", lights, plates, "light ceiling lamp electrical lighting"),
   ...fixtureItems("bathroom", bathrooms, [["White", 0xe9e7e0], ["Soft grey", 0xaaa9a6]], "bathroom basin sink bath toilet laundry"),
+  ...fixtureItems("furniture", [["Three-seat sofa","floor","sofa",[2.1,.82,.86]],["Queen bed","floor","bed",[1.6,.85,2.1]],["Single bed","floor","bed",[.96,.82,1.98]],["Round coffee table","floor","coffee-table",[.8,.42,.8]]], [["Linen",0xc5bba9],["Oak",0xad8965],["Charcoal",0x606365]],"editable furniture sofa bed coffee table"),
   ...fixtureItems("cabinets", cabinets, [["Polar white", 0xe3dfd4], ["Pale oak", 0xad8965],
     ["Walnut", 0x705240], ["Graphite", 0x4e5154]], "cabinet kitchen vanity joinery benchtop worktop"),
   ...doorFinishes.map(([label, color, pattern]) => surface("doors", label, ["opening"], color,

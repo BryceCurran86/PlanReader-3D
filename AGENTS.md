@@ -189,11 +189,11 @@ to connect the current assignments to pending work.
 The directive records work authorization; GitHub comments do not launch or keep
 an external agent process alive. Report execution and progress only when observed.
 
-## Owner external-door height estimate rule — 2026-11-09 (current)
+## Owner standard external-door height estimate rule — 2026-11-25 (current)
 
-**Where a specific external-door height is not stated on the door schedule, elevations or plans, assume 2100 mm for a provisional external-door estimate unless otherwise specifically noted.** Use an authenticated door-specific schedule/elevation height in preference to the assumption, and do not hide explicit conflicts or exceptions. The default is restricted to source-authenticated **external doors**; it is not a default for internal doors, windows, garage panels or joinery.
+**Where a specific standard external-door height is not stated on the door schedule, elevations or plans, assume 2040 mm for a provisional estimate unless otherwise specifically noted.** Use an authenticated door-specific schedule/elevation height in preference to the assumption, and do not hide explicit conflicts or exceptions. The default is restricted to source-authenticated **standard external doors**; internal doors, windows, garage panels and joinery retain their own evidence requirements.
 
-This owner-authorized estimating assumption must be labelled **"Assumed 2100 mm — verify on site"** and tracked with review provenance. It does not itself authenticate a drawing dimension, opening kind/host/frame/width or permit FIRM source-sealed quantities, verified commercial measurements or frozen benchmark scoring. The earlier general no-missing-height-default rule continues to apply to source-authenticated measurement/quantity authority; this is a separate provisional costing policy only. Full detail: [Owner external-door height policy](docs/engineering/OWNER_EXTERNAL_DOOR_HEIGHT_POLICY_20261109.md). Reusable read-only resolver: `pb_external_door_height_estimate_policy.py`.
+This owner-authorized estimating assumption must be labelled **"Assumed 2040 mm — verify on site"** and tracked with review provenance. Source-authenticated measurements and frozen benchmark scoring require independent drawing evidence for the dimension, opening kind, host, frame and width. See the [owner external-door height policy](docs/engineering/OWNER_EXTERNAL_DOOR_HEIGHT_POLICY_20261109.md). The read-only resolver is `pb_external_door_height_estimate_policy.py`.
 
 ## Owner three-agent succession — 2026-11-06 (historical assignments)
 

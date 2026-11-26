@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import nullcontext
+import multiprocessing
 from datetime import datetime, timezone
 import json
 from hashlib import sha256
@@ -207,13 +210,46 @@ def _publish_project_evidence(role_dir: Path, sealed_path: Path, customer_path: 
             stage.unlink(missing_ok=True)
 
 
+def _produce_project(project: str, source_dir: Path, role_dir: Path, timeout_min: int) -> tuple[dict, dict]:
+    """Run one isolated project; never publish benchmark evidence from a worker."""
+    from tools.gpt3_owner_all_source_role_handoff import produce_all_source_roles
+
+    started = perf_counter()
+    print(f"Starting original-source replay for {project}", flush=True)
+    status = {}
+    try:
+        status = produce_all_source_roles(
+            project_id=project, source_dir=source_dir, output_dir=role_dir,
+            timeout_min=timeout_min, record_native_source_input_coverage=True,
+            source_native_finish_text_shadow=True, source_role_abstention_receipts=True,
+        )
+        outcome = {"project_id": project, "status": status["status"]}
+        # Only carry the verified publication flags across the process boundary.
+        status = {key: status.get(key) is True for key in (
+            "native_source_input_coverage_verified",
+            "source_role_coverage_verified",
+            "customer_bijection_verified",
+        )}
+    except (OSError, TypeError, ValueError, RuntimeError) as exc:
+        status = {}
+        outcome = {"project_id": project, "status": "ROLE_REPLAY_FAILED",
+                   "failure_type": type(exc).__name__}
+    outcome["elapsed_seconds"] = round(perf_counter() - started, 3)
+    return outcome, status
+
+
 def run_benchmark(
     *, source_dir: Path, identity_map_dir: Path, output_dir: Path, timeout_min: int,
     saved_run_dir: Path | None = None,
     check_execution: Callable[[], None] | None = None,
+    project_workers: int = 1,
     app_identity: str | None = None,
 ) -> int:
-    """Run serially or re-score existing handoffs through the same verifier."""
+    """Run independent projects in bounded batches, or re-score existing evidence."""
+    if type(project_workers) is not int or project_workers not in (1, 2):
+        raise ValueError("project_workers must be 1 or 2")
+    if saved_run_dir is not None and project_workers != 1:
+        raise ValueError("parallel workers require a fresh extraction")
     source_dir = source_dir.resolve()
     identity_map_dir = identity_map_dir.resolve()
     preflight_new_diagnostic(
@@ -226,7 +262,7 @@ def run_benchmark(
         return _score_run(source_dir, identity_map_dir, saved_run_dir, output_dir)
 
     from tools.gpt3_owner_all_source_role_handoff import (
-        PROJECTS, original_roster, produce_all_source_roles,
+        PROJECTS, original_roster,
     )
 
     rosters = [original_roster(project, source_dir) for project in PROJECTS]
@@ -243,41 +279,52 @@ def run_benchmark(
 
     total_started = perf_counter()
     outcomes = []
-    for project in PROJECTS:
-        if check_execution is not None:
-            check_execution()
-        started = perf_counter()
-        role_dir = output_dir / "production" / project
-        print(f"Starting original-source replay for {project}", flush=True)
-        try:
-            status = produce_all_source_roles(
-                project_id=project, source_dir=source_dir, output_dir=role_dir,
-                timeout_min=timeout_min, record_native_source_input_coverage=True,
-                source_native_finish_text_shadow=True, source_role_abstention_receipts=True,
-            )
-            outcome = {"project_id": project, "status": status["status"]}
-            if (
-                status.get("native_source_input_coverage_verified") is True
-                and status.get("source_role_coverage_verified") is True
-                and status.get("customer_bijection_verified") is True
-            ):
-                _publish_project_evidence(
-                    role_dir, sealed_dir / f"{project}.json",
-                    customer_dir / f"{project}.customer_rows.json",
+    # PyMuPDF does not support concurrent threads. Spawn separate processes,
+    # with at most two active projects; retain the serial default for low RAM.
+    pool = (ProcessPoolExecutor(max_workers=project_workers,
+                                mp_context=multiprocessing.get_context("spawn"))
+            if project_workers > 1 else nullcontext(None))
+    with pool as executor:
+        for offset in range(0, len(PROJECTS), project_workers):
+            batch = PROJECTS[offset:offset + project_workers]
+            if check_execution is not None:
+                check_execution()
+            jobs = []
+            if executor is not None:
+                for project in batch:
+                    role_dir = output_dir / "production" / project
+                    jobs.append(executor.submit(
+                        _produce_project, project, source_dir, role_dir, timeout_min,
+                    ))
+            for index, project in enumerate(batch):
+                role_dir = output_dir / "production" / project
+                outcome, status = (
+                    jobs[index].result() if executor is not None
+                    else _produce_project(project, source_dir, role_dir, timeout_min)
                 )
-        except (OSError, TypeError, ValueError, RuntimeError) as exc:
-            outcome = {"project_id": project, "status": "ROLE_REPLAY_FAILED",
-                       "failure_type": type(exc).__name__}
-        outcome["elapsed_seconds"] = round(perf_counter() - started, 3)
-        outcomes.append(outcome)
-        print(json.dumps(outcome, sort_keys=True), flush=True)
-        status_path = output_dir / "attempt_status.json"
-        staged = status_path.with_suffix(".tmp")
-        staged.write_text(
-            json.dumps({"projects": outcomes, "elapsed_seconds": round(perf_counter() - total_started, 3)},
-                       indent=2, sort_keys=True) + "\n", encoding="utf-8",
-        )
-        staged.replace(status_path)
+                if check_execution is not None:
+                    check_execution()
+                try:
+                    if (
+                        status.get("native_source_input_coverage_verified") is True
+                        and status.get("source_role_coverage_verified") is True
+                        and status.get("customer_bijection_verified") is True
+                    ):
+                        _publish_project_evidence(
+                            role_dir, sealed_dir / f"{project}.json",
+                            customer_dir / f"{project}.customer_rows.json",
+                        )
+                except (OSError, TypeError, ValueError, RuntimeError) as exc:
+                    outcome.update(status="ROLE_REPLAY_FAILED", failure_type=type(exc).__name__)
+                outcomes.append(outcome)
+                print(json.dumps(outcome, sort_keys=True), flush=True)
+                status_path = output_dir / "attempt_status.json"
+                staged = status_path.with_suffix(".tmp")
+                staged.write_text(
+                    json.dumps({"projects": outcomes, "elapsed_seconds": round(perf_counter() - total_started, 3)},
+                               indent=2, sort_keys=True) + "\n", encoding="utf-8",
+                )
+                staged.replace(status_path)
 
     if check_execution is not None:
         check_execution()
@@ -299,11 +346,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="Verify the local original roster and map availability")
     parser.add_argument("--timeout-min", type=int, default=180,
                         help="Maximum extraction time per source document")
+    parser.add_argument("--project-workers", type=int, choices=(1, 2), default=1,
+                        help="Independent project processes (default 1; 2 needs sufficient RAM)")
     parser.add_argument("--saved-run-dir", type=Path,
                         help="Verify and re-score an existing sealed/customer run without extracting PDFs")
     args = parser.parse_args(argv)
     if args.timeout_min < 1:
         parser.error("--timeout-min must be positive")
+    if args.project_workers != 1 and (args.check_only or args.saved_run_dir is not None):
+        parser.error("--project-workers requires fresh extraction")
     if args.check_only and args.saved_run_dir is not None:
         parser.error("--check-only and --saved-run-dir are mutually exclusive")
     if bool(args.app_archive) != bool(args.archive_sha256):
@@ -347,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
             source_dir=source_dir, identity_map_dir=identity_map_dir,
             output_dir=output_dir, timeout_min=args.timeout_min,
             check_execution=check_execution, app_identity=expected_head,
+            project_workers=args.project_workers,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         parser.exit(2, f"Local benchmark could not run ({type(exc).__name__}).\n")

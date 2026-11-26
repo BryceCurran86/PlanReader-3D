@@ -1,4 +1,4 @@
-"""Owner 2100 mm external-door estimate becomes a labelled provisional customer quantity."""
+"""The owner external-door estimate becomes a labelled provisional customer quantity."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -71,14 +71,17 @@ def _bare_external_door(**changes) -> object:
     return replace(opening, **changes) if changes else opening
 
 
-def test_authenticated_external_door_with_one_printed_width_gets_labelled_customer_area():
+@pytest.mark.parametrize("schedule_binding", [None, "width-only-schedule-row"])
+def test_authenticated_external_door_with_one_printed_width_gets_labelled_customer_area(schedule_binding):
     composition = apply_live_external_door_height_estimates(
-        composition=_composition(_bare_external_door()),
+        composition=_composition(
+            _bare_external_door(schedule_binding_record_id=schedule_binding)
+        ),
         whole_wall_role_composition=_roles("wall-1"),
     )
     opening = composition.canonical_openings[0]
     assert opening.area_basis == OWNER_EXTERNAL_DOOR_ASSUMPTION_BASIS
-    assert opening.area_m2 == pytest.approx(870.0 * 2100.0 / 1_000_000.0)
+    assert opening.area_m2 == pytest.approx(870.0 * 2040.0 / 1_000_000.0)
     assert opening.width_m is None
     assert opening.height_m is None
     assert opening.external_wall_role_record_id == "role-wall-1"
@@ -88,7 +91,7 @@ def test_authenticated_external_door_with_one_printed_width_gets_labelled_custom
     assert quantity is not None
     assert quantity.status == "corroborated"
     assert quantity.abstained is False
-    assert quantity.value == pytest.approx(1.827)
+    assert quantity.value == pytest.approx(1.7748)
     assert quantity.authority == (
         LIVE_OPENING_EXTERNAL_DOOR_HEIGHT_ESTIMATE_AREA_QUANTITY_AUTHORITY
     )
@@ -100,6 +103,8 @@ def test_authenticated_external_door_with_one_printed_width_gets_labelled_custom
     assert OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL in quantity.metadata["element"]
     assert OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL in quantity.metadata["location"]
     assert quantity.metadata["assumed_height_mm"] == OWNER_EXTERNAL_DOOR_ASSUMED_HEIGHT_MM
+    assert "2040" in quantity.formula
+    assert "external_door_height_not_specified_owner_2040_assumption" in quantity.reason_codes
     assert "firm" not in quantity.status
 
     claim = replace(
@@ -119,13 +124,13 @@ def test_authenticated_external_door_with_one_printed_width_gets_labelled_custom
         claim, workspace_id=7, project_id="source-project",
     )
     assert len(rows) == 1
-    assert rows[0]["quantity"] == pytest.approx(1.827)
+    assert rows[0]["quantity"] == pytest.approx(1.7748)
     assert OWNER_EXTERNAL_DOOR_HEIGHT_ESTIMATE_LABEL in rows[0]["element"]
     assert rows[0]["inclusion_status"] == "PROVISIONAL"
     assert rows[0]["quantity_status"] == "To review"
 
 
-def test_internal_host_cannot_receive_the_2100_assumption():
+def test_internal_host_cannot_receive_the_external_height_assumption():
     composition = apply_live_external_door_height_estimates(
         composition=_composition(_bare_external_door()),
         whole_wall_role_composition=_roles(
@@ -137,7 +142,7 @@ def test_internal_host_cannot_receive_the_2100_assumption():
     assert _opening_quantity(opening) is None
 
 
-def test_window_cannot_receive_the_2100_assumption():
+def test_window_cannot_receive_the_door_height_assumption():
     composition = apply_live_external_door_height_estimates(
         composition=_composition(_bare_external_door(opening_kind="window")),
         whole_wall_role_composition=_roles("wall-1"),
@@ -145,7 +150,7 @@ def test_window_cannot_receive_the_2100_assumption():
     assert composition.canonical_openings[0].area_m2 is None
 
 
-def test_garage_panel_description_cannot_receive_the_2100_assumption():
+def test_garage_panel_description_cannot_receive_the_standard_door_height_assumption():
     composition = apply_live_external_door_height_estimates(
         composition=_composition(
             _bare_external_door(schedule_row_description="Garage roller door")
@@ -155,7 +160,7 @@ def test_garage_panel_description_cannot_receive_the_2100_assumption():
     assert composition.canonical_openings[0].area_m2 is None
 
 
-def test_unauthenticated_host_cannot_receive_the_2100_assumption():
+def test_unauthenticated_host_cannot_receive_the_door_height_assumption():
     composition = apply_live_external_door_height_estimates(
         composition=_composition(_bare_external_door(host_wall_id="other-wall")),
         whole_wall_role_composition=_roles("wall-1"),
@@ -191,11 +196,23 @@ def test_conflicting_host_and_frame_external_roles_abstain():
     assert composition.canonical_openings[0].area_m2 is None
 
 
-def test_unverified_schedule_height_blocks_the_2100_fallback():
+def test_unverified_schedule_height_blocks_the_fallback():
     composition = apply_live_external_door_height_estimates(
         composition=_composition(
             _bare_external_door(schedule_declared_height_mm=2400)
         ),
+        whole_wall_role_composition=_roles("wall-1"),
+    )
+    assert composition.canonical_openings[0].area_m2 is None
+
+
+@pytest.mark.parametrize("description", ["Opening as per manufacturer", "Full-height timber door"])
+def test_width_only_schedule_with_specific_height_exception_needs_review(description):
+    composition = apply_live_external_door_height_estimates(
+        composition=_composition(_bare_external_door(
+            schedule_binding_record_id="width-only-schedule-row",
+            schedule_row_description=description,
+        )),
         whole_wall_role_composition=_roles("wall-1"),
     )
     assert composition.canonical_openings[0].area_m2 is None

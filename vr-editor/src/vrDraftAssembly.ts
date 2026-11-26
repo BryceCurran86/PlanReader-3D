@@ -5,14 +5,16 @@ import {profileDetails,wallAssembly} from "./wallProfiles.ts";
 export type AssemblyProfile={spacingMm:number;nogginRows:number;wastePct:number;sheetM2:number;paintCoverage:number;paintCoats:number;paintPackL:number;floorM2:number|null;floorPackM2:number;slabMm:number;roofPlanM2:number|null;roofPitchDeg:number;electricalPoints:number|null;plumbingPoints:number|null};
 export const STUDY_PROFILE:AssemblyProfile={spacingMm:450,nogginRows:1,wastePct:10,sheetM2:2.88,paintCoverage:16,paintCoats:2,paintPackL:4,floorM2:null,floorPackM2:1.44,slabMm:100,roofPlanM2:null,roofPitchDeg:22.5,electricalPoints:null,plumbingPoints:null};
 export type AssemblyLine={id:string;trade:string;label:string;unit:string;quantity:number|null;purchase:number|null};
+export type ShellStudyMetrics={floorM2:number;roofM2:number;slabM3:number;ceilingM2:number};
 export type AssemblyRates=Record<string,{material?:string;labour?:string}>;
 const round=(n:number)=>Math.round(n*1000)/1000;
 const pack=(n:number,size:number)=>Math.ceil(n/size-1e-9);
 const inRange=(n:number,min:number,max:number)=>Number.isFinite(n)&&n>=min&&n<=max;
-export function draftAssembly(state:Pick<BuildState,"walls"|"ceilings">,p:AssemblyProfile):AssemblyLine[] {
+export function draftAssembly(state:Pick<BuildState,"walls"|"ceilings">,p:AssemblyProfile,shell?:ShellStudyMetrics):AssemblyLine[] {
  if(!inRange(p.spacingMm,100,1200)||!Number.isInteger(p.nogginRows)||!inRange(p.nogginRows,0,10)||!inRange(p.wastePct,0,100)||!inRange(p.sheetM2,.1,20)||!inRange(p.paintCoverage,.1,100)||!Number.isInteger(p.paintCoats)||!inRange(p.paintCoats,1,10)||!inRange(p.paintPackL,.1,100)||!inRange(p.floorPackM2,.01,100)||!inRange(p.slabMm,20,1000)||!inRange(p.roofPitchDeg,0,75))throw Error("Invalid study assumptions");
  for(const n of [p.floorM2,p.roofPlanM2])if(n!==null&&!inRange(n,0,100000))throw Error("Invalid surface area");
  for(const n of [p.electricalPoints,p.plumbingPoints])if(n!==null&&(!Number.isInteger(n)||!inRange(n,0,100000)))throw Error("Invalid point count");
+ if(shell&&(![shell.floorM2,shell.roofM2,shell.slabM3,shell.ceilingM2].every(n=>inRange(n,0,100000))||shell.floorM2<=0||shell.roofM2<=0||shell.slabM3<=0))throw Error("Invalid local shell metrics");
  let studs=0,plates=0,noggins=0,jambs=0,headers=0,sills=0,net=0,skirting=0,trim=0,doors=0,windows=0,ceiling=0;
  let steelStuds=0,steelTracks=0,steelNoggins=0,steelJambs=0,steelHeads=0,steelSills=0,liningArea=0,brick=0,doubleBrick=0,block=0,concrete=0,cladding=0;
  for(const w of state.walls){
@@ -49,6 +51,7 @@ export function draftAssembly(state:Pick<BuildState,"walls"|"ceilings">,p:Assemb
   if(!inRange(a,0,100000))throw Error("Invalid draft ceiling");
   ceiling+=a;
  }
+ if(shell&&state.ceilings.length===0)ceiling=shell.ceilingM2;
  const f=1+p.wastePct/100;
  const lines:AssemblyLine[]=[];
  function add(id:string,trade:string,label:string,unit:string,q:number|null,buy:number|null=q===null?null:q*f){
@@ -80,10 +83,11 @@ export function draftAssembly(state:Pick<BuildState,"walls"|"ceilings">,p:Assemb
  add("architraves","Finishes","Both faces opening trim allowance","lm",trim);
  const paint=(liningArea+ceiling)*p.paintCoats/p.paintCoverage;
  add("paint","Painting","Wall and ceiling paint","L",paint,pack(paint*f,p.paintPackL)*p.paintPackL);
- add("ceiling","Lining","Ceiling boards (rectangle sum)","sheet",ceiling/p.sheetM2,pack(ceiling*f,p.sheetM2));
- add("floor","Flooring","Entered floor coverage","m²",p.floorM2,p.floorM2===null?null:pack(p.floorM2*f,p.floorPackM2)*p.floorPackM2);
- add("slab","Concrete","Entered floor area × slab thickness","m³",p.floorM2===null?null:p.floorM2*p.slabMm/1000);
- add("roof","Roofing","Entered projected area × pitch factor","m²",p.roofPlanM2===null?null:p.roofPlanM2/Math.cos(p.roofPitchDeg*Math.PI/180));
+ add("ceiling","Lining",shell&&state.ceilings.length===0?"Generated shell ceiling boards":"Ceiling boards (rectangle sum)","sheet",ceiling/p.sheetM2,pack(ceiling*f,p.sheetM2));
+ const floor=shell?shell.floorM2:p.floorM2;
+ add("floor","Flooring",shell?"Local draft shell floor coverage":"Entered floor coverage","m²",floor,floor===null?null:pack(floor*f,p.floorPackM2)*p.floorPackM2);
+ add("slab","Concrete",shell?"Local draft shell slab volume":"Entered floor area × slab thickness","m³",shell?shell.slabM3:p.floorM2===null?null:p.floorM2*p.slabMm/1000);
+ add("roof","Roofing",shell?"Local draft shell roof area":"Entered projected area × pitch factor","m²",shell?shell.roofM2:p.roofPlanM2===null?null:p.roofPlanM2/Math.cos(p.roofPitchDeg*Math.PI/180));
  add("doors","Openings","Draft door count","each",doors,doors);
  add("windows","Openings","Draft window count","each",windows,windows);
  add("electrical","Services","Entered electrical point allowance","each",p.electricalPoints,p.electricalPoints);

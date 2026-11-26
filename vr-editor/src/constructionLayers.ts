@@ -37,3 +37,16 @@ export function surfaceLayerVisible(stage:ConstructionStage,kind:"floor"|"ceilin
  if(elevated&&(kind==="roof"||kind==="ceiling"))return false;
  return layerVisible(layers,kind??"wall",showConstructionSurface(stage,kind));
 }
+
+/** Top-view edit visibility preserves explicit layer hides; ceilings appear
+ * only in ceiling-pick mode, and the roof must never obscure a plan edit. */
+export function editableSurfaceVisible(stage:ConstructionStage,kind:"floor"|"ceiling"|"roof"|undefined,layers:LayerOverrides,elevated:boolean,topEditing:boolean,ceilingPick:boolean){
+ if(topEditing&&kind==="roof")return false;
+ if(topEditing&&kind==="ceiling")return ceilingPick&&layerVisible(layers,"ceiling",true);
+ return surfaceLayerVisible(stage,kind,layers,elevated);
+}
+/** Shared eligibility for direct picks and magnetic wall targets. */
+export function draftWallLayerVisible(stage:ConstructionStage,layers:LayerOverrides,masonry:boolean){
+ return layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation"||masonry))
+  ||layerVisible(layers,"framing",stage==="framing"||stage==="insulation");
+}
