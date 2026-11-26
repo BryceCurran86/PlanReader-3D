@@ -406,6 +406,7 @@
       var pts = ln.kind === 'polygon' ? (ln.points || []) : [[ln.x1, ln.y1], [ln.x2, ln.y2]];
       pts.forEach(function (q) { targets.push({x:q[0], y:q[1]}); });
     });
+    if (targets.length > 8192) return p; // bounded pointer-event work on crowded pages
     if (state.drawing && state.drawing.type === 'line' && state.drawing.p1) {
       var a = state.drawing.p1;
       targets = targets.filter(function (t) {
@@ -1007,6 +1008,7 @@
       state.selectedId = null;
       state.drawing = null;
       state.hover = null;
+      state.snapHit = null;
     } else if (state.pxPerM !== newPx) {
       state.pxPerM = newPx;
       updateLive();
