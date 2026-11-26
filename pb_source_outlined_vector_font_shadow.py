@@ -554,3 +554,124 @@ def extract_outlined_vector_font_ocr_witnesses(
         cross_sheet_review=review,
         reason_codes=reasons,
     )
+
+
+@dataclass(frozen=True)
+class OutlinedDrawingSetIngestionShadowBundle:
+    """Shadow-only consumer wiring combining outlined-set admission preflight & multi-DPI OCR."""
+
+    status: str  # "ADMITTED_AND_EXTRACTED_SHADOW" | "ADMITTED_NO_OCR_EXTRACTED_SHADOW" | "NATIVE_TEXT_DRAWING_SET" | "ABSTAINED"
+    source_sha256: str
+    admission_report: Any
+    selected_page_indices: Tuple[int, ...]
+    ocr_witness_bundle: Optional[OutlinedVectorFontOcrWitnessBundle]
+    reason_codes: Tuple[str, ...]
+    commercial_projection_allowed: bool = False
+    takeoff_eligible: bool = False
+    shadow_only: bool = True
+    schema_version: str = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.commercial_projection_allowed is not False:
+            raise ValueError("OutlinedDrawingSetIngestionShadowBundle cannot authorize commercial projection")
+        if self.takeoff_eligible is not False:
+            raise ValueError("OutlinedDrawingSetIngestionShadowBundle cannot be takeoff-eligible")
+        if self.shadow_only is not True:
+            raise ValueError("OutlinedDrawingSetIngestionShadowBundle must remain shadow_only=True")
+
+
+def admit_and_extract_outlined_drawing_set_shadow(
+    pdf_bytes: bytes,
+    *,
+    expected_source_sha256: Optional[str] = None,
+    finish_specification_present: bool = False,
+    preferred_roles: Sequence[str] = ("floor_plan", "elevation", "section", "schedule"),
+    max_pages_per_role: int = 1,
+    render_dpis: Sequence[int] = (216, 288, 360),
+    ocr_callable: Optional[Callable[[bytes], Sequence[Any]]] = None,
+    min_dpi_agreement: int = 2,
+    max_center_drift_pts: float = 6.0,
+    min_confidence: float = 0.50,
+    right_border_fraction: float = 0.80,
+    bottom_border_fraction: float = 0.85,
+    max_drawings_per_page: int = 20_000,
+) -> OutlinedDrawingSetIngestionShadowBundle:
+    """Source-neutral shadow consumer entrypoint for vector-outlined architectural PDF sets.
+
+    Runs hardened admission preflight (`evaluate_outlined_drawing_admission_shadow`) first,
+    selects representative role sheets (`select_role_pages_for_outlined_ocr_shadow`), and
+    extracts multi-DPI agreed OCR witnesses on admitted pages. Missing finish specifications
+    always remain strictly ABSTAINED (`material_specification_missing`).
+    """
+    from pb_source_outlined_drawing_admission_shadow import (
+        evaluate_outlined_drawing_admission_shadow,
+        select_role_pages_for_outlined_ocr_shadow,
+    )
+
+    admission = evaluate_outlined_drawing_admission_shadow(
+        pdf_bytes,
+        expected_source_sha256=expected_source_sha256,
+        finish_specification_present=finish_specification_present,
+        right_border_fraction=right_border_fraction,
+        bottom_border_fraction=bottom_border_fraction,
+        max_drawings_per_page=max_drawings_per_page,
+    )
+    if admission.status != "ADMITTED_FOR_OUTLINED_TEXT_OCR_SHADOW":
+        return OutlinedDrawingSetIngestionShadowBundle(
+            status=admission.status,
+            source_sha256=admission.source_sha256,
+            admission_report=admission,
+            selected_page_indices=(),
+            ocr_witness_bundle=None,
+            reason_codes=admission.reason_codes,
+        )
+
+    selected = select_role_pages_for_outlined_ocr_shadow(
+        admission,
+        preferred_roles=preferred_roles,
+        max_pages_per_role=max_pages_per_role,
+    )
+    if not selected:
+        return OutlinedDrawingSetIngestionShadowBundle(
+            status="ADMITTED_NO_OCR_EXTRACTED_SHADOW",
+            source_sha256=admission.source_sha256,
+            admission_report=admission,
+            selected_page_indices=(),
+            ocr_witness_bundle=None,
+            reason_codes=tuple(sorted(set(admission.reason_codes) | {"no_matching_role_pages_selected"})),
+        )
+
+    import fitz
+
+    doc = fitz.open(stream=bytes(pdf_bytes), filetype="pdf")
+    try:
+        pages_for_ocr = [(idx, doc[idx]) for idx in selected]
+        bundle = extract_outlined_vector_font_ocr_witnesses(
+            pages_for_ocr,
+            source_sha256=admission.source_sha256,
+            render_dpis=render_dpis,
+            ocr_callable=ocr_callable,
+            finish_specification_present=finish_specification_present,
+            min_dpi_agreement=min_dpi_agreement,
+            max_center_drift_pts=max_center_drift_pts,
+            min_confidence=min_confidence,
+            right_border_fraction=right_border_fraction,
+            bottom_border_fraction=bottom_border_fraction,
+        )
+    finally:
+        doc.close()
+
+    merged_reasons = tuple(sorted(set(admission.reason_codes) | set(bundle.reason_codes)))
+    status = (
+        "ADMITTED_AND_EXTRACTED_SHADOW"
+        if bundle.status == "REVIEW_ONLY_OUTLINED_OCR_WITNESSES"
+        else "ADMITTED_NO_OCR_EXTRACTED_SHADOW"
+    )
+    return OutlinedDrawingSetIngestionShadowBundle(
+        status=status,
+        source_sha256=admission.source_sha256,
+        admission_report=admission,
+        selected_page_indices=selected,
+        ocr_witness_bundle=bundle,
+        reason_codes=merged_reasons,
+    )

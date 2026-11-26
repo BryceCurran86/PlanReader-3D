@@ -28,6 +28,14 @@ from pb_source_multi_wall_open_room_face_shadow import (
     SourceWallSegmentInput,
     compose_multi_wall_open_room_face_shadow,
 )
+from pb_source_same_page_figured_scale_shadow import (
+    DEFAULT_MAX_REL_SCALE_TOLERANCE,
+    OrthogonalFiguredSpanWitness,
+    SamePageFiguredScaleReport,
+    ShadowRoomMetricEstimate,
+    corroborate_same_page_figured_scale_shadow,
+    measure_room_face_from_same_page_scale_shadow,
+)
 
 SOURCE_PRIMITIVE_CAP = 20_000
 SOURCE_SNAP_PT = 2.5
@@ -377,4 +385,119 @@ def compose_multi_wall_open_room_face_evidence(
         viewport_id=viewport_id,
         mm_per_pt_x=mm_per_pt_x,
         mm_per_pt_y=mm_per_pt_y,
+    )
+
+
+@dataclass(frozen=True)
+class NativeTiledRoomFaceSamePageScaleShadowResult:
+    """Shadow-only consumer wiring linking a verified room face to viewport-bound same-page scale."""
+
+    status: str  # "SHADOW_ROOM_FACE_SCALE_CORROBORATED" | "ABSTAINED"
+    room_label: str
+    page_number: int
+    viewport_id: str
+    scale_report: SamePageFiguredScaleReport
+    metric_estimate: ShadowRoomMetricEstimate | None
+    reason_codes: tuple[str, ...]
+    commercial_projection_allowed: bool = False
+    takeoff_eligible: bool = False
+    shadow_only: bool = True
+
+    def __post_init__(self) -> None:
+        if self.commercial_projection_allowed is not False:
+            raise ValueError("NativeTiledRoomFaceSamePageScaleShadowResult cannot authorize commercial projection")
+        if self.takeoff_eligible is not False:
+            raise ValueError("NativeTiledRoomFaceSamePageScaleShadowResult cannot be takeoff-eligible")
+        if self.shadow_only is not True:
+            raise ValueError("NativeTiledRoomFaceSamePageScaleShadowResult must remain shadow_only=True")
+
+
+def corroborate_native_tiled_room_face_same_page_scale_shadow(
+    *,
+    face: NativeTiledRoomFace,
+    source_sha256: str,
+    target_viewport_id: str,
+    page_rect_pts: tuple[float, float, float, float],
+    same_page_witnesses: tuple[OrthogonalFiguredSpanWitness, ...] | list[OrthogonalFiguredSpanWitness],
+    target_viewport_bbox_pdf_pts: tuple[float, float, float, float] | None = None,
+    reference_mm_per_pt_x: float | None = None,
+    reference_mm_per_pt_y: float | None = None,
+    reference_page_rect_pts: tuple[float, float, float, float] | None = None,
+    max_rel_tolerance: float = DEFAULT_MAX_REL_SCALE_TOLERANCE,
+) -> NativeTiledRoomFaceSamePageScaleShadowResult:
+    """Source-neutral shadow consumer wiring for viewport-bound same-page orthogonal scale.
+
+    Requires an already-verified NativeTiledRoomFace plus explicit same-page, same-viewport
+    source-owned orthogonal figured-span witnesses. Never authorizes commercial projection.
+    """
+    if (
+        not isinstance(face, NativeTiledRoomFace)
+        or not face.physical_source_verified
+        or face.commercial_permission
+    ):
+        empty_report = corroborate_same_page_figured_scale_shadow(
+            source_sha256="",
+            page_number=0,
+            target_viewport_id="",
+            page_rect_pts=(0.0, 0.0, 1.0, 1.0),
+            witnesses=(),
+        )
+        return NativeTiledRoomFaceSamePageScaleShadowResult(
+            status="ABSTAINED",
+            room_label="",
+            page_number=0,
+            viewport_id="",
+            scale_report=empty_report,
+            metric_estimate=None,
+            reason_codes=("unverified_or_invalid_native_tiled_room_face",),
+        )
+
+    scale_report = corroborate_same_page_figured_scale_shadow(
+        source_sha256=source_sha256,
+        page_number=face.page_number,
+        target_viewport_id=target_viewport_id,
+        page_rect_pts=page_rect_pts,
+        witnesses=same_page_witnesses,
+        target_viewport_bbox_pdf_pts=target_viewport_bbox_pdf_pts,
+        target_room_bbox_pdf_pts=face.source_bbox_pts,
+        reference_mm_per_pt_x=reference_mm_per_pt_x,
+        reference_mm_per_pt_y=reference_mm_per_pt_y,
+        reference_page_rect_pts=reference_page_rect_pts,
+        max_rel_tolerance=max_rel_tolerance,
+    )
+    if scale_report.status != "CORROBORATED_SAME_PAGE_FIGURED_SCALE_SHADOW":
+        return NativeTiledRoomFaceSamePageScaleShadowResult(
+            status="ABSTAINED",
+            room_label=face.room_label,
+            page_number=face.page_number,
+            viewport_id=scale_report.viewport_id,
+            scale_report=scale_report,
+            metric_estimate=None,
+            reason_codes=scale_report.reason_codes,
+        )
+
+    estimate = measure_room_face_from_same_page_scale_shadow(
+        scale_report=scale_report,
+        finished_width_pts=face.finished_width_pts,
+        finished_depth_pts=face.finished_depth_pts,
+    )
+    if estimate.status != "SHADOW_METRIC_COMPUTED":
+        return NativeTiledRoomFaceSamePageScaleShadowResult(
+            status="ABSTAINED",
+            room_label=face.room_label,
+            page_number=face.page_number,
+            viewport_id=scale_report.viewport_id,
+            scale_report=scale_report,
+            metric_estimate=estimate,
+            reason_codes=estimate.reason_codes,
+        )
+
+    return NativeTiledRoomFaceSamePageScaleShadowResult(
+        status="SHADOW_ROOM_FACE_SCALE_CORROBORATED",
+        room_label=face.room_label,
+        page_number=face.page_number,
+        viewport_id=scale_report.viewport_id,
+        scale_report=scale_report,
+        metric_estimate=estimate,
+        reason_codes=tuple(sorted(set(scale_report.reason_codes) | set(estimate.reason_codes))),
     )

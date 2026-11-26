@@ -277,3 +277,73 @@ def test_extract_outlined_vector_font_ocr_witnesses_skips_all_native_pages_clean
     assert bundle.extractions == ()
     assert bundle.commercial_projection_allowed is False
 
+
+def test_admit_and_extract_outlined_drawing_set_shadow_consumer_wiring():
+    from dataclasses import replace
+    import hashlib
+    import fitz
+    from pb_source_outlined_vector_font_shadow import (
+        OutlinedDrawingSetIngestionShadowBundle,
+        admit_and_extract_outlined_drawing_set_shadow,
+    )
+
+    doc = fitz.open()
+    for title in ("SITE PLAN", "GROUND FLOOR PLAN", "NORTH ELEVATION"):
+        page = doc.new_page(width=1000.0, height=700.0)
+        page.insert_text((820.0, 640.0), title, fontsize=9)
+        page.insert_text((820.0, 665.0), "SCALE 1:100", fontsize=9)
+        shape = page.new_shape()
+        for j in range(600):
+            x = 50.0 + (j % 50) * 12.0
+            y = 50.0 + (j // 50) * 12.0
+            shape.draw_line(fitz.Point(x, y), fitz.Point(x + 8.0, y))
+            shape.finish(color=(0, 0, 0), width=0.5)
+        shape.commit()
+    pdf_bytes = doc.tobytes()
+    doc.close()
+    sha = hashlib.sha256(pdf_bytes).hexdigest()
+
+    import struct
+    from pb_source_vector_outlined_text_ocr_shadow import OcrRawToken
+
+    def _fake_ocr(png: bytes):
+        pw, _ph = struct.unpack(">II", png[16:24])
+        scale = pw / 800.0  # clip width is 800 pts
+        return (
+            OcrRawToken(text="3600", confidence=0.96, bbox_px=(100.0 * scale, 100.0 * scale, 140.0 * scale, 112.0 * scale)),
+            OcrRawToken(text="W01", confidence=0.93, bbox_px=(220.0 * scale, 150.0 * scale, 245.0 * scale, 162.0 * scale)),
+        )
+
+    res = admit_and_extract_outlined_drawing_set_shadow(
+        pdf_bytes,
+        expected_source_sha256=sha,
+        finish_specification_present=False,
+        render_dpis=(144, 216),
+        ocr_callable=_fake_ocr,
+    )
+    assert isinstance(res, OutlinedDrawingSetIngestionShadowBundle)
+    assert res.status == "ADMITTED_AND_EXTRACTED_SHADOW"
+    # Picks GROUND FLOOR PLAN (1) and NORTH ELEVATION (2), never SITE PLAN (0)
+    assert res.selected_page_indices == (1, 2)
+    assert res.admission_report.sheet_assessments[0].detected_role == "site_or_cover"
+    assert res.admission_report.finish_authority_status == "ABSTAINED"
+    assert res.admission_report.finish_authority_reason == "material_specification_missing"
+    assert res.ocr_witness_bundle is not None
+    assert "3600" in res.ocr_witness_bundle.cross_sheet_review.corroborated_dimension_tokens
+    assert res.commercial_projection_allowed is False
+    assert res.takeoff_eligible is False
+    assert res.shadow_only is True
+    with pytest.raises(ValueError):
+        replace(res, commercial_projection_allowed=True)
+
+    # Negative: primitive cap overflow abstains before any OCR runs
+    capped = admit_and_extract_outlined_drawing_set_shadow(
+        pdf_bytes,
+        expected_source_sha256=sha,
+        max_drawings_per_page=500,
+        ocr_callable=_fake_ocr,
+    )
+    assert capped.status == "ABSTAINED"
+    assert "source_primitive_cap_exceeded" in capped.reason_codes
+    assert capped.ocr_witness_bundle is None
+
