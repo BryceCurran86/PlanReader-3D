@@ -20,10 +20,12 @@ export function roofComponentMesh(edge: RoofEdge, spec: RoofComponentVisual) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, height, width), material);
     mesh.position.set(0, y, z);
     mesh.rotation.x = angle;
+    mesh.castShadow=true;mesh.receiveShadow=true;
     group.add(mesh);
   }
   if (spec.component === "fascia") {
     strip(0.17, 0.032, -0.083, 0.018);
+    strip(.012,.045,-.164,.022); // nominal folded lower fascia lip
   } else if (spec.component === "gutter") {
     if (spec.profile === "half-round") {
       const geometry = new THREE.CylinderGeometry(0.071, 0.071, length, 16, 1, true, Math.PI, Math.PI);
@@ -33,11 +35,13 @@ export function roofComponentMesh(edge: RoofEdge, spec: RoofComponentVisual) {
       material.dispose();
       curve.rotation.z = Math.PI / 2;
       curve.position.set(0, -0.049, 0.078);
+      curve.castShadow=true;curve.receiveShadow=true;
       group.add(curve);
     } else {
       strip(0.013, 0.131, -0.12, 0.083);
       strip(0.083, 0.012, -0.078, 0.019);
       strip(0.083, 0.012, -0.078, 0.146, spec.profile === "quad" ? 0.26 : 0);
+      strip(.012,.022,-.034,.146); // rolled outer edge
     }
   } else if (spec.profile === "ridge" || spec.profile === "valley") {
     const angle = spec.profile === "ridge" ? 0.22 : -0.12;
