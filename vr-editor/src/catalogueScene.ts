@@ -16,6 +16,7 @@ import { makeItemHostId, openingFitMessage, openingHostId, timberFitsWall, workt
 import type { ItemHit, OpeningSize, PlacedItem, Vector, WallSection } from "./itemPlacement.ts";
 import { createCatalogueFixture } from "./catalogueFixtures.ts";
 import { finishMesh, trimRun } from "./catalogueGeometry.ts";
+import {architraveMitres} from "./architraveMitres.ts";
 import { createEntryAssembly, createTimberSection } from "./exteriorGeometry.ts";
 import { createDesignAssembly, createOpeningStyle } from "./extensionGeometry.ts";
 import { SITE_HOST_ID } from "./itemPlacement.ts";
@@ -139,16 +140,14 @@ function trimMount(host: CatalogueHost, item: CatalogueItem, normal: THREE.Vecto
   if (host.opening) {
     const { start, end, bottom, top } = host.opening;
     const left = xy(start, top), right = xy(end, top);
-    const across = right.clone().sub(left).normalize();
-    add(xy(start, bottom), left, across.clone().negate());
-    add(xy(end, bottom), right, across);
-    add(left.addScaledVector(across, -spec.widthM), right.addScaledVector(across, spec.widthM), vertical);
+    group.add(architraveMitres(left,right,bottom,normal,spec));
   }
   return group;
 }
 
 function dispose(root: THREE.Object3D) {
   const materials = new Set<THREE.Material>();
+  const textures = new Set<THREE.Texture>();
   root.traverse(object => {
     if (!(object instanceof THREE.Mesh)) return;
     object.geometry.dispose();
@@ -156,9 +155,10 @@ function dispose(root: THREE.Object3D) {
     for (const material of faces) materials.add(material);
   });
   for (const material of materials) {
-    if (material instanceof THREE.MeshStandardMaterial) {material.map?.dispose();material.bumpMap?.dispose();material.roughnessMap?.dispose();}
+    if (material instanceof THREE.MeshStandardMaterial) for(const texture of [material.map,material.bumpMap,material.roughnessMap])if(texture)textures.add(texture);
     material.dispose();
   }
+  for(const texture of textures)texture.dispose();
 }
 
 function surfaceKey(entry: PlacedItem) {
