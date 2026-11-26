@@ -37,7 +37,7 @@ C08 stays open until M02 states these.
 
 ## One measurement (one residential floor plan page: one tracer pass, 18 rooms)
 
-Preview without a packet: 29.0 s, of which the tracer run is 14.8 s: 13.9 s before the correction hook and 0.9 s forming rooms. A correction today runs the tracer twice. Under this contract a rejected or non-barrier mark, or a new wall line, would re-form rooms (about 1 s per pass) plus the plan and review block (not timed), instead of the whole page.
+Preview without a packet: 29.0 s, of which the tracer run is 14.8 s: 13.9 s before the correction hook and 0.9 s forming rooms. A correction today repeats the whole page and runs the tracer twice. Under this contract no correction repeats the part before the hook: it re-forms the rooms of the invalidated passes (about 1 s per pass) and re-runs the plan and review block (not timed).
 
 ## Benchmark observations that must not influence the implementation
 
