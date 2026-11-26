@@ -160,3 +160,41 @@ def test_malformed_source_record_is_not_counted_as_authenticated_occurrence():
     assert _occurrences_on_page(
         (_scope(_record(), None),), page_id="11"
     ) == (_record(),)
+
+
+def test_publication_page_lookup_reuses_exact_quarantine_once_per_page(monkeypatch):
+    import pb_cross_view_floor_finish_authority as authority
+
+    a = _record("a", "ea")
+    conflict = replace(a, code="FT2")
+    b = _record("b", "eb", bbox=(80, 80, 90, 90))
+    c = _record("c", "ec", page_id="12")
+    scopes = (_scope(a, b, c), _scope(conflict))
+    calls = []
+    original = authority._occurrences_on_page
+
+    def counted(results, *, page_id):
+        calls.append(page_id)
+        return original(results, page_id=page_id)
+
+    monkeypatch.setattr(authority, "_occurrences_on_page", counted)
+    lookup = authority._PublicationPageOccurrences(scopes)
+    for _ in range(20):
+        assert lookup.for_page("11") == (b,)
+        assert lookup.for_page("12") == (c,)
+        assert lookup.for_page("13") == ()
+    assert calls == ["11", "12", "13"]
+
+
+def test_publication_page_lookup_does_not_reuse_previous_revision_results():
+    import pb_cross_view_floor_finish_authority as authority
+
+    first = _record()
+    second = replace(first, snapshot_id="new-snapshot", code="FT2")
+    a = authority._PublicationPageOccurrences((_scope(first),))
+    b = authority._PublicationPageOccurrences((_scope(second),))
+    disputed = authority._PublicationPageOccurrences((_scope(first, second),))
+    assert a.for_page("11") == (first,)
+    assert b.for_page("11") == (second,)
+    assert disputed.for_page("11") == ()
+    assert a.for_page("11") == (first,)
