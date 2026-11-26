@@ -100,8 +100,39 @@ def render_guided_plan_review(st, *, workspace, page, native_trace, doc_path,
         st.caption(f"Magnetic placement: {len(targets)} source endpoint candidates plus "
                    "your own drawn vertices. Toggle Snap or hold Alt for free placement. "
                    "Snapping is a positioning aid, not proof of a physical wall or opening.")
+        from pb_guided_plan_review_snap import build_review_issue_targets
+        issue_cache_key = f"guided_issue_targets_{scope.key}"
+        if issue_cache_key not in st.session_state:
+            locations = []
+            if overlay_matches:
+                try:
+                    locations = build_review_issue_targets(
+                        scope=scope, pdf_path=doc_path, image_bytes=image, report=report,
+                    )
+                except (ValueError, OSError, RuntimeError, TypeError, KeyError):
+                    pass
+            st.session_state[issue_cache_key] = locations
+        locations = st.session_state[issue_cache_key]
+        by_id = {item["id"]: item for item in locations}
+        focus = None
+        if locations:
+            choices = [None, *by_id]
+            selected_location = st.selectbox(
+                f"Jump to an unresolved wall / opening location ({len(locations)})",
+                choices, format_func=lambda k: "Overview / free navigation" if k is None
+                else f"{choices.index(k)}. {by_id[k]['label']}",
+                key=prefix + "_focus_location",
+            )
+            focus = by_id.get(selected_location)
+            st.caption("Red crosshair locates a source review candidate, not a confirmed missing wall. "
+                       "Select another location to jump there. Known covered aperture terminals, "
+                       "internal walls and joinery are not listed as exterior gaps.")
+        else:
+            st.caption("No navigable residual exterior endpoint candidates in this preview. "
+                       "This does not certify a closed footprint or complete plan.")
         result = line_editor(image, pending[1], editor_rows(), 0.0, saved["revision"],
-                             key=prefix + "_canvas", height=760, review_snap_targets=targets)
+                             key=prefix + "_canvas", height=760,
+                             review_snap_targets=targets, review_focus=focus)
         if result is not None:
             st.session_state[pending_key] = (saved["revision"], result)
             pending = st.session_state[pending_key]
