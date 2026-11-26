@@ -56,8 +56,10 @@ def _display_points(*, scope, pdf_path, image_bytes, report, raw):
                 continue
             x, y = point
             if any(type(v) not in (int, float) or not math.isfinite(v) for v in (x, y)):
+                targets.append(None)
                 continue
             if not (0 <= x <= frame.native_width and 0 <= y <= frame.native_height):
+                targets.append(None)
                 continue
             if frame.rotation == 90:
                 x, y = frame.native_height - y, x
@@ -67,6 +69,8 @@ def _display_points(*, scope, pdf_path, image_bytes, report, raw):
 
 
 def build_review_snap_targets(*, scope, pdf_path, image_bytes, report):
+    if not isinstance(report, dict):
+        raise ValueError("Review snap preview provenance mismatch")
     network = report.get("exterior_source_wall_network") or {}
     raw = list(network.get("unjoined_native_wall_endpoints_pdf_pts") or [])
     raw.extend(hit.get("tip_pdf_pts") for hit in
@@ -91,6 +95,8 @@ def build_review_issue_targets(*, scope, pdf_path, image_bytes, report):
         "ambiguous_competing_hosted_apertures": "Ambiguous opening ownership",
         "ambiguous_competing_source_roles": "Ambiguous wall / source role",
     }
+    if not isinstance(report, dict):
+        raise ValueError("Review issue preview provenance mismatch")
     audit = report.get("source_wall_endpoint_aperture_review") or {}
     reviews = [item for item in (audit.get("endpoint_reviews") or [])
                if isinstance(item, dict) and item.get("status") in labels]
