@@ -524,3 +524,30 @@ class TestDegenerateRatiosFailClosed:
         record = _resolve([ScaleSourceReading(SB, "1:100", numpy.float64(100.0), numpy.float64(1.0))])
         assert _authority(record) == AuthorityStatus.FIRM.value
         assert record.px_per_m == pytest.approx(POINTS_PER_METRE_AT_1_1 / 100.0)
+
+
+class TestRecoveredScaleApprovalAuthority:
+    @pytest.mark.parametrize("source_type", ["inferred", "unknown", "ai", "", None, []])
+    def test_nonfirm_valid_scale_record_is_blocked(self, source_type):
+        record = ScaleCalibration(
+            page_no=1, ratio_str="1:100", px_per_m=28.35, method="X",
+            is_verified=True, confidence=1.0, source_type=source_type,
+            status=ScaleCalibrationStatus.VALID.value,
+        )
+        assert measurement_authority_for_page_scale(record) == AuthorityStatus.BLOCKED.value
+
+    @pytest.mark.parametrize("approver", [None, "", "   ", 1, True])
+    def test_empty_or_untyped_approval_cannot_grant_authority(self, approver):
+        record = ScaleCalibration(
+            page_no=1, ratio_str="1:100", px_per_m=28.35, method="MANUAL",
+            is_verified=True, confidence=1.0, source_type=ScaleSourceType.MANUAL.value,
+            status=ScaleCalibrationStatus.USER_APPROVED.value, approved_by=approver,
+        )
+        assert measurement_authority_for_page_scale(record) == AuthorityStatus.BLOCKED.value
+        with pytest.raises(ValueError):
+            approve_page_scale_calibration(unknown_calibration(1), 100.0, approver)
+
+    def test_real_manual_approval_remains_firm(self):
+        record = approve_page_scale_calibration(unknown_calibration(1), 100.0, "Estimator")
+        assert measurement_authority_for_page_scale(record) == AuthorityStatus.FIRM.value
+        assert record.px_per_m == pytest.approx(POINTS_PER_METRE_AT_1_1 / 100.0)
