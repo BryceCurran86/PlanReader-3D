@@ -156,3 +156,59 @@ def test_replaced_source_table_uses_fresh_scalar_authentication():
     assert authority.prove_existence(selector).status is not EvidenceResolutionStatus.CORROBORATED
     store.observations[key] = original
     assert authority.prove_existence(selector) == baseline
+
+
+_MUTATIONS = {
+    "setitem": lambda table, key, value: table.__setitem__(key, value),
+    "delitem": lambda table, key, value: table.__delitem__(key),
+    "pop": lambda table, key, value: table.pop(key),
+    "popitem": lambda table, key, value: table.popitem(),
+    "clear": lambda table, key, value: table.clear(),
+    "update": lambda table, key, value: table.update({key: value}),
+    "setdefault": lambda table, key, value: table.setdefault((key[0], "unfiled"), value),
+    "ior": lambda table, key, value: table.__ior__({key: value}),
+}
+
+
+@pytest.mark.parametrize("method", sorted(_MUTATIONS))
+def test_every_kind_of_write_to_the_receipt_table_changes_its_count(method):
+    source, published = _prepare(frame_lines=2)
+    table = source._raster_opening_primitive_receipts
+    key = next(iter(table))
+    before = table.changes
+    _MUTATIONS[method](table, key, table[key])
+    assert table.changes > before
+
+
+def test_counted_table_is_checked_by_count_not_entry_by_entry():
+    source, published = _prepare(frame_lines=2)
+    record = _corroborated_records(source, published)[0]
+    authority = source.physical_opening_authority()
+    selector = _selector(published, record.source_observation_ids[0])
+    baseline = authority.prove_existence(selector)
+    token = authority._raster_inventory_inputs(published)
+    assert type(token[-1]) is int
+    key = (published.snapshot.snapshot_id, record.source_observation_ids[1])
+    receipt = source._raster_opening_primitive_receipts[key]
+    source._raster_opening_primitive_receipts.update({key: replace(receipt, render_sha256="0" * 64)})
+    assert authority.prove_existence(selector).status is not EvidenceResolutionStatus.CORROBORATED
+    source._raster_opening_primitive_receipts |= {key: receipt}
+    assert authority.prove_existence(selector) == baseline
+
+
+def test_replacement_receipt_mapping_is_still_compared_entry_by_entry():
+    source, published = _prepare(frame_lines=2)
+    record = _corroborated_records(source, published)[0]
+    authority = source.physical_opening_authority()
+    counted = authority._raster_inventory_inputs(published)
+    source._raster_opening_primitive_receipts = dict(source._raster_opening_primitive_receipts)
+    plain = authority._raster_inventory_inputs(published)
+    assert type(plain[-1]) is tuple
+    assert not authority._same_raster_inventory_inputs(counted, plain)
+    key = (published.snapshot.snapshot_id, record.source_observation_ids[1])
+    receipt = source._raster_opening_primitive_receipts[key]
+    source._raster_opening_primitive_receipts[key] = replace(receipt)
+    assert not authority._same_raster_inventory_inputs(plain, authority._raster_inventory_inputs(published))
+    source._raster_opening_primitive_receipts[key] = receipt
+    assert authority._same_raster_inventory_inputs(plain, authority._raster_inventory_inputs(published))
+

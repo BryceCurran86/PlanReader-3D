@@ -2290,18 +2290,22 @@ class PhysicalOpeningAuthority:
     def _same_raster_inventory_inputs(first, second) -> bool:
         if first is None or second is None:
             return False
-        return (
-            all(a is b for a, b in zip(first[:-1], second[:-1]))
-            and len(first[-1]) == len(second[-1])
-            and all(a is b for a, b in zip(first[-1], second[-1]))
-        )
+        if not all(a is b for a, b in zip(first[:-1], second[:-1])):
+            return False
+        before, after = first[-1], second[-1]
+        if type(before) is int or type(after) is int:
+            # A counted receipt table: unchanged exactly when nothing was written through it.
+            return type(before) is type(after) and before == after
+        return len(before) == len(after) and all(a is b for a, b in zip(before, after))
 
     def _raster_inventory_inputs(self, published) -> tuple | None:
         """Immutable source-object token, never a caller-supplied proof.
 
         Snapshot-chain tables discard their flat view on ANY write, including
         a parent/fingerprint replacement outside the selected opening/page.
-        Receipt dictionaries are independent, so check every published entry.
+        The receipt table is independent: the producer's table counts its
+        writes, and any other mapping has every published entry compared, so a
+        page with thousands of primitives is not re-walked on every proof.
         A diagnostic replacement with an ordinary mapping cannot use this fast
         path and is reauthenticated through the existing scalar source reader.
         """
@@ -2320,14 +2324,16 @@ class PhysicalOpeningAuthority:
         if rows is None or hashes is None:
             return None
         ids = published.raster_opening_primitive_observation_ids
+        receipts = producer._raster_opening_primitive_receipts
+        changes = getattr(receipts, "changes", None)
         return (
             published, ids,
             store.revisions.get(published.revision.revision_id),
             store.snapshots.get(snapshot_id),
             store.source_bytes_by_revision.get(published.revision.revision_id),
-            rows, hashes,
-            tuple(producer._raster_opening_primitive_receipts.get((snapshot_id, oid))
-                  for oid in ids),
+            rows, hashes, receipts,
+            changes if type(changes) is int
+            else tuple(receipts.get((snapshot_id, oid)) for oid in ids),
         )
 
     def _raster_primitive_snapshot_records(

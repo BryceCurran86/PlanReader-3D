@@ -366,6 +366,49 @@ class RasterOpeningPrimitiveVisibilityReceipt:
     detector_version: str = RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION
 
 
+class _ChangeCountedReceipts(dict):
+    """The raster opening-primitive receipt table, counting every write made through it.
+
+    A reader that saw the same table and the same count knows no receipt was added, replaced or removed since,
+    without comparing them all. Reads are unchanged.
+    """
+
+    changes = 0
+
+    def __setitem__(self, key, value) -> None:
+        self.changes += 1
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key) -> None:
+        self.changes += 1
+        super().__delitem__(key)
+
+    def pop(self, *args):
+        self.changes += 1
+        return super().pop(*args)
+
+    def popitem(self):
+        self.changes += 1
+        return super().popitem()
+
+    def clear(self) -> None:
+        self.changes += 1
+        super().clear()
+
+    def update(self, *args, **kwargs) -> None:
+        self.changes += 1
+        super().update(*args, **kwargs)
+
+    def setdefault(self, key, default=None):
+        self.changes += 1
+        return super().setdefault(key, default)
+
+    def __ior__(self, other):
+        self.changes += 1
+        super().update(other)
+        return self
+
+
 @dataclass(frozen=True)
 class PublishedVisibleSourceSnapshot:
     revision: SourceRevisionRecord
@@ -1092,7 +1135,7 @@ class SourceVisibilityProducer:
         ] = {}
         self._raster_opening_primitive_receipts: dict[
             tuple[str, str], RasterOpeningPrimitiveVisibilityReceipt
-        ] = {}
+        ] = _ChangeCountedReceipts()
         self._visibility_page_cache: (
             "OrderedDict[tuple[str, str, int, bool, bool], _CachedVisibilityPage]"
         ) = OrderedDict()
