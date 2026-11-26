@@ -19,9 +19,9 @@ export interface VisualPreset {
 export const VISUAL_PRESETS: Readonly<Record<LightingMood, Readonly<VisualPreset>>> = {
   daylight: {
     label: "Architectural daylight (illustrative)",
-    background: 0xc6d9e5, ambientSky: 0xf0f7ff, ambientGround: 0x83918e,
-    ambientIntensity: 2.0, sunColor: 0xfff2da, sunIntensity: 3.0,
-    sunPosition: [9, 18, 7], exposure: 0.88, materialRoughness: 0.89,
+    background: 0xc6d9e5, ambientSky: 0xe9f0fa, ambientGround: 0x8d887d,
+    ambientIntensity: 1.1, sunColor: 0xfff5e7, sunIntensity: 2.7,
+    sunPosition: [9, 12, 7], exposure: 0.92, materialRoughness: 0.78,
   },
   studio: {
     label: "Neutral model studio (illustrative)",

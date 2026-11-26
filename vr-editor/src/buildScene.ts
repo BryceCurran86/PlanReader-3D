@@ -588,6 +588,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
   menu.visible = false;
   scene.add(menu);
   const tray=createPhysicalToolTray(menu);
+  // One readable opaque panel; avoid layering physical keys under an atlas.
+  tray.keys.visible=tray.samples.visible=false;
   function highlightMenu(layout:MenuLayout,index:number){
     if(!layout.radial)tray.highlight(index);
   }
@@ -716,11 +718,11 @@ export function createBuildOverlay(scene: THREE.Scene) {
   }
   function drawMenu(layout: MenuLayout, hover: number) {
     highlightMenu(layout,hover);
-    const key = JSON.stringify([layout, layout.radial?hover:-1]);
+    const key = JSON.stringify([layout, hover]);
     if (!context || drawn === key) return;
     drawn = key;
     const nextTrayKey=JSON.stringify([layout.width,layout.height,layout.radial,layout.buttons]);
-    if(nextTrayKey!==trayKey){tray.update(layout);trayKey=nextTrayKey;}
+    if(nextTrayKey!==trayKey){tray.update(layout);tray.keys.visible=tray.samples.visible=false;trayKey=nextTrayKey;}
     highlightMenu(layout,hover);
     if (canvas.width !== layout.width || canvas.height !== layout.height) {
       canvas.width = layout.width;
@@ -730,7 +732,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     context.fillStyle = "#13242c";
     if(layout.radial){context.beginPath();context.arc(canvas.width/2,canvas.height/2,canvas.width/2-2,0,Math.PI*2);context.fill();}
     // Transparent gaps expose the building between individual physical keys.
-    else {context.fillStyle="rgba(18,30,36,.92)";context.fillRect(10,10,canvas.width-20,54);context.fillRect(10,canvas.height-52,canvas.width-20,44);}
+    else {context.fillStyle="#18232c";context.fillRect(0,0,canvas.width,canvas.height);}
     context.font = "bold 33px sans-serif";
     context.fillStyle = "#f0fbfc";
     if(layout.radial){/* title is rendered in the centre below */}
@@ -773,8 +775,11 @@ export function createBuildOverlay(scene: THREE.Scene) {
       texture.needsUpdate=true;return;
     }
     for (const [index, button] of layout.buttons.entries()) {
-      const highlight = button.active;
-      // The key itself is a batched 3D mesh; this atlas contains text only.
+      const highlight = !button.disabled&&(index===hover||button.active);
+      context.fillStyle=button.disabled?"#303943":highlight?"#346e68":"#354651";
+      context.fillRect(button.x,button.y,button.w,button.h);
+      if(highlight){context.strokeStyle="#b6e2d8";context.lineWidth=3;context.strokeRect(button.x+2,button.y+2,button.w-4,button.h-4);}
+      if(button.swatch!==undefined){context.fillStyle="#"+button.swatch.toString(16).padStart(6,"0");context.fillRect(button.x+10,button.y+(button.h-30)/2,29,30);}
       const middle = button.y + button.h / 2;
       // Colour samples are physical swatches, separate from the text atlas.
       context.fillStyle = button.disabled ? "#a1aeb4" : "#fff";

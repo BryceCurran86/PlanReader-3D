@@ -331,8 +331,8 @@ export function createCatalogueScene(scene: THREE.Scene) {
     meshes = [...hosts.keys()];
   }
 
-  function candidate(raycaster: THREE.Raycaster, item: CatalogueItem, turn = 0): { hit: ItemHit | null; reason?: string } {
-    for (const hit of raycaster.intersectObjects(meshes, false)) {
+  function candidate(raycaster: THREE.Raycaster, item: CatalogueItem, turn = 0, selectedHit?:THREE.Intersection): { hit: ItemHit | null; reason?: string } {
+    for (const hit of selectedHit?[selectedHit]:raycaster.intersectObjects(meshes, false)) {
       const host = hosts.get(hit.object);
       if (!host || !hit.face) continue;
       // Keep floor and interior placement available under roof finishes and behind opening targets.
@@ -404,7 +404,9 @@ export function createCatalogueScene(scene: THREE.Scene) {
         host.target==="wall"||host.target==="ceiling"?i.group==="paint":
         host.target==="floor"?i.group==="floors":host.target==="roof"?i.group==="roofing":i.group==="tapware"));
     if(!probe)return null;
-    const result=candidate(ray,probe);
+    // Reuse the exact visible intersection chosen above. A second unfiltered
+    // raycast can hit a hidden roof or an unrelated host before this surface.
+    const result=candidate(ray,probe,0,first);
     return result.hit&&result.hit.hostId===host.id?{hit:result.hit,worldPoint:first.point.toArray() as Vector}:null;
   }
 

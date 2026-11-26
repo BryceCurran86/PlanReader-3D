@@ -56,7 +56,7 @@ import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
 import type {WallAim,WallTarget} from "./wallMagnet";
-import {displayedMenuAction,thumbstickSector} from "./toolWheelInput";
+import {displayedMenuAction,thumbstickSector,adjacentMenuButton} from "./toolWheelInput";
 import {createWallTextureLibrary} from "./wallTextures";
 import {layerVisible,editableSurfaceVisible,draftWallLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
 import type {LayerOverrides} from "./constructionLayers";
@@ -417,8 +417,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let lastMenuSignature="",lastMenuDraw=0,menuPose:"radial"|"panel"|null=null,lastMenuHover=-2;
     // Only a layout actually displayed can authorize a menu action.
     let displayedMenuLayout: ReturnType<typeof menuLayout> | null = null;
-    let stickNeedsNeutral=false;
-    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    let stickNeedsNeutral=false,menuFocus=-1,menuStickArmed=true,menuStickFocus=false;
+    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(contextual=false){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
@@ -427,11 +427,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         activeGrip=null;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;
         const right=inputSources.findIndex(source=>source?.handedness==="right"&&source.targetRayMode==="tracked-pointer");
         if(contextual&&right>=0&&interaction.current.mode==="inspect"&&!resize.current.projection&&!resize.current.enabled){
-          aimController(controllers[right]);finishContext=itemView.contextAt(raycaster);
+          syncItems();aimController(controllers[right]);finishContext=itemView.contextAt(raycaster);
           if(finishContext)finishGroup=initialFinishGroup(finishContext);
           else{closeTools();reportTool("Aim at a wall, floor, door or fitting, then squeeze right grip.");return;}
         }
-        displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
+        displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;
       }
       else closeTools();
     }
@@ -533,7 +533,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(choice.action==="apply"&&finishGroup&&choice.itemId&&contextChoices(finishContext,finishGroup).some(i=>i.id===choice.itemId)){
           const existing=finishContext.entry&&getCatalogueItem(finishContext.entry.itemId);
           itemControls.current.onAction({kind:"apply-finish",itemId:choice.itemId,hit:finishContext.hit,...(existing?.visual.kind==="fixture"?{replaceId:finishContext.entry!.id}:{})});
-          closeTools();
+          // Keep the selected face and palette open for repeated comparisons.
         }
         return;
       }
@@ -1453,6 +1453,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function menuTarget(layout:ReturnType<typeof menuLayout>){
       if(!toolsOpen)return null;
       const rayHit=buildOverlay.menuHit(raycaster,layout);
+      if(!layout.radial&&menuStickFocus&&menuFocus>=0&&!layout.buttons[menuFocus]?.disabled&&layout.buttons[menuFocus])return {index:menuFocus,action:layout.buttons[menuFocus].action};
       if(rayHit?.action)return rayHit;
       if(layout.radial){
         const right=inputSources.find(s=>s?.handedness==="right");
@@ -1462,17 +1463,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       return rayHit;
     }
     function activateMenu(choice:MenuAction){
-      displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;
+      displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuFocus=-1;menuStickFocus=false;menuStickArmed=false;
       menuAction(choice);
       if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
     }
     function activateDisplayedMenu(current: ReturnType<typeof menuLayout>) {
       const shown=displayedMenuLayout;
-      if(!shown)return;
+      if(!shown)return false;
       const hit=menuTarget(shown);
-      if(!hit?.action)return;
+      if(!hit?.action)return false;
       const action=displayedMenuAction(shown,current,hit.index);
-      if(action)activateMenu(action);
+      if(!action)return false;
+      activateMenu(action);return true;
     }
     function menuKey(layout: ReturnType<typeof menuLayout>) {
       const hit=menuTarget(layout);
@@ -1485,7 +1487,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const layout = menuLayout("");
         menuConsumed[index]=true;
         // The first trigger press activates one button. Release never needs to hit it again.
-        activateDisplayedMenu(layout);
+        if(!activateDisplayedMenu(layout))reportTool("Aim at a visible button, or move right stick to choose, then trigger.");
         return;
       }
       const menu = null;
@@ -1531,7 +1533,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (gesture && completeDrag(gesture, index)) return;
       if(gesture?.direct&&"previous" in gesture){updateDraftSelection(gesture.previous.proposalId);select(null);reportTool("Selected draft "+gesture.kind+" · hold trigger and drag.");return;}
       // Menu actions dispatch exclusively on selectstart.
-      if(toolsOpen)return;
+      if(toolsOpen){activateDisplayedMenu(menuLayout(""));return;}
       if ((toolsOpen&&(itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen)) || resize.current.enabled) return;
       const item = itemControls.current.active;
       if (item) {
@@ -1746,7 +1748,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
       toolsOpen=false;ghostMode=false;displayedMenuLayout=null;menuPose=null;menuConsumed.fill(false);renderer.shadowMap.enabled=false;
-      reportTool("Left grip opens tools. Aim or use right stick, then trigger. Left stick walks when tools are closed.");
+      reportTool("Left grip: tools. Right grip while aiming: finishes. Aim or move right stick, then trigger.");
       elevatedReturn=null;navBase=null;navOffset=identityNavOffset();turnArmed=true;lastNavTime=0;
       cancelPointer();
       lastController = -1;
@@ -2020,7 +2022,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       let activeDimensionRay=false;
       if (renderer.xr.isPresenting) {
         // Cache the menu model and avoid large canvas uploads on every XR frame.
-        if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=250)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
+        if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=100)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
         const layout=toolsOpen?cachedMenu:null;
         if(layout){
           const hitLayout=displayedMenuLayout??layout;
@@ -2038,6 +2040,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
         activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
+        if(toolsOpen&&displayedMenuLayout&&!displayedMenuLayout.radial){
+          const stick=standardThumbstick(inputSources.find(s=>s?.handedness==="right"));
+          if(Math.hypot(...stick)<.25)menuStickArmed=true;
+          else if(menuStickArmed&&Math.hypot(...stick)>.6){menuFocus=adjacentMenuButton(displayedMenuLayout,menuFocus,stick[0],stick[1]);menuStickFocus=true;menuStickArmed=false;}
+        }
         const hover=toolsOpen&&active>=0&&displayedMenuLayout?menuTarget(displayedMenuLayout):null;
         const hostTool=buildState.tool==="door"||buildState.tool==="window"||buildState.tool==="frame"||buildState.tool==="move"||buildState.tool==="stretch"||buildState.tool==="opening-move";
         const canLock=active>=0&&!hover&&(!buildState.tool||hostTool)&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
@@ -2070,11 +2077,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (layout && !simpleHome && !finishContext && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
-        if(displayedMenuLayout&&!displayedMenuLayout.radial)buildOverlay.highlightMenu(displayedMenuLayout,hover?.index??-1);
-        if(layout&&(!displayedMenuLayout||now-lastMenuDraw>=250)){
+        if(layout&&(!displayedMenuLayout||now-lastMenuDraw>=100)){
           const signature=JSON.stringify(layout);
           lastMenuDraw=now;
-          if(signature!==lastMenuSignature||!displayedMenuLayout||(layout.radial&&(hover?.index??-1)!==lastMenuHover)){
+          if(signature!==lastMenuSignature||!displayedMenuLayout||(hover?.index??-1)!==lastMenuHover){
             buildOverlay.sizeMenu(layout);
             buildOverlay.drawMenu(layout,hover?.index??-1);
             lastMenuSignature=signature;displayedMenuLayout=layout;
