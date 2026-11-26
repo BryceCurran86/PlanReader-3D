@@ -3,6 +3,10 @@ name: VR development feedback (not release CI)
 on:
   push:
     branches: ['vr/**']
+    paths:
+      - 'vr-editor/**'
+      - 'scripts/ci_vr_dev_scope.py'
+      - '.github/workflows/vr-development-fast-feedback.yml'
   workflow_dispatch:
 
 permissions:
@@ -30,7 +34,7 @@ jobs:
           base=$(git merge-base HEAD FETCH_HEAD)
           scope=$(git diff --no-renames --name-only -z "$base" HEAD | python scripts/ci_vr_dev_scope.py)
           echo "scope=$scope" >> "$GITHUB_OUTPUT"
-          echo "Development feedback only: $scope. Required full PR/main CI is unchanged." >> "$GITHUB_STEP_SUMMARY"
+          echo "Development feedback only: $scope. Full PR/main CI remains mandatory." >> "$GITHUB_STEP_SUMMARY"
   protocol-feedback:
     needs: scope
     if: needs.scope.outputs.scope == 'vr-only'
