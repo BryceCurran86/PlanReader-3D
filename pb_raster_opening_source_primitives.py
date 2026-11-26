@@ -11,7 +11,9 @@ this module and belong to PhysicalOpeningAuthority.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
+import hashlib
 import math
 from typing import Iterable
 
@@ -245,36 +247,52 @@ def _raw_axis_line_run_primitives(
         registration_scale,
     )
     minimum = _scaled_px(THIN_RUN_MIN_PT, dpi, along_scale)
-    for row_index, row in enumerate(work):
-        padded = np.pad(row.astype(np.int8, copy=False), (1, 1))
-        transitions = np.diff(padded)
-        starts = np.flatnonzero(transitions == 1)
-        ends = np.flatnonzero(transitions == -1) - 1
-        for start, end in zip(starts.tolist(), ends.tolist()):
-            if end - start + 1 < minimum:
-                continue
+    row_sums = work.sum(axis=1)
+    active_rows = np.flatnonzero(row_sums >= minimum)
+    if active_rows.size == 0:
+        return
+    sub = work[active_rows].astype(np.int8, copy=False)
+    padded = np.pad(sub, ((0, 0), (1, 1)), mode="constant", constant_values=0)
+    diff = np.diff(padded, axis=1)
+    s_rows, s_cols = np.nonzero(diff == 1)
+    _e_rows, e_cols = np.nonzero(diff == -1)
+    e_cols = e_cols - 1
+    keep = (e_cols - s_cols + 1) >= minimum
+    if not np.any(keep):
+        return
+    kept_rows = active_rows[s_rows[keep]]
+    kept_starts = s_cols[keep]
+    kept_ends = e_cols[keep]
+    if excluded_work is not None:
+        width_cols = source_work.shape[1]
+        can_left = kept_starts > 0
+        left_idx = np.where(can_left, kept_starts - 1, 0)
+        extend_left = (
+            can_left
+            & (source_work[kept_rows, left_idx] != 0)
+            & (excluded_work[kept_rows, left_idx] != 0)
+        )
+        kept_starts = kept_starts - extend_left.astype(kept_starts.dtype)
+        can_right = (kept_ends + 1) < width_cols
+        right_idx = np.where(can_right, kept_ends + 1, 0)
+        extend_right = (
+            can_right
+            & (source_work[kept_rows, right_idx] != 0)
+            & (excluded_work[kept_rows, right_idx] != 0)
+        )
+        kept_ends = kept_ends + extend_right.astype(kept_ends.dtype)
 
-            # Recover only immediate source-ink contact with excluded wall mass.
-            # Never traverse further into the excluded region.
-            if excluded_work is not None:
-                if (
-                    start > 0
-                    and bool(source_work[row_index, start - 1])
-                    and bool(excluded_work[row_index, start - 1])
-                ):
-                    start -= 1
-                if (
-                    end + 1 < source_work.shape[1]
-                    and bool(source_work[row_index, end + 1])
-                    and bool(excluded_work[row_index, end + 1])
-                ):
-                    end += 1
-
-            center = float(row_index)
-            geometry = (float(start), center, float(end), center)
-            if axis == "vertical":
-                geometry = (center, float(start), center, float(end))
-            yield _primitive(RASTER_LINE_RUN, geometry, dpi=dpi)
+    is_vertical = axis == "vertical"
+    for row_index, start, end in zip(
+        kept_rows.tolist(), kept_starts.tolist(), kept_ends.tolist()
+    ):
+        center = float(row_index)
+        geometry = (
+            (center, float(start), center, float(end))
+            if is_vertical
+            else (float(start), center, float(end), center)
+        )
+        yield _primitive(RASTER_LINE_RUN, geometry, dpi=dpi)
 
 
 def _axis_run_primitives(
@@ -315,6 +333,13 @@ def _axis_run_primitives(
         yield _primitive(RASTER_THIN_INK_RUN, geometry, dpi=dpi)
 
 
+_PRIMITIVE_CACHE_MAX_ENTRIES = 8
+_PRIMITIVE_CACHE: OrderedDict[
+    tuple[str, int, float, float],
+    tuple[RasterOpeningSourcePrimitive, ...],
+] = OrderedDict()
+
+
 def detect_raster_opening_source_primitives(
     png_bytes: bytes,
     *,
@@ -328,14 +353,6 @@ def detect_raster_opening_source_primitives(
     dpi = int(dpi)
     if dpi <= 0:
         raise ValueError("dpi must be positive")
-
-    encoded = np.frombuffer(bytes(png_bytes), dtype=np.uint8)
-    gray = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
-    if gray is None or gray.ndim != 2 or gray.size == 0:
-        raise ValueError("raster opening primitive render is unreadable")
-
-    mass = (gray < MASS_THRESHOLD).astype(np.uint8)
-    line_mask = (gray < LINE_THRESHOLD).astype(np.uint8)
     sx, sy = (float(value) for value in registration_scale)
     if (
         not math.isfinite(sx)
@@ -344,6 +361,21 @@ def detect_raster_opening_source_primitives(
         or sy <= 0.0
     ):
         raise ValueError("registration_scale must contain positive finite values")
+
+    raw_bytes = bytes(png_bytes)
+    cache_key = (hashlib.sha256(raw_bytes).hexdigest(), dpi, sx, sy)
+    cached = _PRIMITIVE_CACHE.get(cache_key)
+    if cached is not None:
+        _PRIMITIVE_CACHE.move_to_end(cache_key)
+        return cached
+
+    encoded = np.frombuffer(raw_bytes, dtype=np.uint8)
+    gray = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
+    if gray is None or gray.ndim != 2 or gray.size == 0:
+        raise ValueError("raster opening primitive render is unreadable")
+
+    mass = (gray < MASS_THRESHOLD).astype(np.uint8)
+    line_mask = (gray < LINE_THRESHOLD).astype(np.uint8)
     solid_x = _odd(_scaled_px(POCHE_MIN_PT, dpi, sx))
     solid_y = _odd(_scaled_px(POCHE_MIN_PT, dpi, sy))
     thick = cv2.morphologyEx(
@@ -405,6 +437,10 @@ def detect_raster_opening_source_primitives(
         x0, y0, x1, y1 = primitive.geometry_pt
         if math.hypot(x1 - x0, y1 - y0) <= 0.0:
             raise ValueError("raster opening primitive geometry is degenerate")
+    _PRIMITIVE_CACHE[cache_key] = result
+    _PRIMITIVE_CACHE.move_to_end(cache_key)
+    while len(_PRIMITIVE_CACHE) > _PRIMITIVE_CACHE_MAX_ENTRIES:
+        _PRIMITIVE_CACHE.popitem(last=False)
     return result
 
 

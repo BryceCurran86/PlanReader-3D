@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from pathlib import Path
 
@@ -40,6 +40,7 @@ from pb_new_source_modality_router import classify_source_page_modality
 from pb_new_typed_vector_ink_scope import scope_outlined_vector_lettering
 from pb_next_wall_ring_preview import (
     KIND_SOURCE_OWNED_CHORD,
+    REASON_PRIMITIVE_CAP,
     _clip_drawing_items,
     _collect_cavity_multi_face_strips,
     _collect_dark_fill_strips,
@@ -51,6 +52,13 @@ from pb_next_wall_ring_preview import (
     build_layered_wall_doorway_room_rings,
 )
 from pb_source_ocr_glyph_fastpath import get_source_words_with_glyph_fastpath
+from pb_user_assisted_review_topology import (
+    BarrierRecorder,
+    abstained_review_block,
+    build_review_block,
+    plan_review,
+    read_review_packet,
+)
 from pb_source_internal_door_completeness_shadow import inspect_source_internal_door_completeness
 from pb_source_native_figured_window_bridge_review import (
     inspect_original_window_figured_bridge_review,
@@ -151,6 +159,7 @@ def source_native_trace_preview(
     source_owned_doorway_chord_shadow: bool = False,
     source_owned_doorway_chord_closures: bool = False,
     admit_wall_joint_paint: bool = True,
+    review_packet: Mapping | None = None,
 ) -> tuple[dict, bytes]:
     """Return actual native-source trace evidence + PNG on the original PDF page.
 
@@ -181,6 +190,11 @@ def source_native_trace_preview(
     ``admit_wall_joint_paint`` (default True) lets the exterior outline step keep mitred or junction pieces of black paint on a
     named wall layer that sit flush against admitted walls on two sides, so a corner painted that way is not read as open. It
     changes only the review outline; no wall, length, area or quantity follows. The pieces used are counted in the summary.
+
+    ``review_packet`` (default None: nothing changes) is a guided-review correction packet for this exact source, page and frame
+    (``ReviewPacketError``, a ValueError, otherwise). The automatic result is traced as without it; a second, user-assisted trace
+    applies the marks and is reported in ONE additive summary key, ``user_assisted_review`` (see
+    ``pb_user_assisted_review_topology``). It never changes the automatic rooms, the PNG, or any authority.
     """
     pdf_path = Path(pdf_path)
     if pdf_path.suffix.lower() != ".pdf":
@@ -208,6 +222,9 @@ def source_native_trace_preview(
         drawings = page.get_drawings()
         rect = page.rect
         page_count = len(document)
+        packet = None if review_packet is None else read_review_packet(
+            review_packet, source_sha256=sha, page_index=page_index, coordinate_frame=asdict(frame),
+        )
 
         def _report(stage: str, fraction: float, *,
                     snapshot=None, wall_candidates: int = 0) -> None:
@@ -353,14 +370,11 @@ def source_native_trace_preview(
                 viewport_pdf_pts=outer_wall.viewport_pdf_pts,
                 native_vector_rows_architectural=source_modality.route != "tiled_raster_underlay",
             )
-        result = build_layered_wall_doorway_room_rings(
-            wall_drawings,
+        tracer_kwargs = dict(
             source_sha256=sha,
             page_index=page_index,
             sliding_leaf_frame_closure=True,
             panel_lift_label_closure=True,
-            source_native_cs_jamb_closure=False,
-            source_native_internal_swing_closure=False,
             source_words=tuple(
                 {
                     "text": str(w[4]),
@@ -381,6 +395,11 @@ def source_native_trace_preview(
             viewport_pdf_pts=panes,
             source_owned_doorway_chords=() if doorway_chords is None else tuple(doorway_chords["chords"]),
         )
+        recorder = None if packet is None else BarrierRecorder()
+        result = build_layered_wall_doorway_room_rings(
+            wall_drawings, source_native_cs_jamb_closure=False, source_native_internal_swing_closure=False, **tracer_kwargs,
+            **({} if recorder is None else {"barrier_view": recorder}),
+        )
         if doorway_chords is not None:
             _mark_applied_doorway_chords(doorway_chords, result.closures)
         doorway_chord_shadow = None
@@ -394,6 +413,25 @@ def source_native_trace_preview(
                 viewport_pdf_pts=outer_wall.viewport_pdf_pts,
                 native_vector_rows_architectural=source_modality.route != "tiled_raster_underlay",
             )
+        review_block = None
+        if packet is not None:
+            if REASON_PRIMITIVE_CAP in result.reason_codes:
+                review_block = abstained_review_block(packet, source_sha256=sha, page_index=page_index,
+                                                      reason="page_over_primitive_cap")
+            elif not recorder.strips:
+                review_block = abstained_review_block(packet, source_sha256=sha, page_index=page_index,
+                                                      reason="no_traced_walls_on_this_page")
+            else:
+                plan = plan_review(packet, recorder)
+                assisted = build_layered_wall_doorway_room_rings(
+                    wall_drawings, source_native_cs_jamb_closure=False, source_native_internal_swing_closure=False,
+                    **tracer_kwargs, barrier_view=plan,
+                )
+                review_block = build_review_block(
+                    packet, plan, source_sha256=sha, page_index=page_index,
+                    automatic_rings=result.rings, user_rings=assisted.rings,
+                    endpoint_reviews=outer_wall.source_wall_endpoint_aperture_review.to_dict().get("endpoint_reviews", ()),
+                )
         _report("wall_room_topology_ready", .56)
         preview = fitz.open()
         canvas = _new_native_frame_canvas(preview, document, page_index, frame)
@@ -834,5 +872,7 @@ def source_native_trace_preview(
         if outer_wall.source_wall_joint_paint:
             # additive and only when corner paint was used, so a page without it keeps its summary
             summary["external_wall_joint_paint_count"] = len(outer_wall.source_wall_joint_paint)
+        if review_block is not None:
+            summary["user_assisted_review"] = review_block
         _report("trace_complete", 1.0, wall_candidates=sum(native_wall_counts.values()))
         return summary, png

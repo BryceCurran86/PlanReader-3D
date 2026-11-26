@@ -41,7 +41,7 @@ from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import math
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
@@ -208,6 +208,22 @@ class _Gap:
         if self.horizontal:
             return box(self.lo, self.band[0], self.hi, self.band[1])
         return box(self.band[0], self.lo, self.band[1], self.hi)
+
+
+@dataclass(frozen=True)
+class LayeredBarrierView:
+    """The pieces the tracer turns into room barriers, offered to an optional ``barrier_view`` just before it forms rooms.
+
+    ``extra_rects`` are ``(owner label, polygon)`` barriers added by the caller; they never become walls or closures.
+    ``unresolved_gaps`` are the wall interruptions that would still veto a room; the caller drops those its barriers close.
+    """
+
+    strips: tuple
+    other_fills: tuple
+    closures: tuple
+    closure_rects: tuple
+    unresolved_gaps: tuple = ()
+    extra_rects: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -2355,6 +2371,7 @@ def build_layered_wall_doorway_room_rings(
     source_pair_baseline_drawings: Sequence[Mapping[str, Any] | None] | None = None,
     viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
     source_owned_doorway_chords: Sequence[Mapping[str, Any]] = (),
+    barrier_view: Callable[[LayeredBarrierView], LayeredBarrierView] | None = None,
 ) -> LayeredRoomRingResult:
     """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
 
@@ -2366,6 +2383,8 @@ def build_layered_wall_doorway_room_rings(
     its native endpoints already meet major structural strips. The stroke is not extended.
     ``source_owned_doorway_chords`` (default none) are topology-only doorway chords the layered builder proved from the same source
     rows. Each one in view closes its door interval across its wall band, unless this builder already closed that doorway.
+    ``barrier_view`` (default None: nothing changes) is called with the barrier pieces just before rooms are formed (once per
+    tile) and returns the pieces to use. Room edges on its extra barriers are owned by their labels.
     """
     chords = tuple(_validated_doorway_chord(item) for item in source_owned_doorway_chords)
     if type(sliding_leaf_frame_closure) is not bool:
@@ -2406,6 +2425,7 @@ def build_layered_wall_doorway_room_rings(
                         source_pair_baseline_drawings=source_pair_baseline_drawings,
                         viewport_pdf_pts=box,
                         source_owned_doorway_chords=source_owned_doorway_chords,
+                        barrier_view=barrier_view,
                     )
                     for box in viewports
                 ])
@@ -2729,7 +2749,22 @@ def build_layered_wall_doorway_room_rings(
             source_sha256=source_sha256, page_index=page_index,
         )
 
-    barrier = _closed_union([*polygons, *(rect for _cid, rect in closure_rects)])
+    extra_rects: tuple = ()
+    if barrier_view is not None:
+        view = barrier_view(LayeredBarrierView(
+            tuple(strips), tuple(other_fills), tuple(closures), tuple(closure_rects), tuple(unresolved),
+        ))
+        strips, other_fills = list(view.strips), list(view.other_fills)
+        closures, closure_rects = list(view.closures), list(view.closure_rects)
+        unresolved = list(view.unresolved_gaps)
+        extra_rects = tuple(view.extra_rects)
+        polygons = [s.polygon for s in strips] + [polygon for _index, polygon in other_fills]
+        if extra_rects:
+            domain = unary_union([domain, *(rect for _label, rect in extra_rects)]).envelope.buffer(1.0, join_style=2)
+        if not strips:
+            return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0,
+                                         len(other_fills), 0, 0)
+    barrier = _closed_union([*polygons, *(rect for _cid, rect in closure_rects), *(rect for _label, rect in extra_rects)])
     free = domain.difference(barrier)
     rings: list[LayeredRoomRingRecord] = []
     thicknesses = sorted(min(s.x1 - s.x0, s.y1 - s.y0) for s in strips)
@@ -2780,7 +2815,9 @@ def build_layered_wall_doorway_room_rings(
             if owners:
                 wall_edges += 1
             else:
-                unowned_edges += 1
+                owners = tuple(sorted({label for label, rect in extra_rects if rect.buffer(NOISE_PT * 2).contains(mid)}))
+                if not owners:
+                    unowned_edges += 1
             edge_owners.append(owners)
         if unowned_edges:
             reasons.append(REASON_UNOWNED_EDGE)
