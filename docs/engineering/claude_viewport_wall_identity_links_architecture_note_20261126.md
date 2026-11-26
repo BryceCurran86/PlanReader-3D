@@ -30,7 +30,7 @@ Two candidates with the same path and the same source primitives are the same wa
 
 Synthetic: `tests/test_viewport_wall_identity_links_v1.py` (link rule, ambiguity and look-alikes, order, the real fallback fixture, receipt, pass-through, switch off identical, page-scope rooms untouched); 12 single-line mutants all fail a test. Tests touching the changed modules, with originals: 2,043 passed, 15 skipped, 2 failed; both failures are the Maryborough Office FT3 original-source tests, which fail the same way on `main` and on `main` from before 26 November's merges.
 
-Original drawing (counts and digests only; live claim, floor-plan page with its support page): switch off is identical to `main` in every field. Switch on: all 683 rooms name canonical walls (0 before), every named wall is in the claim, no room is marked complete, and rooms, floors, walls, openings, every quantity family, the 3 published floor areas and the room-area, floor-area and floor-finish seals are unchanged.
+Original drawing (counts and digests only; live claim, floor-plan page with its support page): switch off is identical to `main` in every field. Switch on: all 683 rooms name canonical walls (0 before), every named wall is in the claim, no room is marked complete, and rooms, floors, walls, openings, every quantity family, the 3 published floor areas and the room-area, floor-area and floor-finish seals are unchanged. A second plan set (3Laurel floor-plan page, also a drawing-area fallback): switch on names canonical walls on all 292 rooms and changes nothing else against switch off. Page-scope rooms are covered by the synthetic test.
 
 ## 6. Benchmark observations that must not influence the implementation
 
