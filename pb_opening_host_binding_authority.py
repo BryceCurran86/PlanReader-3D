@@ -2981,18 +2981,26 @@ def _source_same_group_distinct_pair_conflicts(
     for group_index, group in enumerate(equivalence.equivalence_groups):
         for wall_id in group:
             groups_by_member.setdefault(str(wall_id), set()).add(group_index)
+    if not groups_by_member:
+        return frozenset()
     result: set[tuple[str, str]] = set()
     for left, right, raw in equivalence.pair_classifications:
+        # Only a pair inside one SAME group can conflict, so membership is
+        # checked before the (far costlier) class conversion.
+        a, b = str(left), str(right)
+        left_groups = groups_by_member.get(a)
+        if left_groups is None:
+            continue
+        right_groups = groups_by_member.get(b)
+        if right_groups is None or left_groups.isdisjoint(right_groups):
+            continue
         try:
             classification = PhysicalEquivalenceClass(raw)
         except (TypeError, ValueError):
             # Bad original class is an explicit, contradictory source
             # receipt, never permission to trust an issued SAME group.
             classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
-        if classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
-            continue
-        a, b = str(left), str(right)
-        if groups_by_member.get(a, set()) & groups_by_member.get(b, set()):
+        if classification is not PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
             result.add(tuple(sorted((a, b))))
     return frozenset(result)
 
