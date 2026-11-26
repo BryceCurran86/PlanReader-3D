@@ -3,7 +3,7 @@ import {wallAngleDegrees} from "./buildPlacement.ts";
 import type { BuildAction, BuildState, PlacedWall, WallAxis, WallRotationPivot } from "./buildPlacement.ts";
 import { CATALOGUE_GROUPS, ITEM_CATALOGUE, itemCanRotate } from "./itemCatalogue.ts";
 import type { CatalogueItem,CatalogueGroup } from "./itemCatalogue.ts";
-import {contextGroups,contextChoices,contextTitle,finishGroupLabel} from "./contextFinishes.ts";
+import {contextGroups,contextChoices,contextTitle,finishGroupLabel,localContextTarget} from "./contextFinishes.ts";
 import type {FinishContext} from "./contextFinishes.ts";
 import {canEditFloorFixture} from "./itemPlacement.ts";
 import type {ItemHit,FixtureEdit,Vector} from "./itemPlacement.ts";
@@ -23,10 +23,12 @@ export type ItemAction =
   | { kind: "choose"; itemId: string }
   | { kind:"apply-finish";itemId:string;hit:ItemHit;replaceId?:string }
   | {kind:"edit-fixture";id:string;edit:FixtureEdit;move?:{from:Vector;to:[number,number]}}
+  | {kind:"remove-context-item";id:string}
   | { kind: "undo" | "redo" | "done" | "rotate" };
 type BrowseAction = { kind: "toggle" } | { kind: "groups" } | { kind: "category" | "page" | "group-page"; step: number }
   | { kind: "choose-group"; index: number };
 export type MenuAction =
+  | {area:"context-edit";action:"wall"|"opening"|"move"|"stretch"|"slab"|"remove"}
   | {area:"finish";action:"group"|"page"|"apply"|"back"|"close"|"hardware";group?:CatalogueGroup;step?:number;itemId?:string;hardware?:DoorHardwareFinish}
   | { area: "build"; action: BuildAction }
   | { area: "items"; action: ItemAction }
@@ -62,7 +64,7 @@ export type MenuLayout = { title: string; width: number; height: number;
 export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
-  simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;activeFinishId?:string;slabMm?:number;slabTools?:boolean;
+  simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;activeFinishId?:string;hoverContext?:boolean;slabMm?:number;slabTools?:boolean;
   rotationPivot?:WallRotationPivot; connectedRotation?:boolean; angleTools?:boolean; feedback?:string;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
@@ -120,6 +122,14 @@ export function buildMenuLayout(
     const c=quest.finishContext,group=quest.finishGroup;
     const groups=contextGroups(c);
     const page=Math.max(0,quest.finishPage??0);
+    const target=localContextTarget(c),localWall=target&&build.walls.find(w=>w.proposalId===target.id&&w.levelId===levelId),localCeiling=target&&build.ceilings.find(w=>w.proposalId===target.id&&w.levelId===levelId);
+    const editRows:{label:string;action:MenuAction}[]=[];
+    if(target?.kind==="wall"&&localWall)editRows.push({label:"Move / stretch / size",action:{area:"context-edit",action:"wall"}});
+    if(target?.kind==="opening"&&localWall?.openings.some(o=>o.openingId===target.openingId))editRows.push({label:"Edit frame / opening",action:{area:"context-edit",action:"opening"}});
+    if(target?.kind==="ceiling"&&localCeiling)editRows.push({label:"Move ceiling",action:{area:"context-edit",action:"move"}},{label:"Stretch ceiling",action:{area:"context-edit",action:"stretch"}});
+    if(c.hit.hostId.startsWith("draft-floor:"))editRows.push({label:"Concrete slab",action:{area:"context-edit",action:"slab"}});
+    if(c.entry)editRows.push({label:"Remove selection…",action:{area:"context-edit",action:"remove"}});
+    function contextRows(y:number){editRows.forEach((e,i)=>add(e.label,24+(i%2)*460,y+Math.floor(i/2)*78,440,68,e.action));return editRows.length?Math.ceil(editRows.length/2)*78:0;}
     if(group){
       const choices=contextChoices(c,group),max=Math.max(0,Math.ceil(choices.length/6)-1),p=Math.min(page,max);
       choices.slice(p*6,p*6+6).forEach((item,i)=>add(item.label,24+(i%2)*460,88+Math.floor(i/2)*84,440,74,{area:"finish",action:"apply",itemId:item.id},{active:(quest.activeFinishId??c.entry?.itemId)===item.id,swatch:item.visual.color}));
@@ -129,7 +139,8 @@ export function buildMenuLayout(
       add("Close",702,354,210,68,{area:"finish",action:"close"});
       const editing=!!c.entry&&canEditFloorFixture(c.entry);
       if(editing){const actions:[string,FixtureEdit][]=[["Rotate 90°","rotate"],["X −100","left"],["X +100","right"],["Z −100","forward"],["Z +100","back"],["Duplicate","duplicate"]];actions.forEach(([label,edit],i)=>add(label,24+i*150,438,142,64,items({kind:"edit-fixture",id:c.entry!.id,edit})));}
-      return {buttons,title:finishGroupLabel(group)+" · "+(p+1)+"/"+(max+1),width:936,height:editing?560:476,note:editing?"Change finish or edit this fitting · movement in mm, local design.":"Choose a finish to apply directly to the selected item or face."};
+      const height=editing?560:476;const extra=contextRows(height-28);
+      return {buttons,title:contextTitle(c)+" · "+finishGroupLabel(group)+" "+(p+1)+"/"+(max+1),width:936,height:height+extra,note:editing?"Change finish or edit this fitting · movement in mm, local design.":"Choose a finish to apply directly to the selected item or face."};
     }
     const max=Math.max(0,Math.ceil(groups.length/8)-1),p=Math.min(page,max);
     groups.slice(p*8,p*8+8).forEach((g,i)=>add(finishGroupLabel(g),24+(i%2)*460,86+Math.floor(i/2)*74,440,64,{area:"finish",action:"group",group:g}));
@@ -141,7 +152,8 @@ export function buildMenuLayout(
     add("Previous",250,394,210,65,{area:"finish",action:"page",step:-1},{disabled:p===0});
     add("Next",476,394,210,65,{area:"finish",action:"page",step:1},{disabled:p===max});
     add("Close",702,394,210,65,{area:"finish",action:"close"});
-    return {buttons,title:contextTitle(c),width:936,height:512,note:"Choose a category. Existing fixtures retain their position."};
+    const extra=contextRows(484);
+    return {buttons,title:contextTitle(c),width:936,height:512+extra,note:quest.hoverContext?"Aim at this toolbox to choose; point back at the object to grab it.":"Choose a category. Existing fixtures retain their position."};
   }
   if(quest?.slabTools){
     const mm=quest.slabMm??0;

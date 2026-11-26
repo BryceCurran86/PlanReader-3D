@@ -416,16 +416,16 @@ export function createCatalogueScene(scene: THREE.Scene) {
     return { hit: null };
   }
 
-  function contextAt(ray:THREE.Raycaster):FinishContext|null{
+  function contextAt(ray:THREE.Raycaster,maxDistance=4):FinishContext|null{
     // One explicit controller action, never per-frame catalogue traversal.
     const hostHits=ray.intersectObjects(meshes,false).filter(h=>{
       const host=hosts.get(h.object);
-      if(!host||host.target==="site"||!visibleInScene(h.object))return false;
+      if(!host||!visibleInScene(h.object))return false;
       if(host.target==="ceiling"||host.target==="roof")return !cutawayKey&&showConstructionSurface(stageKey,host.target);
       if(host.target==="floor")return showConstructionSurface(stageKey,"floor");
       return stageKey!=="slab";
     });
-    const picked=ray.intersectObjects(mounts.filter(visibleInScene),true).find(h=>visibleInScene(h.object)&&h.distance<=4);
+    const picked=ray.intersectObjects(mounts.filter(visibleInScene),true).find(h=>visibleInScene(h.object)&&h.distance<=maxDistance);
     if(picked&&picked.distance<=(hostHits[0]?.distance??Infinity)+.10){
       for(let p:THREE.Object3D|null=picked.object;p;p=p.parent){
         const entry=mountedEntries.get(p);
@@ -433,12 +433,12 @@ export function createCatalogueScene(scene: THREE.Scene) {
       }
     }
     const first=hostHits[0];
-    if(!first||first.distance>4)return null;
+    if(!first||first.distance>maxDistance)return null;
     const host=hosts.get(first.object)!;
     const probe=ITEM_CATALOGUE.find(i=>i.targets.includes(host.target)&&
       (host.target==="opening"?i.group===(host.opening?.size.door?"doors":"windows"):
         host.target==="wall"||host.target==="ceiling"?i.group==="paint":
-        host.target==="floor"?i.group==="floors":host.target==="roof"?i.group==="roofing":i.group==="tapware"));
+        host.target==="floor"?i.group==="floors":host.target==="roof"?i.group==="roofing":host.target==="site"?i.group==="landscaping":i.group==="tapware"));
     if(!probe)return null;
     // Reuse the exact visible intersection chosen above. A second unfiltered
     // raycast can hit a hidden roof or an unrelated host before this surface.

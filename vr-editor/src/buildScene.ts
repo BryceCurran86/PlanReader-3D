@@ -685,7 +685,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     // once on explicit selection; no controller- or gaze-following jitter.
     const distance=ray.length();if(!Number.isFinite(distance)||distance<.05){positionMenu(camera,true,true);return;}
     ray.normalize();const lateral=new THREE.Vector3(-ray.z,0,ray.x).normalize();
-    menu.position.copy(head).addScaledVector(ray,Math.min(1.25,Math.max(.65,distance-.25))).addScaledVector(lateral,-.35);
+    menu.position.copy(head).addScaledVector(ray,Math.min(1.25,Math.max(.65,distance-.25))).addScaledVector(lateral,-.62);
     menu.position.y=Math.max(head.y-.63,Math.min(head.y+.18,menu.position.y));
     menu.lookAt(head);menu.updateMatrixWorld();menu.visible=true;
   }

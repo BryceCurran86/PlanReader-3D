@@ -1,4 +1,4 @@
-import {ITEM_CATALOGUE,getCatalogueItem,catalogueGroupLabel} from "./itemCatalogue.ts";
+import {ITEM_CATALOGUE,getCatalogueItem,catalogueGroupLabel,CATALOGUE_GROUPS} from "./itemCatalogue.ts";
 import type {CatalogueGroup,CatalogueItem,ItemTarget} from "./itemCatalogue.ts";
 import type {ItemHit,PlacedItem,Vector} from "./itemPlacement.ts";
 export type FinishContext={hit:ItemHit;entry?:PlacedItem;worldPoint?:Vector};
@@ -12,7 +12,7 @@ export function contextGroups(context:FinishContext):CatalogueGroup[]{
  const old=context.entry&&getCatalogueItem(context.entry.itemId);
  if(old?.visual.kind==="fixture")return [old.group];
  const t=context.hit.target;
- const groups=priority.filter(g=>finishCandidates.some(i=>i.group===g&&i.targets.includes(t)));
+ const groups=[...new Set([...priority,...CATALOGUE_GROUPS.map(([g])=>g)])].filter(g=>finishCandidates.some(i=>i.group===g&&i.targets.includes(t)));
  if(t==="opening")return groups.filter(g=>context.hit.opening?.door?["doors","entry","sliding-doors"].includes(g):context.hit.opening?.window?["windows","window-coverings"].includes(g):false);
  return groups;
 }
@@ -62,4 +62,22 @@ export function activeContextFinish(context:FinishContext,group:CatalogueGroup|n
   const shared=hit.target==="opening"&&(i.visual.kind==="entry"||i.visual.kind==="opening-style"&&i.visual.type!=="covering");
   return !sideSensitive||shared||p.side===hit.side;
  })?.itemId;
+}
+
+/** Stable target identity excludes the moving hit position. Face selection is
+ * separate, and a mounted object wins over its supporting wall/floor. */
+export function contextTargetKey(context:FinishContext|null):string|null{
+ if(!context)return null;
+ const {hit,entry}=context;
+ return entry?JSON.stringify(["item",entry.id]):JSON.stringify(["host",hit.hostId,hit.target,hit.target==="wall"||hit.target==="opening"?hit.side:1]);
+}
+export type LocalContextTarget={kind:"wall"|"ceiling"|"opening";id:string;openingId?:string};
+export function localContextTarget(context:FinishContext):LocalContextTarget|null{
+ const {hostId,target}=context.hit;
+ if(target==="wall"&&hostId.startsWith("draft-wall:"))return {kind:"wall",id:hostId.slice(11)};
+ if(target==="ceiling"&&hostId.startsWith("draft-ceiling:"))return {kind:"ceiling",id:hostId.slice(14)};
+ if(target==="opening"&&hostId.startsWith("opening:"))try{
+  const ids:unknown=JSON.parse(hostId.slice(8));if(Array.isArray(ids)&&ids.length===2&&ids.every(id=>typeof id==="string"))return {kind:"opening",id:ids[0],openingId:ids[1]};
+ }catch{/* malformed host */}
+ return null;
 }

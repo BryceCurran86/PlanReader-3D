@@ -435,6 +435,10 @@ export function App() {
   }
 
   function onItemAction(action: ItemAction) {
+    if(action.kind==="remove-context-item"){
+      if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect"||!catalogue.draft.items.some(p=>p.id===action.id)){setToolMessage("Selected placement is no longer editable.");return;}
+      changeCatalogue(current=>({...current,draft:removeItem(current.draft,action.id)}));setLastEdit("place");setToolMessage("Placement removed. Undo restores it and attached items.");return;
+    }
     if(action.kind==="edit-fixture"){
       if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect"){setToolMessage("Finish the active edit first.");return;}
       const key=scopeKey(manifest),walls=[...activeBatchSketches,...buildState.walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])];

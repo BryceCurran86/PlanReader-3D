@@ -36,7 +36,8 @@ import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type {CatalogueGroup} from "./itemCatalogue";
-import {contextGroups,contextChoices,initialFinishGroup,refreshFinishContext,activeContextFinish} from "./contextFinishes";
+import {contextGroups,contextChoices,initialFinishGroup,refreshFinishContext,activeContextFinish,contextTargetKey,localContextTarget} from "./contextFinishes";
+import {HoverToolDwell} from "./hoverToolDwell";
 import {applyMaterialDetailBudget} from "./materialQuality";
 import type {FinishContext} from "./contextFinishes";
 import {createOutdoorEnvironment} from "./outdoorEnvironment";
@@ -428,17 +429,18 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let helpOpen = false;
     let toolsOpen=false,wallProfilesOpen=false,dimensions=true,radial=false,layersOpen=false;
     let simpleHome=true,finishContext:FinishContext|null=null,finishGroup:CatalogueGroup|null=null,finishPage=0;
+    const hoverDwell=new HoverToolDwell();let automaticContext=false,lastContextProbe=-Infinity,contextDragTarget:{kind:"wall"|"ceiling";id:string}|null=null;
     let lastMenuSignature="",lastMenuDraw=0,menuPose:"radial"|"panel"|null=null,lastMenuHover=-2;
     // Only a layout actually displayed can authorize a menu action.
     let displayedMenuLayout: ReturnType<typeof menuLayout> | null = null;
     let stickNeedsNeutral=false,menuFocus=-1,menuStickArmed=true,menuStickFocus=false;
-    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;slabTools=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    const closeTools=()=>{if(automaticContext)hoverDwell.dismiss(contextTargetKey(finishContext));automaticContext=false;toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;slabTools=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(contextual=false){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
       if(toolsOpen){
         for(let i=0;i<xrPress.length;i++)if(xrPress[i]||xrGestures[i]||xrResize[i]){menuConsumed[i]=true;selectEnd(i);}
-        activeGrip=null;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;
+        activeGrip=null;automaticContext=false;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;
         const right=inputSources.findIndex(source=>source?.handedness==="right"&&source.targetRayMode==="tracked-pointer");
         if(contextual&&right>=0&&interaction.current.mode==="inspect"&&!resize.current.projection&&!resize.current.enabled){
           syncItems();aimController(controllers[right]);finishContext=itemView.contextAt(raycaster);
@@ -518,7 +520,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
-          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext:liveContext,finishGroup,finishPage,activeFinishId,slabMm:construction.current.slabMm,slabTools,
+          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext:liveContext,finishGroup,finishPage,activeFinishId,hoverContext:automaticContext,slabMm:construction.current.slabMm,slabTools,
            selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, angleTools, feedback:interaction.current.toolFeedback, gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
@@ -535,6 +537,23 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
+      if(choice.area==="context-edit"){
+        if(!finishContext)return;
+        const context=refreshFinishContext(finishContext,itemControls.current.items);
+        if(!context){closeTools();return;}
+        const target=localContextTarget(context),b=build.current.buildState,level=build.current.buildLevel;
+        const wall=target&&b.walls.find(w=>w.proposalId===target.id&&w.scopeKey===sceneScope&&w.levelId===level);
+        const ceiling=target&&b.ceilings.find(w=>w.proposalId===target.id&&w.scopeKey===sceneScope&&w.levelId===level);
+        if(choice.action==="remove"&&context.entry){
+          if(!deleteArmed){deleteArmed=true;reportTool("Choose Remove selection again to confirm. Undo restores it.");return;}
+          itemControls.current.onAction({kind:"remove-context-item",id:context.entry.id});closeTools();return;
+        }
+        if(choice.action==="slab"&&context.hit.hostId.startsWith("draft-floor:")){finishContext=null;automaticContext=false;slabTools=true;return;}
+        if(choice.action==="wall"&&target?.kind==="wall"&&wall){updateDraftSelection(wall.proposalId);finishContext=null;automaticContext=false;simpleHome=false;return;}
+        if(choice.action==="opening"&&target?.kind==="opening"&&wall){const i=wall.openings.findIndex(o=>o.openingId===target.openingId);if(i<0)return;updateDraftSelection(wall.proposalId);finishContext=null;automaticContext=false;simpleHome=false;openingTools=true;openingIndex=i;return;}
+        if((choice.action==="move"||choice.action==="stretch")&&target?.kind==="ceiling"&&ceiling){contextDragTarget={kind:"ceiling",id:ceiling.proposalId};updateDraftSelection(ceiling.proposalId);build.current.onBuildAction({kind:"tool",tool:choice.action});closeTools();reportTool("Aim at selected ceiling, hold trigger and drag.");return;}
+        reportTool("This object is not editable in the current design.");return;
+      }
       if(choice.area==="slab"){if(choice.mm===undefined){slabTools=!slabTools;return;}construction.current.onSlab(choice.mm);return;}
       if(choice.area==="footprint-size"){const b=resize.current.box;if(!b||!resize.current.enabled)return;resize.current.onResize(resizeFromDimensions(b,footprintWidth(b)+(choice.axis==="x"?choice.delta:0),footprintDepth(b)+(choice.axis==="z"?choice.delta:0),"centre"));return;}
       if(choice.area==="items"&&choice.action.kind==="edit-fixture"){
@@ -765,6 +784,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           // switches straight into the existing verified trigger-drag workflow.
           // This never targets a signed/source wall.
           const tool = choice.action;
+          contextDragTarget={kind:"wall",id:wall.proposalId};
           selectedDraftId=null;
           deleteArmed=false;
           build.current.onBuildAction({kind:"tool",tool});
@@ -1324,6 +1344,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         return directDraftGesture(allowed,buildLevel,raycaster.ray,kind,topEditing(),snapOptions());
       }
       if(interaction.current.mode!=="draw")return null;
+      const target=contextDragTarget;
+      if(target&&(buildState.tool==="move"||buildState.tool==="stretch")){
+        const scoped={...buildState,walls:target.kind==="wall"?buildState.walls.filter(w=>w.proposalId===target.id):[],ceilings:target.kind==="ceiling"?buildState.ceilings.filter(w=>w.proposalId===target.id):[]};
+        return beginDraftGesture(scoped,buildLevel,raycaster.ray,snapOptions());
+      }
+      contextDragTarget=null;
       return beginDraftGesture(buildState, buildLevel, raycaster.ray,snapOptions());
     }
     function previewDrag(gesture: DraftGesture, controllerIndex?: number) {
@@ -1505,6 +1531,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuFocus=-1;menuStickFocus=false;menuStickArmed=false;
       lastMenuSignature="";lastMenuHover=-2;
       buildOverlay.hideMenu();
+      if(automaticContext&&choice.area!=="context-edit"&&!(choice.area==="finish"&&choice.action==="close"))automaticContext=false;
       menuAction(choice);
       if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
     }
@@ -1524,6 +1551,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function beginXrGesture(index: number) {
       menuConsumed[index]=false;
       aimController(controllers[index]);
+      if(toolsOpen&&automaticContext&&displayedMenuLayout&&!buildOverlay.menuHit(raycaster,displayedMenuLayout)&&!menuStickFocus)closeTools();
       if(toolsOpen){
         const layout = menuLayout("");
         menuConsumed[index]=true;
@@ -1537,7 +1565,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       xrResize[index] = startResize();
       if (!xrResize[index]) {
         if(interaction.current.mode==="inspect"&&!resize.current.projection&&!resize.current.enabled&&!multiSelect&&!itemControls.current.active&&!teleportSettings.current.teleportMode){
-          syncItems();const context=itemView.contextAt(raycaster),entry=context?.entry;
+          syncItems();const context=itemView.contextAt(raycaster,topEditing()?60:4),entry=context?.entry;
           if(entry&&canEditFloorFixture(entry)){
             fixtureGrabs[index]={entry,hand:controllers[index].getWorldPosition(new THREE.Vector3()),planePoint:raycaster.ray.intersectPlane(fixturePlane,new THREE.Vector3())};
             reportTool("Fitting grabbed · move controller, then release trigger.");return;
@@ -1689,13 +1717,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function stationaryNavigation(now:number){
       const dt=lastNavTime?Math.min(.05,Math.max(0,(now-lastNavTime)/1000)):0;
       lastNavTime=now;
-      if(!renderer.xr.isPresenting||!dt||toolsOpen||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||(toolsOpen&&(stageMenuOpen||budgetOpen||layersOpen||wallProfilesOpen||helpOpen||numberPad))||resize.current.enabled||teleportSettings.current.teleportMode)return;
+      if(!renderer.xr.isPresenting||!dt||toolsOpen&&!automaticContext||xrPress.some(Boolean)||xrGestures.some(Boolean)||xrResize.some(Boolean)||activeGrip||itemBrowser.open||(toolsOpen&&(stageMenuOpen||budgetOpen||layersOpen||wallProfilesOpen||helpOpen||numberPad))||resize.current.enabled||teleportSettings.current.teleportMode)return;
       const left=inputSources.find(s=>s?.handedness==="left"),right=inputSources.find(s=>s?.handedness==="right");
       const move=standardThumbstick(left),rightStick=standardThumbstick(right);
       if(stickNeedsNeutral){if(Math.hypot(...rightStick)<.2)stickNeedsNeutral=false;else return;}
       const turn=snapTurn(rightStick[0],turnArmed);
       turnArmed=turn.armed;
       if(!move[0]&&!move[1]&&!turn.angle)return;
+      if(automaticContext){if(Math.hypot(...move)>.25){closeTools();}else return;}
       const space=renderer.xr.getReferenceSpace();
       if(!space||typeof XRRigidTransform==="undefined")return;
       const headCamera=renderer.xr.getCamera(),head=headCamera.getWorldPosition(new THREE.Vector3());
@@ -1805,7 +1834,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const disconnected0 = () => disconnect(0);
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
-      toolsOpen=false;ghostMode=false;displayedMenuLayout=null;menuPose=null;menuConsumed.fill(false);renderer.shadowMap.enabled=false;
+      toolsOpen=false;automaticContext=false;hoverDwell.reset();ghostMode=false;displayedMenuLayout=null;menuPose=null;menuConsumed.fill(false);renderer.shadowMap.enabled=false;
       reportTool("Left grip: tools. Right grip while aiming: finishes. Aim or move right stick, then trigger.");
       elevatedReturn=null;navBase=null;navOffset=identityNavOffset();turnArmed=true;lastNavTime=0;
       cancelPointer();
@@ -2080,6 +2109,20 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         item ? itemGuide(item) : buildGuide(buildState, buildLevel);
       let activeDimensionRay=false;
       if (renderer.xr.isPresenting) {
+        // Probe at 10 Hz only, while inspecting, never during an active edit.
+        const rightPointer=inputSources.findIndex(s=>s?.handedness==="right"&&s.targetRayMode==="tracked-pointer");
+        const hoverAllowed=rightPointer>=0&&interaction.current.mode==="inspect"&&!buildState.tool&&!item&&!resize.current.enabled&&!resize.current.projection&&!multiSelect&&!teleportSettings.current.teleportMode&&!xrPress.some(Boolean)&&!activeGrip;
+        if(hoverAllowed&&(!toolsOpen||automaticContext)&&now-lastContextProbe>=100){
+          lastContextProbe=now;aimController(controllers[rightPointer]);
+          const overPanel=automaticContext&&displayedMenuLayout&&buildOverlay.menuHit(raycaster,displayedMenuLayout);
+          if(!overPanel&&!menuStickFocus){
+            const context=itemView.contextAt(raycaster,topEditing()?60:4),key=contextTargetKey(context);
+            if(hoverDwell.observe(key,now)&&context&&key!==contextTargetKey(finishContext)){
+              automaticContext=true;toolsOpen=true;finishContext=context;finishGroup=initialFinishGroup(context);finishPage=0;simpleHome=true;radial=false;deleteArmed=false;
+              displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;
+            }
+          }
+        }else if(!hoverAllowed&&!toolsOpen)hoverDwell.reset();
         // Cache the menu model and avoid large canvas uploads on every XR frame.
         if(toolsOpen&&finishContext&&!refreshFinishContext(finishContext,itemControls.current.items)){closeTools();reportTool("Selected fitting is no longer available. Aim at a current object.");}
         if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=100)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
