@@ -184,3 +184,96 @@ def test_authority_resolution_and_selector():
     res_unreg = authority.resolve(sel_unreg)
     assert res_unreg.status == EvidenceResolutionStatus.ABSTAINED.value
     assert SOURCE_OUTLINED_TEXT_UNAVAILABLE in res_unreg.reason_codes
+
+
+def test_extract_outlined_vector_font_ocr_witnesses_wires_multi_dpi_and_abstains_missing_finishes():
+    import fitz
+    from pb_source_outlined_vector_font_shadow import (
+        OutlinedVectorFontOcrWitnessBundle,
+        extract_outlined_vector_font_ocr_witnesses,
+    )
+    from pb_source_vector_outlined_text_ocr_shadow import OcrRawToken
+
+    class _FakePage:
+        def __init__(self, body_words: int, drawings: int):
+            self.rect = fitz.Rect(0.0, 0.0, 1000.0, 700.0)
+            self._body_words = body_words
+            self._drawings = drawings
+
+        def get_text(self, mode):
+            assert mode == "words"
+            return [(100.0, 100.0, 120.0, 110.0, "W", 0, 0, 0)] * self._body_words
+
+        def get_drawings(self):
+            return [{}] * self._drawings
+
+        def get_images(self):
+            return []
+
+        def get_pixmap(self, dpi, clip, alpha=False):
+            class _Pix:
+                def tobytes(self, fmt):
+                    return f"dpi={dpi}".encode("ascii")
+
+            return _Pix()
+
+    def _fake_ocr(png_bytes: bytes):
+        dpi = int(png_bytes.decode("ascii").split("=")[1])
+        scale = dpi / 72.0
+        return [
+            OcrRawToken("3600", (100 * scale, 100 * scale, 140 * scale, 112 * scale), 0.96),
+            OcrRawToken("D01", (200 * scale, 150 * scale, 230 * scale, 162 * scale), 0.94),
+        ]
+
+    # Page 0: native-font page (not outlined -> skipped); Page 1: outlined vector sheet
+    p_native = _FakePage(body_words=120, drawings=800)
+    p_outlined = _FakePage(body_words=2, drawings=1500)
+    bundle = extract_outlined_vector_font_ocr_witnesses(
+        [(0, p_native), (1, p_outlined)],
+        source_sha256="b" * 64,
+        render_dpis=(144, 216),
+        ocr_callable=_fake_ocr,
+        finish_specification_present=False,
+    )
+    assert isinstance(bundle, OutlinedVectorFontOcrWitnessBundle)
+    assert bundle.status == "REVIEW_ONLY_OUTLINED_OCR_WITNESSES"
+    assert bundle.commercial_projection_allowed is False
+    assert bundle.takeoff_eligible is False
+    assert bundle.shadow_only is True
+    assert len(bundle.body_assessments) == 2
+    assert bundle.body_assessments[0].outlined_text_suspected is False
+    assert bundle.body_assessments[1].outlined_text_suspected is True
+    # Only the outlined page underwent OCR extraction.
+    assert len(bundle.extractions) == 1
+    assert bundle.extractions[0].page_index == 1
+    assert "3600" in bundle.cross_sheet_review.corroborated_dimension_tokens
+    assert "D01" in bundle.cross_sheet_review.corroborated_opening_marks
+    assert bundle.cross_sheet_review.finish_authority_status == "ABSTAINED"
+    assert bundle.cross_sheet_review.finish_authority_reason == "material_specification_missing"
+
+
+def test_extract_outlined_vector_font_ocr_witnesses_skips_all_native_pages_cleanly():
+    import fitz
+    from pb_source_outlined_vector_font_shadow import extract_outlined_vector_font_ocr_witnesses
+
+    class _NativePage:
+        rect = fitz.Rect(0.0, 0.0, 1000.0, 700.0)
+
+        def get_text(self, mode):
+            return [(100.0, 100.0, 120.0, 110.0, "NATIVE", 0, 0, 0)] * 80
+
+        def get_drawings(self):
+            return [{}] * 900
+
+        def get_images(self):
+            return []
+
+    bundle = extract_outlined_vector_font_ocr_witnesses(
+        [(0, _NativePage())],
+        source_sha256="c" * 64,
+        render_dpis=(144, 216),
+    )
+    assert bundle.status == EvidenceResolutionStatus.ABSTAINED.value
+    assert bundle.extractions == ()
+    assert bundle.commercial_projection_allowed is False
+
