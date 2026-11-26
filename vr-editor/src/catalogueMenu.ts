@@ -33,6 +33,8 @@ export type MenuAction =
   | { area: "browse"; action: BrowseAction }
   | { area: "view"; stage?: ConstructionStage }
   | { area: "footprint"; reset?: boolean }
+  | {area:"footprint-size";axis:"x"|"z";delta:number}
+  | {area:"slab";mm:number}
   | { area: "history"; action: HistoryAction }
   | { area: "level"; id: string }
   | { area: "done" }
@@ -60,7 +62,7 @@ export type MenuLayout = { title: string; width: number; height: number;
 export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
-  simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;activeFinishId?:string;
+  simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;activeFinishId?:string;slabMm?:number;
   rotationPivot?:WallRotationPivot; connectedRotation?:boolean; angleTools?:boolean; feedback?:string;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
@@ -141,6 +143,12 @@ export function buildMenuLayout(
     add("Close",702,394,210,65,{area:"finish",action:"close"});
     return {buttons,title:contextTitle(c),width:936,height:512,note:"Choose a category. Existing fixtures retain their position."};
   }
+  if(footprint.enabled&&quest){
+    add("Width −500 mm",24,88,440,74,{area:"footprint-size",axis:"x",delta:-.5});add("Width +500 mm",484,88,440,74,{area:"footprint-size",axis:"x",delta:.5});
+    add("Depth −500 mm",24,174,440,74,{area:"footprint-size",axis:"z",delta:-.5});add("Depth +500 mm",484,174,440,74,{area:"footprint-size",axis:"z",delta:.5});
+    add("Reset preview",24,260,440,74,{area:"footprint",reset:true});add("Apply / done",484,260,440,74,{area:"footprint"});
+    return {buttons,title:"RESIZE BUILDING FOOTPRINT",width:936,height:406,note:"Drag green corners / gold edges or use 500 mm steps. Apply before further wall edits."};
+  }
   if(quest?.simpleHome&&!quest.layersOpen&&!quest.wallProfilesOpen&&!quest.budgetOpen&&!quest.help&&!quest.numeric&&!quest.angleTools&&!quest.openingTools&&!quest.multiSelect&&!viewsOpen&&!browser.open&&!footprint.enabled){
     const selected=quest.selectedWall&&!build.tool&&!item;
     const entries:{label:string;action:MenuAction;disabled?:boolean}[]=selected?[
@@ -157,13 +165,16 @@ export function buildMenuLayout(
       {label:quest.outdoor?"Grass & sky: ON":"Grass & sky: OFF",action:questAction("environment")},
       {label:"Construction stages",action:{area:"view"}},
       {label:"Budget",action:questAction("budget")},
+      {label:"Resize footprint",action:{area:"footprint"},disabled:!footprint.available},
+      {label:quest.slabMm?"Slab · "+quest.slabMm+" mm":"Add concrete slab",action:{area:"slab",mm:quest.slabMm?quest.slabMm>=200?0:quest.slabMm+25:100}},
     ];
     entries.forEach((e,i)=>add(e.label,24+(i%2)*460,88+Math.floor(i/2)*86,440,76,e.action,{disabled:e.disabled}));
-    add("Undo",24,358,210,70,{area:"history",action:"undo"},{disabled:!interaction?.canUndo});
-    add("Redo",250,358,210,70,{area:"history",action:"redo"},{disabled:!interaction?.canRedo});
-    add(selected?"Home":quest.quality==="performance"?"Performance":quest.quality==="high"?"Ultra":"Realistic",476,358,210,70,questAction(selected?"home":"quality"));
-    add("Close",702,358,210,70,questAction("hide-tools"));
-    return {buttons,title:selected?"WALL WORKBENCH":"PLANREADER · TOOL TRAY",width:936,height:480,note:"Left grip: tools · Right grip on an object: finishes · Trigger: choose"};
+    const footer=selected?358:446;
+    add("Undo",24,footer,210,70,{area:"history",action:"undo"},{disabled:!interaction?.canUndo});
+    add("Redo",250,footer,210,70,{area:"history",action:"redo"},{disabled:!interaction?.canRedo});
+    add(selected?"Home":quest.quality==="performance"?"Performance":quest.quality==="high"?"Ultra":"Realistic",476,footer,210,70,questAction(selected?"home":"quality"));
+    add("Close",702,footer,210,70,questAction("hide-tools"));
+    return {buttons,title:selected?"WALL WORKBENCH":"PLANREADER · TOOL TRAY",width:936,height:selected?480:568,note:"Left grip: tools · Right grip on an object: finishes · Trigger: choose"};
   }
   if(quest?.layersOpen){
     CONSTRUCTION_LAYERS.forEach(([id,label],i)=>add(label+" · "+(quest.layers?.[id]??"auto").toUpperCase(),20+(i%2)*475,85+Math.floor(i/2)*67,455,58,{area:"layer",layer:id},{active:quest.layers?.[id]==="show"}));

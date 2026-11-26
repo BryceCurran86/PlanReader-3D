@@ -42,7 +42,7 @@ import type {FinishContext} from "./contextFinishes";
 import {createOutdoorEnvironment} from "./outdoorEnvironment";
 import type { ControlMode, HistoryAction } from "./editorControls";
 import { createFootprintGizmo, footprintGeometry, projectSourceHost, renderFootprintGeometry } from "./footprintScene";
-import { footprintHandlePoint, projectCeiling, projectPlacement, projectWall, projectPlan, resizeFromHandle } from "./footprintResize";
+import { footprintHandlePoint, projectCeiling, projectPlacement, projectWall, projectPlan, resizeFromHandle,resizeFromDimensions,footprintWidth,footprintDepth } from "./footprintResize";
 import type { FootprintBounds, FootprintHandle, FootprintProjection } from "./footprintResize";
 import { catalogueWallHost, createCatalogueScene, demoCatalogueHosts, draftCatalogueHosts, draftSiteHost } from "./catalogueScene";
 import type { CatalogueHost } from "./catalogueScene";
@@ -124,6 +124,8 @@ type Props = {
   onLayers:(layers:LayerOverrides)=>void;
   allDimensions:boolean;
   shell:DraftShell|null;
+  slabMm:number;
+  onSlab:(mm:number)=>void;
   onAllDimensions:(value:boolean)=>void;
   footprint: {
     box: FootprintBounds | null;
@@ -265,7 +267,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell,slabMm,onSlab, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback });
@@ -291,8 +293,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   addedWallsRef.current = addedWallSketches;
   const build = useRef({ buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes });
   build.current = { buildState, buildLevel, buildSizes, onBuildAction, onBuildHint, onBuildSizes };
-  const construction = useRef({ stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell });
-  construction.current = { stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell };
+  const construction = useRef({ stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell,slabMm,onSlab });
+  construction.current = { stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell,slabMm,onSlab };
   const resize = useRef(footprint);
   resize.current = footprint;
   const itemControls = useRef(catalogue);
@@ -482,7 +484,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     };
     function pointerContext() {
       return [interaction.current.mode, build.current.buildState.tool, build.current.buildLevel,
-        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,build.current.buildState.ceilings,directSelection.current.kind,topEditing(),resize.current.projection,connectedRotation] as const;
+        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,build.current.buildState.ceilings,directSelection.current.kind,topEditing(),resize.current.enabled?null:resize.current.projection,connectedRotation] as const;
     }
     type PointerContext = ReturnType<typeof pointerContext>;
     const samePointerContext = (expected: PointerContext) =>
@@ -516,7 +518,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
-          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext:liveContext,finishGroup,finishPage,activeFinishId,
+          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext:liveContext,finishGroup,finishPage,activeFinishId,slabMm:construction.current.slabMm,
            selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, angleTools, feedback:interaction.current.toolFeedback, gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
@@ -533,6 +535,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
+      if(choice.area==="slab"){construction.current.onSlab(choice.mm);return;}
+      if(choice.area==="footprint-size"){const b=resize.current.box;if(!b||!resize.current.enabled)return;resize.current.onResize(resizeFromDimensions(b,footprintWidth(b)+(choice.axis==="x"?choice.delta:0),footprintDepth(b)+(choice.axis==="z"?choice.delta:0),"centre"));return;}
       if(choice.area==="items"&&choice.action.kind==="edit-fixture"){
         const live=finishContext&&refreshFinishContext(finishContext,itemControls.current.items);
         if(!live?.entry||live.entry.id!==choice.action.id){closeTools();reportTool("Select a current fitting first.");return;}
@@ -801,7 +805,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       else if (choice.area === "level") interaction.current.onLevel(choice.id);
       else if (choice.area === "footprint") {
         if (choice.reset) resize.current.onReset();
-        else resize.current.onToggle();
+        else {if(!resize.current.enabled&&!elevatedReturn)toggleElevatedView();resize.current.onToggle();}
       } else if (choice.area === "view") {
         if (choice.stage) {
           construction.current.onStage(choice.stage);
@@ -1308,7 +1312,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function draftGesture() {
       const { buildState, buildLevel } = build.current;
       if (resize.current.projection||resize.current.enabled||itemControls.current.active) return null;
-      if(interaction.current.mode==="inspect"&&(!renderer.xr.isPresenting||topEditing())){
+      if(interaction.current.mode==="inspect"&&!teleportSettings.current.teleportMode){
         const shape=selectedHandleShape();
         const handle=shape&&editHandles.group.visible?pickDraftEditHandle(shape,raycaster.ray):null;
         if(handle)return handle;
@@ -1324,7 +1328,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function previewDrag(gesture: DraftGesture, controllerIndex?: number) {
       const { buildState, buildLevel, buildSizes } = build.current;
       if ((!gesture.direct&&buildState.tool !== gesture.mode)||(gesture.direct&&interaction.current.mode!=="inspect")||buildLevel !== gesture.levelId) return null;
-      const hand = controllerIndex === undefined ? undefined :
+      const hand = controllerIndex === undefined || topEditing() ? undefined :
         controllers[controllerIndex].getWorldPosition(new THREE.Vector3());
       return draftGesturePreview(gesture, buildSizes, raycaster.ray, buildState,
         hand ? [hand.x, hand.z] : undefined,snapOptions(),connectedRotation);
@@ -1534,7 +1538,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const selectEnd = (index: number) => {
       xrGestures[index] = null; xrResize[index] = null; xrPress[index] = null;
     };
-    const selectEnd0 = () => selectEnd(0), selectEnd1 = () => selectEnd(1);
+    // Some XR runtimes deliver selectend before select. Commit a held edit once,
+    // then consume a possible trailing select rather than losing the drag.
+    const finishNativeSelect=(index:number)=>{if(xrPress[index]&&(xrResize[index]||xrGestures[index])){trigger(index);menuConsumed[index]=true;}selectEnd(index);};
+    const selectEnd0 = () => finishNativeSelect(0), selectEnd1 = () => finishNativeSelect(1);
     const trigger=(index:number)=>{
       if (!renderer.xr.isPresenting) return;
       if(menuConsumed[index]){menuConsumed[index]=false;return;}
@@ -1957,7 +1964,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       planOverview.update(build.current.buildState,interaction.current.level,
         interaction.current.visibleIds,renderer.xr.isPresenting?renderer.xr.getCamera():camera,
-        renderer.xr.isPresenting&&overviewOpen,resize.current.projection,planMoves,planExtra);
+        renderer.xr.isPresenting&&overviewOpen,resize.current.projection,planMoves,planExtra,construction.current.shell);
       gizmo.show(resize.current.enabled ? resize.current.box : null);
       if (startPointer?.resize && hoveringCanvas && !renderer.xr.isPresenting) {
         raycaster.setFromCamera(mouse, camera);

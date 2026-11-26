@@ -103,7 +103,8 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
     panel([...a].reverse(),leftFinish);panel(b,rightFinish);
     if(texture&&profile.role==="external"){
       const side=assembly.exteriorSide==="left"?1:-1;
-      const points=(side===1?a:b).map(v=>v.clone().addScaledVector(normal,side*.001));
+      // Keep cladding exactly on the shared miter plane; depth bias handles overlay ordering.
+      const points=side===1?a:b;
       const ordered=side===1?[...points].reverse():points;
       panel(ordered,exteriorFaces);
       for(const index of [0,1,2,0,2,3]){

@@ -239,6 +239,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
       const normal=new THREE.Vector3(...p.normal);
       const face=host.finishFaces&&host.run?((host.run.end[0]-host.run.start[0])*normal.z-(host.run.end[1]-host.run.start[1])*normal.x>0?host.finishFaces.left:host.finishFaces.right):null;
       const node=finishMesh(face??host.mesh,item.visual,host.target,normal,face?1:p.side);
+      if(face)node.position.set(0,0,0);
       if(host.target==="wall"&&host.halfThickness&&!face)node.position.addScaledVector(normal,host.halfThickness);
       pending.push({placement:p,node,host});
     }
@@ -301,6 +302,7 @@ export function createCatalogueScene(scene: THREE.Scene) {
         const face=host.finishFaces&&host.run?((host.run.end[0]-host.run.start[0])*normal.z-(host.run.end[1]-host.run.start[1])*normal.x>0?host.finishFaces.left:host.finishFaces.right):null;
         actualFinishFace=!!face;
         node = finishMesh(face??host.mesh, visual, host.target, normal, face?1:placement.side);
+        if(face)node.position.set(0,0,0);
       } else if (visual.kind === "trim") {
         node = trimMount(host, item, normal);
       } else if (visual.kind === "entry" || visual.kind === "opening-style") {
