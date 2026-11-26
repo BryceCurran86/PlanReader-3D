@@ -474,7 +474,10 @@ def test_live_extractor_predictions_unchanged_by_additive_provenance(tmp_path: P
 import copy
 from typing import Any
 import pytest
-from pb_source_visibility_authority import classify_native_segment_visibility
+from pb_source_visibility_authority import (
+    VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,
+    classify_native_segment_visibility,
+)
 from pb_vector_geometry_v130 import _ClipAssociation, _clip_scissor_by_seqno
 
 # PDF ``0 0 100 100 re`` clip on a 300x300 page, in top-left page coordinates.
