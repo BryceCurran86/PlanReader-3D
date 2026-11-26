@@ -14,6 +14,8 @@ export interface WallAdditionSketch {
   end:[number,number];
   heightM:number;
 }
+export type DoorHardwareFinish="chrome"|"matte-black"|"brushed-brass"|"brushed-nickel";
+export type DoorMechanism="swing"|"sliding"|"garage";
 export interface WallAdditionOpening {
   openingId:string;
   offsetM:number;
@@ -21,6 +23,9 @@ export interface WallAdditionOpening {
   heightM:number;
   sillHeightM:number;
   openingKind:"door"|"window"|"passage";
+  /** Local walkthrough visual only; omitted from server quantity commands. */
+  doorMechanism?:DoorMechanism;
+  doorHardware?:DoorHardwareFinish;
 }
 export interface WallAdditionCommand {
   workspaceId:string;
@@ -119,7 +124,7 @@ export function makeWallAdditionCommand(
     sourceSha256:s.sourceSha256,baseModelRevision:s.modelRevision,
     proposalId:sketch.proposalId,levelId:sketch.levelId,
     startPt:[...sketch.start],endPt:[...sketch.end],heightM:sketch.heightM,
-    openings:openings.map(o=>({...o})),assemblyProfileId,
+    openings:openings.map(({doorMechanism: _local,doorHardware: _hardware,...o})=>o),assemblyProfileId,
   };
 }
 function obj(raw:unknown):Record<string,unknown>{

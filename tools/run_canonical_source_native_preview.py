@@ -23,6 +23,8 @@ EXPECTED_PRODUCER = "pb_layered_wall_doorway_room_ring_shadow.build_layered_wall
 NATIVE_STAGE = "attempt_source_native_exterior_wall_trace_first"
 RASTER_STAGE = "attempt_raster_source_walls_first"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+CHORD_SHADOW_KEY = "source_owned_doorway_chord_shadow"
+CHORD_CLOSURES_KEY = "source_owned_doorway_chord_closures"
 
 
 class WrongTraceRoute(RuntimeError):
@@ -111,6 +113,67 @@ def validate_canonical_preview(
     }
 
 
+def validate_doorway_chord_shadow(
+    block: object, *, expected_source_sha256: str, expected_page_index: int,
+) -> None:
+    """Fail closed unless the opt-in doorway chord block belongs to this source and page and claims nothing.
+
+    The block is read-only evidence beside the preview: it may not say it was applied to the preview's topology, issue a quantity or
+    publish, and no chord may claim host authority, a metric area or publication."""
+    if not isinstance(block, Mapping):
+        raise WrongTraceRoute("doorway_chord_shadow_missing_from_preview_summary")
+    if block.get("source_sha256") != expected_source_sha256 or block.get("page_index") != expected_page_index:
+        raise WrongTraceRoute("doorway_chord_shadow_source_or_page_mismatch")
+    if (
+        block.get("applied_to_preview_topology") is not False
+        or block.get("preview_rings_and_closures_unchanged") is not True
+        or block.get("quantity_authorized") is not False
+        or block.get("commercial_publishable") is not False
+    ):
+        raise WrongTraceRoute("doorway_chord_shadow_claims_authority_or_topology_change")
+    chords = block.get("chords")
+    if not isinstance(chords, (list, tuple)):
+        raise WrongTraceRoute("doorway_chord_shadow_chords_missing")
+    for chord in chords:
+        if not isinstance(chord, Mapping) or any(
+            chord.get(flag) is not False
+            for flag in (
+                "source_physical_door_host_authenticated", "metric_area_issued", "commercial_publishable",
+                "applied_to_preview_topology",
+            )
+        ):
+            raise WrongTraceRoute("doorway_chord_shadow_chord_claims_authority")
+
+
+def validate_doorway_chord_closures(
+    block: object, *, expected_source_sha256: str, expected_page_index: int,
+) -> None:
+    """Fail closed unless the opt-in chord closure block belongs to this source and page, is honest about what was applied and
+    claims no authority. Applying a chord closes a doorway in the preview's topology only: never a quantity or a publication."""
+    if not isinstance(block, Mapping):
+        raise WrongTraceRoute("doorway_chord_closures_missing_from_preview_summary")
+    if block.get("source_sha256") != expected_source_sha256 or block.get("page_index") != expected_page_index:
+        raise WrongTraceRoute("doorway_chord_closures_source_or_page_mismatch")
+    if block.get("quantity_authorized") is not False or block.get("commercial_publishable") is not False:
+        raise WrongTraceRoute("doorway_chord_closures_claim_authority")
+    chords = block.get("chords")
+    if not isinstance(chords, (list, tuple)):
+        raise WrongTraceRoute("doorway_chord_closures_chords_missing")
+    for chord in chords:
+        if not isinstance(chord, Mapping) or type(chord.get("applied_to_preview_topology")) is not bool or any(
+            chord.get(flag) is not False
+            for flag in ("source_physical_door_host_authenticated", "metric_area_issued", "commercial_publishable")
+        ):
+            raise WrongTraceRoute("doorway_chord_closures_chord_claims_authority")
+    applied = sum(1 for chord in chords if chord["applied_to_preview_topology"])
+    if (
+        block.get("applied_count") != applied
+        or block.get("applied_to_preview_topology") is not (applied > 0)
+        or block.get("preview_rings_and_closures_unchanged") is not (applied == 0)
+    ):
+        raise WrongTraceRoute("doorway_chord_closures_misreport_what_was_applied")
+
+
 def run_preview(
     pdf: Path, *,
     page_index: int,
@@ -118,8 +181,21 @@ def run_preview(
     expected_head_sha: str,
     out_dir: Path,
     repo_root: Path = ROOT,
+    doorway_chord_shadow: bool = False,
+    doorway_chord_closures: bool = False,
 ) -> Path:
-    """Execute only the UI's real source-native preview at the exact supplied HEAD."""
+    """Execute only the UI's real source-native preview at the exact supplied HEAD.
+
+    ``doorway_chord_shadow`` (default False, an explicit boolean) additionally asks the preview for its read-only block of
+    source-owned doorway chords and fails closed unless that block is present, belongs to this source and page and claims no
+    authority. With it off the call, the validation and the receipt are exactly what they always were.
+    ``doorway_chord_closures`` (default False) instead has the preview use those chords as topology-only doorway closures."""
+    if type(doorway_chord_shadow) is not bool:
+        raise WrongTraceRoute("doorway_chord_shadow_must_be_bool")
+    if type(doorway_chord_closures) is not bool:
+        raise WrongTraceRoute("doorway_chord_closures_must_be_bool")
+    if doorway_chord_shadow and doorway_chord_closures:
+        raise WrongTraceRoute("doorway_chord_shadow_and_closures_are_exclusive")
     source_sha = _expected_hash(expected_source_sha256, 64, "source_sha256")
     required_head = _expected_hash(expected_head_sha, 40, "expected_head")
     if _git_head(repo_root) != required_head:
@@ -133,10 +209,27 @@ def run_preview(
 
     from pb_new_source_trace_preview import source_native_trace_preview
 
-    summary, image_bytes = source_native_trace_preview(pdf, page_index)
+    if doorway_chord_shadow:
+        summary, image_bytes = source_native_trace_preview(pdf, page_index, source_owned_doorway_chord_shadow=True)
+    elif doorway_chord_closures:
+        summary, image_bytes = source_native_trace_preview(pdf, page_index, source_owned_doorway_chord_closures=True)
+    else:
+        summary, image_bytes = source_native_trace_preview(pdf, page_index)
     receipt = validate_canonical_preview(
         summary, expected_source_sha256=source_sha, expected_page_index=page_index,
     )
+    if doorway_chord_shadow:
+        validate_doorway_chord_shadow(
+            summary.get(CHORD_SHADOW_KEY) if isinstance(summary, Mapping) else None,
+            expected_source_sha256=source_sha, expected_page_index=page_index,
+        )
+        receipt["doorway_chord_shadow_requested"] = True
+    if doorway_chord_closures:
+        validate_doorway_chord_closures(
+            summary.get(CHORD_CLOSURES_KEY) if isinstance(summary, Mapping) else None,
+            expected_source_sha256=source_sha, expected_page_index=page_index,
+        )
+        receipt["doorway_chord_closures_requested"] = True
     if not isinstance(image_bytes, bytes) or not image_bytes.startswith(PNG_SIGNATURE):
         raise WrongTraceRoute("original_source_native_preview_png_missing")
     if _git_head(repo_root) != required_head:
@@ -161,6 +254,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-head-sha", required=True, help="Exact 40-character Git checkout commit")
     parser.add_argument("--out-dir", type=Path, required=True, help="Private results directory")
     parser.add_argument("--purpose", choices=["preview", "official-benchmark"], required=True)
+    parser.add_argument(
+        "--with-doorway-chord-shadow", action="store_true",
+        help="also record the preview's read-only block of source-owned doorway chords (shadow evidence; the preview itself is unchanged)",
+    )
+    parser.add_argument(
+        "--with-doorway-chord-closures", action="store_true",
+        help="let the room tracer use proven doorway chords as topology-only closures (no quantity or authority)",
+    )
     args = parser.parse_args(argv)
     if args.purpose != "preview":
         parser.error(
@@ -172,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
             args.pdf, page_index=args.page_index,
             expected_source_sha256=args.source_sha256,
             expected_head_sha=args.expected_head_sha, out_dir=args.out_dir,
+            doorway_chord_shadow=args.with_doorway_chord_shadow,
+            doorway_chord_closures=args.with_doorway_chord_closures,
         )
     except (WrongTraceRoute, OSError, ValueError) as exc:
         print(f"CANONICAL_ROUTE_BLOCKED: {exc}", file=sys.stderr)

@@ -6,7 +6,10 @@ import type { EditorObject, SceneManifest } from "./types";
 import { studyColor } from "./finishStudy";
 import { safeDrafts } from "./reviewDraft";
 import type { DraftHistory, WallDraft } from "./reviewDraft";
-import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS } from "./visualRealism";
+import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget } from "./visualRealism";
+import {createMaterialDetailLibrary,physicalUV} from "./materialDetail";
+import {createPresentationGarden} from "./presentationGarden";
+import {RoomEnvironment} from "three/addons/environments/RoomEnvironment.js";
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
@@ -18,15 +21,22 @@ import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
   displayWallDraft, draftGesturePreview, magneticDraftWalls, directDraftGesture } from "./buildScene";
 import type { DraftGesture, DraftPickKind } from "./buildScene";
+import {createDraftEditHandles,pickDraftEditHandle} from "./draftEditHandles";
+import type {HandleShape} from "./draftEditHandles";
 import { roofEdges } from "./roofComponents";
 import { CATALOGUE_DRAG_TYPE, OPENING_DRAG_TYPE, CONSTRUCTION_STAGES, isLiningStage } from "./constructionStages";
 import {setLiningAppearance,LINING_BOARDS,makeShellCeilingLining} from "./constructionLiningVisual";
 import {nominalShellFraming} from "./constructionFrameVisual";
 import {junctionBackingMesh} from "./constructionJunctionVisual";
+import {wallCornerJoins} from "./wallCornerJoin";
 import {sourceWallLiningPreview,sourceCeilingLiningPreview} from "./sourceLiningPreview";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
+import type {CatalogueGroup} from "./itemCatalogue";
+import {contextGroups,contextChoices} from "./contextFinishes";
+import type {FinishContext} from "./contextFinishes";
+import {createOutdoorEnvironment} from "./outdoorEnvironment";
 import type { ControlMode, HistoryAction } from "./editorControls";
 import { createFootprintGizmo, footprintGeometry, projectSourceHost, renderFootprintGeometry } from "./footprintScene";
 import { footprintHandlePoint, projectCeiling, projectPlacement, projectWall, projectPlan, resizeFromHandle } from "./footprintResize";
@@ -40,6 +50,8 @@ import { createVrPlanOverview } from "./vrPlanOverview";
 import { standardThumbstick, walkDelta, collisionLimitedStep, snapTurn, navigationOffset, identityNavOffset, composeNavigationOffset, navigationWallFace } from "./vrStationaryNavigation";
 import type { NavigationWall, NavOffset } from "./vrStationaryNavigation";
 import {doorKey,localNavigationWalls} from "./walkthroughDoors";
+import {nextDoorMechanism} from "./localDoorMotion";
+import type {LocalDoorMotion} from "./localDoorMotion";
 import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
@@ -50,7 +62,7 @@ import {layerVisible,editableSurfaceVisible,draftWallLayerVisible,cycleLayer,ite
 import type {LayerOverrides} from "./constructionLayers";
 import type { ImmersiveBudget } from "./vrAssemblyStudy";
 import type { CatalogueItem } from "./itemCatalogue";
-import { ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
+import { localFloorHostId, ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
 import type { ItemHit, PlacedItem } from "./itemPlacement";
 import { evaluateSourceFloorTeleport,describeTeleportReason } from "./verifiedTeleport";
 import { scopeKey } from "./reviewDraft";
@@ -86,11 +98,14 @@ type Props = {
   onSelect: (id: string | null) => void;
   draftState: DraftHistory | null;
   onCycleStudy: (objectId: string) => void;
+  outdoor:boolean;
+  onOutdoor:(enabled:boolean)=>void;
   mood: LightingMood;
   onMood:(mood:LightingMood)=>void;
   previewLights:boolean;
   onPreviewLights:(enabled:boolean)=>void;
   quality: RenderQuality;
+  onQuality:(quality:RenderQuality)=>void;
   detail: SurfaceDetail;
   moveMode: MoveMode;
   addedWallSketch: WallVisual | null;
@@ -247,7 +262,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback });
@@ -283,8 +298,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
   moveSettings.current = { moveMode, wallMoveState, onMoveDelta };
   const sessionReportCallback = useRef(onPcVrSessionReport);
   sessionReportCallback.current = onPcVrSessionReport;
-  const visualSettings = useRef({ mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture });
-  visualSettings.current = { mood, onMood, previewLights, onPreviewLights, quality, detail, inspection, cameraRequest, captureSerial, onCapture };
+  const visualSettings = useRef({ outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture });
+  visualSettings.current = { outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const mappedDrafts=useMemo(()=>new Map<string,WallDraft>((draftState?safeDrafts(draftState,manifest):[])
@@ -298,8 +313,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
 
     const scene = new THREE.Scene();
     const wallTextures=createWallTextureLibrary();
+    const details=createMaterialDetailLibrary();
     const initialPreset = VISUAL_PRESETS[visualSettings.current.mood];
     scene.background = new THREE.Color(initialPreset.background);
+    const environment=createOutdoorEnvironment(scene);
+    const garden=createPresentationGarden(scene);
     const ambient = new THREE.HemisphereLight(
       initialPreset.ambientSky, initialPreset.ambientGround, initialPreset.ambientIntensity,
     );
@@ -339,6 +357,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     renderer.toneMappingExposure = initialPreset.exposure;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Static architectural lighting: refresh a shadow map on actual changes,
+    // never every frame in a stationary scene.
+    renderer.shadowMap.autoUpdate=false;
+    const pmrem=new THREE.PMREMGenerator(renderer);
+    const lightingRoom=new RoomEnvironment();
+    const environmentMap=pmrem.fromScene(lightingRoom,.04);
+    lightingRoom.dispose();pmrem.dispose();
+    scene.environment=environmentMap.texture;scene.environmentIntensity=.65;
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local-floor");
     renderer.xr.setFramebufferScaleFactor(0.8);
@@ -386,18 +412,26 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let nudgeStep: 0.05 | 0.1 | 0.25 = 0.05;
     let panelPinned = true;
     let helpOpen = false;
-    let toolsOpen=false,wallProfilesOpen=false,dimensions=true,radial=true,layersOpen=false;
+    let toolsOpen=false,wallProfilesOpen=false,dimensions=true,radial=false,layersOpen=false;
+    let simpleHome=true,finishContext:FinishContext|null=null,finishGroup:CatalogueGroup|null=null,finishPage=0;
     let lastMenuSignature="",lastMenuDraw=0,menuPose:"radial"|"panel"|null=null,lastMenuHover=-2;
     // Only a layout actually displayed can authorize a menu action.
     let displayedMenuLayout: ReturnType<typeof menuLayout> | null = null;
     let stickNeedsNeutral=false;
-    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;radial=true;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
-    function toggleTools(){
+    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    function toggleTools(contextual=false){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
       if(toolsOpen){
         for(let i=0;i<xrPress.length;i++)if(xrPress[i]||xrGestures[i]||xrResize[i]){menuConsumed[i]=true;selectEnd(i);}
-        activeGrip=null;radial=true;displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
+        activeGrip=null;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;
+        const right=inputSources.findIndex(source=>source?.handedness==="right"&&source.targetRayMode==="tracked-pointer");
+        if(contextual&&right>=0&&interaction.current.mode==="inspect"&&!resize.current.projection&&!resize.current.enabled){
+          aimController(controllers[right]);finishContext=itemView.contextAt(raycaster);
+          if(finishContext){const groups=contextGroups(finishContext);if(groups.length===1&&finishContext.hit.target!=="opening")finishGroup=groups[0];}
+          else{closeTools();reportTool("Aim at a wall, floor, door or fitting, then squeeze right grip.");return;}
+        }
+        displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
       }
       else closeTools();
     }
@@ -436,7 +470,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     };
     function pointerContext() {
       return [interaction.current.mode, build.current.buildState.tool, build.current.buildLevel,
-        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,build.current.buildState.ceilings,directSelection.current.kind,topEditing(),resize.current.projection] as const;
+        itemControls.current.active?.id, construction.current.stage, interaction.current.visibleIds,construction.current.layers,build.current.buildState.walls,build.current.buildState.ceilings,directSelection.current.kind,topEditing(),resize.current.projection,connectedRotation] as const;
     }
     type PointerContext = ReturnType<typeof pointerContext>;
     const samePointerContext = (expected: PointerContext) =>
@@ -468,7 +502,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
-          selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, angleTools, feedback:interaction.current.toolFeedback, gridM: snapGrid, axis: snapAxis,
+          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext,finishGroup,finishPage,
+           selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, angleTools, feedback:interaction.current.toolFeedback, gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
           canTeleport:teleportSettings.current.teleportAvailable,
@@ -483,6 +518,25 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
+      if(choice.area==="finish"){
+        if(choice.action==="close"){closeTools();return;}
+        if(choice.action==="back"){if(finishGroup){finishGroup=null;finishPage=0;}else finishContext=null;return;}
+        if(!finishContext)return;
+        if(choice.action==="hardware"&&choice.hardware){
+          const hit=finishContext.hit;
+          if(hit.target!=="opening"||!hit.opening?.door||!hit.hostId.startsWith("opening:"))return;
+          try{const ids=JSON.parse(hit.hostId.slice(8));if(Array.isArray(ids)&&ids.length===2&&ids.every(id=>typeof id==="string"))build.current.onBuildAction({kind:"set-door-hardware",proposalId:ids[0],openingId:ids[1],finish:choice.hardware});}catch{/* invalid host ignored */}
+          closeTools();return;
+        }
+        if(choice.action==="group"&&choice.group&&contextGroups(finishContext).includes(choice.group)){finishGroup=choice.group;finishPage=0;return;}
+        if(choice.action==="page"){const n=finishGroup?contextChoices(finishContext,finishGroup).length:contextGroups(finishContext).length;finishPage=Math.max(0,Math.min(Math.ceil(n/(finishGroup?6:8))-1,finishPage+(choice.step??0)));return;}
+        if(choice.action==="apply"&&finishGroup&&choice.itemId&&contextChoices(finishContext,finishGroup).some(i=>i.id===choice.itemId)){
+          const existing=finishContext.entry&&getCatalogueItem(finishContext.entry.itemId);
+          itemControls.current.onAction({kind:"apply-finish",itemId:choice.itemId,hit:finishContext.hit,...(existing?.visual.kind==="fixture"?{replaceId:finishContext.entry!.id}:{})});
+          closeTools();
+        }
+        return;
+      }
       if(choice.area==="lining"){
         if(choice.action==="board"){const i=LINING_BOARDS.indexOf(construction.current.liningBoard);construction.current.onLiningBoard(LINING_BOARDS[(i+1)%LINING_BOARDS.length]);}
         else{const wall=selectedDraftWall();if(wall){inspectedWall=inspectedWall===wall.proposalId?null:wall.proposalId;}}
@@ -562,6 +616,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const wall=selectedDraftWall();
         const opening=wall?.openings[openingIndex%(wall.openings.length||1)];
         if (wall && opening) {
+          if(choice.action==="mechanism"){
+            if(opening.openingKind==="door")build.current.onBuildAction({kind:"set-door-mechanism",proposalId:wall.proposalId,openingId:opening.openingId,mechanism:nextDoorMechanism(opening.doorMechanism)});
+            return;
+          }
+          if(choice.action==="toggle"){
+            const leaf=wallAdditionLayer.children.find(g=>g.visible&&g.userData.proposalId===wall.proposalId)?.children.find(c=>c instanceof THREE.Mesh&&c.visible&&c.userData.catalogueDoorLeaf===opening.openingId&&c.userData.localDoorMotion&&c.material instanceof THREE.MeshStandardMaterial&&c.material.visible);
+            if(leaf instanceof THREE.Mesh)toggleLocalDoorLeaf(leaf);
+            return;
+          }
           const field=choice.action==="shift"?"offset":choice.action;
           const value=opening[choice.action==="shift"?"offsetM":
             choice.action==="width"?"widthM":"heightM"]*1000+choice.deltaMm;
@@ -572,7 +635,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
       } else if (choice.area === "quest") {
         if(choice.action==="hide-tools"){closeTools();return;}
-        if(choice.action==="more-tools"){radial=false;compactMenu=true;return;}
+        if(choice.action==="more-tools"){radial=false;simpleHome=false;compactMenu=true;return;}
+        if(choice.action==="home"){simpleHome=true;radial=false;finishContext=null;finishGroup=null;selectedDraftId=null;return;}
+        if(choice.action==="quality"){const modes:RenderQuality[]=["performance","balanced","high"];visualSettings.current.onQuality(modes[(modes.indexOf(visualSettings.current.quality)+1)%modes.length]);return;}
+        if(choice.action==="environment"){visualSettings.current.onOutdoor(!visualSettings.current.outdoor);return;}
         if(choice.action==="layers"){layersOpen=!layersOpen;return;}
         if(choice.action==="reset-layers"){construction.current.onLayers({});return;}
         if(choice.action==="wall-profiles"){wallProfilesOpen=!wallProfilesOpen;return;}
@@ -643,7 +709,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           buildOverlay.positionMenu(renderer.xr.getCamera(),panelPinned,true);
         if (choice.action === "help") { helpOpen = !helpOpen; numberPad=null; openingTools=false;
           selectedDraftId = null; deleteArmed=false; }
-        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; openingTools=false; numberPad=null; angleTools=false;radial=true; }
+        if (choice.action === "back") { selectedDraftId=null; deleteArmed=false; openingTools=false; numberPad=null; angleTools=false;radial=false;simpleHome=true; }
         reportTool(choice.action === "grid" ? "Draft grid: " + Math.round(snapGrid*1000) + " mm." :
           choice.action === "axis" ? "Wall alignment: " + snapAxis + "." : "");
       } else if (choice.area === "draft") {
@@ -800,18 +866,29 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const wallAdditionLayer = new THREE.Group();
     wallAdditionLayer.name = "UnapprovedNewWallStudy";
     scene.add(wallAdditionLayer);
+    const editHandles=createDraftEditHandles();scene.add(editHandles.group);
     const junctionLayer=new THREE.Group();junctionLayer.name="NominalDraftJunctionBacking";scene.add(junctionLayer);
     const shellGroup=new THREE.Group();shellGroup.name="LocalDraftConnectedShell";scene.add(shellGroup);
     let currentShell:DraftShell|null=null;
+    let gardenBounds:{minX:number;maxX:number;minZ:number;maxZ:number}|null=null;
+    let shellFloorHosts:CatalogueHost[]=[];
+    let lastShellHosts:CatalogueHost[]|null=null;
+    let combinedDraftHosts:CatalogueHost[]=[];
+    let lastCombinedWallHosts:CatalogueHost[]|null=null;
     function refreshShell(){
       const next=construction.current.shell;
       if(next!==currentShell){
         currentShell=next;
+        itemView.clear();shellFloorHosts=[];gardenBounds=null;
+        if(manifest.scope.workspaceId==="starter-house-local"&&next){const vertices=next.surfaces.filter(s=>s.kind==="floor").flatMap(s=>s.vertices);if(vertices.length)gardenBounds={minX:Math.min(...vertices.map(v=>v[0])),maxX:Math.max(...vertices.map(v=>v[0])),minZ:Math.min(...vertices.map(v=>v[2])),maxZ:Math.max(...vertices.map(v=>v[2]))};}
         for(const child of [...shellGroup.children]){shellGroup.remove(child);child.traverse(o=>{if(o instanceof THREE.Mesh){o.geometry.dispose();(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());}});}
         for(const surface of next?.surfaces??[]){
           const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(surface.vertices.flat(),3));geometry.computeVertexNormals();
           const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
-          const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;shellGroup.add(mesh);
+          physicalUV(geometry,surface.kind==="roof"?.3:.5,surface.kind==="roof"?1.4:.5);
+          if(surface.kind==="roof"){const maps=details.get("roof");material.map=maps.map;material.bumpMap=maps.bumpMap;material.bumpScale=.003;material.roughness=.68;}
+          const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;mesh.receiveShadow=true;mesh.castShadow=surface.kind!=="floor";shellGroup.add(mesh);
+          if(surface.kind==="floor"&&next){const vertices=surface.vertices.flatMap((_,i)=>i%3===0&&surface.vertices.slice(i,i+3).every(v=>Math.abs(v[1]-.002)<1e-6)?surface.vertices.slice(i,i+3):[]);if(vertices.length){const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(vertices.flat(),3));g.computeVertexNormals();const host=new THREE.Mesh(g,new THREE.MeshBasicMaterial({side:THREE.DoubleSide,visible:false}));host.userData.surfaceKind="floor";shellGroup.add(host);shellFloorHosts=[{id:localFloorHostId(next.levelId),target:"floor",mesh:host}];}}
           if(surface.kind==="ceiling"){const lining=makeShellCeilingLining(surface.vertices);if(lining)shellGroup.add(lining); }
         }
         if(next)for(const accessory of nominalShellFraming(next).children.slice())shellGroup.add(accessory);
@@ -859,7 +936,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         byId.set(wall.proposalId, wall);
       }
       const active = [...byId.values()].map(wall => appliedProjection ? projectWall(wall, appliedProjection) : wall);
-      const ceilings = buildState.ceilings.filter(ceiling => !buildLevel || ceiling.levelId === buildLevel)
+      const ceilings = buildState.ceilings.filter(ceiling => ceiling.scopeKey===sceneScope&&(!buildLevel || ceiling.levelId === buildLevel))
         .map(ceiling => appliedProjection ? projectCeiling(ceiling, appliedProjection) : ceiling);
       const signature = JSON.stringify([active, ceilings]);
       if (lastAddedWall === signature) return;
@@ -869,13 +946,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const junctions=junctionBackingMesh(active);if(junctions)junctionLayer.add(junctions);
       itemView.clear();
       draftItemHosts = [];
+      const joins=wallCornerJoins(active);
       const nextMeshes=new Map<string,{signature:string;object:THREE.Object3D}>();
       const nextOpenDoors=new Set<string>();
       for (const wall of active) {
-        const key="wall:"+wall.proposalId,signature=JSON.stringify(wall);
+        const corner=joins.get(wall.proposalId);
+        const key="wall:"+wall.proposalId,signature=JSON.stringify([wall,corner]);
         const previous=draftMeshes.get(key);
         const reused=previous?.signature===signature;
-        const group=reused && previous.object instanceof THREE.Group ? previous.object : displayWallDraft(wall,wallTextures);
+        const group=reused && previous.object instanceof THREE.Group ? previous.object : displayWallDraft(wall,wallTextures,corner,details);
         if(!reused){
           group.userData.reviewOnlyWallProposal = true;
           group.userData.proposalId = wall.proposalId;
@@ -991,7 +1070,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let syncedLayers:LayerOverrides|null=null,syncedCutaway=false;
     function syncItems() {
       updateSourceLayout();
-      refreshWallAddition();
+      refreshWallAddition();refreshShell();
+      if(lastShellHosts!==shellFloorHosts||lastCombinedWallHosts!==draftItemHosts){lastShellHosts=shellFloorHosts;lastCombinedWallHosts=draftItemHosts;combinedDraftHosts=[...draftItemHosts,...shellFloorHosts];}
       const items = itemControls.current.items;
       if (itemsAtSource !== items || itemProjection !== appliedProjection) {
         itemsAtSource = items;
@@ -1004,9 +1084,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         visibleHosts = renderHosts.filter(entry => sourceVisible(entry.mesh));
       }
       const stage=construction.current.stage;
-      if(syncedVisible!==visibleHosts||syncedDraft!==draftItemHosts||syncedItems!==renderItems||syncedStage!==stage||syncedLayers!==construction.current.layers||syncedCutaway!==!!elevatedReturn){
-        itemView.sync(visibleHosts,draftItemHosts,renderItems,stage,construction.current.layers,!!elevatedReturn);
-        syncedVisible=visibleHosts;syncedDraft=draftItemHosts;syncedItems=renderItems;syncedStage=stage;syncedLayers=construction.current.layers;syncedCutaway=!!elevatedReturn;
+      if(syncedVisible!==visibleHosts||syncedDraft!==combinedDraftHosts||syncedItems!==renderItems||syncedStage!==stage||syncedLayers!==construction.current.layers||syncedCutaway!==!!elevatedReturn){
+        itemView.sync(visibleHosts,combinedDraftHosts,renderItems,stage,construction.current.layers,!!elevatedReturn);
+        syncedVisible=visibleHosts;syncedDraft=combinedDraftHosts;syncedItems=renderItems;syncedStage=stage;syncedLayers=construction.current.layers;syncedCutaway=!!elevatedReturn;
       }
     }
     function placeSelectedItem(item: CatalogueItem) {
@@ -1083,7 +1163,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(!group.visible)continue;
         for(const child of group.children){
           if(child instanceof THREE.Mesh&&child.visible&&child.material instanceof THREE.MeshStandardMaterial&&child.material.visible){
-            if(child.userData.catalogueDoorLeaf&&child.userData.doorHinge)leaves.push(child);
+            if(child.userData.catalogueDoorLeaf&&child.userData.localDoorMotion)leaves.push(child);
             else if(child.userData.catalogueWallFace)blockers.push(child);
           }
         }
@@ -1092,14 +1172,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(!hit||hit.distance>3)return false;
       const blocked=raycaster.intersectObjects([...blockers,...pickables.filter(o=>o instanceof THREE.Mesh&&sourceVisible(o)&&displaySurface(construction.current.stage,o.userData.surfaceKind)&&!o.userData.surfaceKind)],false)[0];
       if(blocked&&blocked.distance<hit.distance-.015)return false;
-      const leaf=hit.object as THREE.Mesh;
-      const key=doorKey(leaf.parent!.userData.proposalId,leaf.userData.catalogueDoorLeaf);
+      return toggleLocalDoorLeaf(hit.object as THREE.Mesh);
+    }
+    function toggleLocalDoorLeaf(leaf:THREE.Mesh){
+      if(multiSelect||resize.current.projection||elevatedReturn||!leaf.parent||!leaf.userData.localDoorMotion)return false;
+      const key=doorKey(leaf.parent.userData.proposalId,leaf.userData.catalogueDoorLeaf);
       const opening=!openDoors.has(key);
-      const hinge=leaf.userData.doorHinge as THREE.Vector3;
-      const angle=opening?Math.PI/2:0;
-      // Rigid rotation around the original hinge while retaining the original mesh coordinates.
-      leaf.rotation.y=angle;
-      leaf.position.copy(hinge).sub(hinge.clone().applyAxisAngle(new THREE.Vector3(0,1,0),angle));
+      const motion=leaf.userData.localDoorMotion as LocalDoorMotion;
+      const pivot=new THREE.Vector3(...motion.pivot);
+      leaf.quaternion.setFromAxisAngle(new THREE.Vector3(...motion.axis),opening?motion.angle:0);
+      leaf.position.copy(pivot).sub(pivot.clone().applyQuaternion(leaf.quaternion));
+      if(opening)leaf.position.add(new THREE.Vector3(...motion.translation));
       leaf.updateMatrixWorld(true);
       const next=new Set(openDoors);
       if(opening)next.add(key);else next.delete(key);
@@ -1186,14 +1269,27 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     let startPointer: { id: number; x: number; y: number;
       gesture: DraftGesture | null; resize: ResizeDrag | null; context: PointerContext } | null = null;
+    function selectedHandleShape():HandleShape|null{
+      if(!topEditing()||interaction.current.mode!=="inspect"||!selectedDraftId||toolsOpen||multiSelect||
+        resize.current.enabled||resize.current.projection||itemControls.current.active||teleportSettings.current.teleportMode)return null;
+      const {buildState,buildLevel}=build.current;
+      const kind=directSelection.current.kind,stage=construction.current.stage,layers=construction.current.layers;
+      const wall=kind!=="ceilings"?buildState.walls.find(w=>w.proposalId===selectedDraftId&&w.scopeKey===sceneScope&&w.levelId===buildLevel):null;
+      if(wall&&draftWallLayerVisible(stage,layers,profileDetails(wall.assembly).core==="masonry"))return {kind:"wall",object:wall};
+      const ceiling=kind!=="walls"&&displaySurface(stage,"ceiling")?buildState.ceilings.find(c=>c.proposalId===selectedDraftId&&c.scopeKey===sceneScope&&c.levelId===buildLevel):null;
+      return ceiling?{kind:"ceiling",object:ceiling}:null;
+    }
     function draftGesture() {
       const { buildState, buildLevel } = build.current;
       if (resize.current.projection||resize.current.enabled||itemControls.current.active) return null;
       if(interaction.current.mode==="inspect"&&(!renderer.xr.isPresenting||topEditing())){
+        const shape=selectedHandleShape();
+        const handle=shape&&editHandles.group.visible?pickDraftEditHandle(shape,raycaster.ray):null;
+        if(handle)return handle;
         const kind=directSelection.current.kind;
         const stage=construction.current.stage;
         const layers=construction.current.layers;
-        const allowed={...buildState,walls:buildState.walls.filter(w=>w.scopeKey===sceneScope&&w.levelId===buildLevel&&draftWallLayerVisible(stage,layers,profileDetails(w.assembly).core==="masonry")),ceilings:displaySurface(stage,"ceiling")?buildState.ceilings:[]};
+        const allowed={...buildState,walls:buildState.walls.filter(w=>w.scopeKey===sceneScope&&w.levelId===buildLevel&&draftWallLayerVisible(stage,layers,profileDetails(w.assembly).core==="masonry")),ceilings:displaySurface(stage,"ceiling")?buildState.ceilings.filter(c=>c.scopeKey===sceneScope&&c.levelId===buildLevel):[]};
         return directDraftGesture(allowed,buildLevel,raycaster.ray,kind,topEditing(),snapOptions());
       }
       if(interaction.current.mode!=="draw")return null;
@@ -1205,7 +1301,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const hand = controllerIndex === undefined ? undefined :
         controllers[controllerIndex].getWorldPosition(new THREE.Vector3());
       return draftGesturePreview(gesture, buildSizes, raycaster.ray, buildState,
-        hand ? [hand.x, hand.z] : undefined,snapOptions());
+        hand ? [hand.x, hand.z] : undefined,snapOptions(),connectedRotation);
     }
     function completeDrag(gesture: DraftGesture, controllerIndex?: number) {
       const preview = previewDrag(gesture, controllerIndex);
@@ -1382,14 +1478,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function beginXrGesture(index: number) {
       menuConsumed[index]=false;
       aimController(controllers[index]);
-      const layout = menuLayout("");
       if(toolsOpen){
+        const layout = menuLayout("");
         menuConsumed[index]=true;
         // The first trigger press activates one button. Release never needs to hit it again.
         activateDisplayedMenu(layout);
         return;
       }
-      const menu = menuKey(layout);
+      const menu = null;
       xrPress[index] = { context: pointerContext(), menu,wallKey:!menu&&magnetic&&!build.current.buildState.tool&&!itemControls.current.active&&!resize.current.enabled&&!teleportSettings.current.teleportMode?targetWallAim()?.target.key??null:undefined };
       if (toolsOpen && (itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen || menu !== null)) return;
       xrResize[index] = startResize();
@@ -1413,9 +1509,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(menuConsumed[index]){menuConsumed[index]=false;return;}
       lastController = index;
       aimController(controllers[index]);
-      const layout = menuLayout("");
+      const layout = toolsOpen?menuLayout(""):null;
       const press = xrPress[index];
-      if (press && (!samePointerContext(press.context) || press.menu !== menuKey(layout))) {
+      if (press && (!samePointerContext(press.context) || press.menu !== (layout?menuKey(layout):null))) {
         selectEnd(index);
         return;
       }
@@ -1519,8 +1615,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           walls.push({start:[w.start[0]+dx,w.start[1]+dz],end:[w.end[0]+dx,w.end[1]+dz]});
         }
         for(const raw of build.current.buildState.walls){
-          if(build.current.buildLevel&&raw.levelId!==build.current.buildLevel)continue;
-          if(!layerVisible(layers,"wall",stage!=="slab"&&(stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation"||profileDetails(raw.assembly).core==="masonry"))&&!layerVisible(layers,"framing",stage==="framing"||stage==="insulation"))continue;
+          if(raw.scopeKey!==sceneScope||(build.current.buildLevel&&raw.levelId!==build.current.buildLevel))continue;
+          if(!draftWallLayerVisible(stage,layers,profileDetails(raw.assembly).core==="masonry"))continue;
           const w=resize.current.projection?projectWall(raw,resize.current.projection):raw;
           const showDoors=layerVisible(layers,"openings",stage!=="slab"&&stage!=="framing"&&stage!=="rough-in"&&stage!=="insulation");
           walls.push(...localNavigationWalls(w,openDoors,showDoors));
@@ -1601,6 +1697,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     };
     function handleGripAction(index:number){
       if(inputSources[index]?.handedness==="left"){toggleTools();return;}
+      if(inputSources[index]?.handedness==="right"&&interaction.current.mode==="inspect"&&!resize.current.enabled&&!resize.current.projection&&!build.current.buildState.tool&&!itemControls.current.active){toggleTools(true);return;}
       if(moveSettings.current.moveMode!=="move")applyFinishSqueeze();
     }
     const nativeStart0 = () => {
@@ -1748,6 +1845,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let lastPreviewLighting=-Infinity;
     const lightEye=new THREE.Vector3();
     let lastQuality: RenderQuality | null = null;
+    let shadowKey:readonly unknown[]=[];let lastShadowRefresh=-Infinity;
+    let materialBudgetKey:readonly unknown[]=[];
     let lastPresenting=false;
     let lastDetail: SurfaceDetail | null = null;
     let lastCameraSerial: number | null = null;
@@ -1757,6 +1856,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let indexedMoveState: WallMoveHistory | null | undefined;
     const movesById = new Map<string, ReturnType<typeof safeWallMoves>[number]>();
     let planMoves:ReturnType<typeof safeWallMoves>=[];
+    let appliedMovementKey:readonly unknown[]=[];
     let planExtra:WallVisual[]=[];let planExtraBatch:WallVisual[]|undefined;let planExtraSingle:WallVisual|null|undefined;
     let frameStart=0,previousFrame=0,frameCount=0,worstFrame=0,slowWindows=0,fastWindows=0;
     let sourceAppearanceKey: readonly unknown[] = [];
@@ -1797,6 +1897,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       const projectionX=resize.current.projection?.scaleX ?? 1;
       const projectionZ=resize.current.projection?.scaleZ ?? 1;
+      // Imported object transforms change only on a move revision, projection,
+      // or live grip delta. Avoid traversing all source objects on idle XR frames.
+      const movementKey=[moveState,projectionX,projectionZ,activeGrip?.objectId,dragX,dragZ];
+      if(!movementKey.every((v,i)=>v===appliedMovementKey[i])){
+      appliedMovementKey=movementKey;
       for (const obj of pickables) {
         const id=obj.userData.objectId as string|undefined;
         const move=id === undefined ? undefined : movesById.get(id);
@@ -1807,6 +1912,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const x=dx*projectionX,z=dz*projectionZ;
           if(obj.position.x!==x||obj.position.y!==0||obj.position.z!==z)obj.position.set(x,0,z);
         }
+      }
       }
       if (startPointer && !samePointerContext(startPointer.context)) cancelPointer();
       syncItems();
@@ -1887,6 +1993,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
             if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",inspect||currentStage==="framing"||currentStage==="insulation");
             else if(child.userData.constructionAccessory==="bracing"||child.userData.constructionAccessory==="tie-down")child.visible=layerVisible(construction.current.layers,child.userData.constructionAccessory,inspect||currentStage==="framing");
             else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",currentStage==="insulation");
+            else if(child.userData.illustrativeTrim)child.visible=!inspect&&currentStage!=="slab"&&layerVisible(construction.current.layers,"wall",!framing)&&layerVisible(construction.current.layers,"finishes",currentStage==="finished");
             else if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
               child.visible=!!liningStage&&!inspect&&layerVisible(construction.current.layers,"wall",true)&&layerVisible(construction.current.layers,"lining",true);
               if(liningStage)setLiningAppearance(child,liningStage,construction.current.liningBoard);
@@ -1894,8 +2001,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
             else if(child instanceof THREE.Mesh&&child.material instanceof THREE.MeshStandardMaterial){
               const showBody=layerVisible(construction.current.layers,"wall",currentStage!=="slab"&&(!framing||shape.userData.masonryAssembly===true)&&!inspect);
               child.material.visible=child.userData.exteriorTexture?showBody&&layerVisible(construction.current.layers,"envelope",!framing):
-                child.userData.catalogueDoorLeaf?layerVisible(construction.current.layers,"openings",currentStage!=="slab"&&!framing):showBody;
-            } else if(child instanceof THREE.Line)child.visible=layerVisible(construction.current.layers,"wall",currentStage!=="slab");
+                (child.userData.catalogueDoorLeaf||child.userData.nominalOpeningFrame||child.userData.catalogueWindow)?layerVisible(construction.current.layers,"openings",currentStage!=="slab"&&!framing):showBody;
+            } else if(child instanceof THREE.Line&&!child.userData.selectionEdge)child.visible=layerVisible(construction.current.layers,"wall",currentStage!=="slab")&&(topEditing()||currentStage!=="finished"||!child.userData.draftGuide);
           }
         }
       }
@@ -1907,16 +2014,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       let activeDimensionRay=false;
       if (renderer.xr.isPresenting) {
         // Cache the menu model and avoid large canvas uploads on every XR frame.
-        if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=100)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
+        if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=250)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
         const layout=toolsOpen?cachedMenu:null;
         if(layout){
           const hitLayout=displayedMenuLayout??layout;
-          buildOverlay.sizeMenu(hitLayout);
+          if(menuPose===null)buildOverlay.sizeMenu(hitLayout);
           const pose=hitLayout.radial?"radial":"panel";
           // Keep one world-space anchor through submenu transitions. Never
           // attach the tool surface to a moving controller during selection.
-          if(menuPose===null)buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);
-          else if(!panelPinned)buildOverlay.positionMenu(renderer.xr.getCamera(),false);
+          if(menuPose===null){if(finishContext?.worldPoint)buildOverlay.positionContextMenu(renderer.xr.getCamera(),new THREE.Vector3(...finishContext.worldPoint));else buildOverlay.positionMenu(renderer.xr.getCamera(),true,true);}
+          // Stay world-locked until explicitly reopened or recentered.
           if(menuPose!==pose){menuPose=pose;lastMenuHover=-2;}
         }
         const isPointer = (source: PcVrInputSource | null | undefined) => source?.targetRayMode === "tracked-pointer";
@@ -1925,7 +2032,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
         activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
-        const hover=active>=0&&displayedMenuLayout?menuTarget(displayedMenuLayout):null;
+        const hover=toolsOpen&&active>=0&&displayedMenuLayout?menuTarget(displayedMenuLayout):null;
         const hostTool=buildState.tool==="door"||buildState.tool==="window"||buildState.tool==="frame"||buildState.tool==="move"||buildState.tool==="stretch"||buildState.tool==="opening-move";
         const canLock=active>=0&&!hover&&(!buildState.tool||hostTool)&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
         if(canLock&&magnetic){
@@ -1952,14 +2059,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
           draftAction?.kind==="drag" && drag?.mode==="wall"
           ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM,assembly:buildSizes.wallAssembly} : null);
-        itemView.aim(itemPick?.hit ?? null);
+        itemView.aim(finishContext?.hit??itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
-        if (layout && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
+        if (layout && !simpleHome && !finishContext && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
-        if(layout){
+        if(displayedMenuLayout&&!displayedMenuLayout.radial)buildOverlay.highlightMenu(displayedMenuLayout,hover?.index??-1);
+        if(layout&&(!displayedMenuLayout||now-lastMenuDraw>=250)){
           const signature=JSON.stringify(layout);
-          if((signature!==lastMenuSignature||(hover?.index??-1)!==lastMenuHover)&&(!displayedMenuLayout||now-lastMenuDraw>=80)){
+          lastMenuDraw=now;
+          if(signature!==lastMenuSignature||!displayedMenuLayout||(layout.radial&&(hover?.index??-1)!==lastMenuHover)){
             buildOverlay.sizeMenu(layout);
             buildOverlay.drawMenu(layout,hover?.index??-1);
             lastMenuSignature=signature;displayedMenuLayout=layout;
@@ -1978,7 +2087,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
           draftAction?.kind==="drag" && drag?.mode==="wall"
           ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM,assembly:buildSizes.wallAssembly} : null);
-        itemView.aim(itemPick?.hit ?? null);
+        itemView.aim(finishContext?.hit??itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item ? null : origin);
         setBuildHint(item ? (itemPick?.hit ? "Click to place " + item.label + "." :
           itemPick?.reason ?? itemGuide(item)) : buildTarget?.hint ?? "");
@@ -1989,7 +2098,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(group instanceof THREE.Mesh&&group.userData.surfaceKind==="ceiling"&&group.material instanceof THREE.MeshStandardMaterial){group.material.emissive.setHex(group.userData.proposalId===selectedDraftId?0x16ad83:0);group.material.emissiveIntensity=group.userData.proposalId===selectedDraftId?.65:0;continue;}
         if (!group.userData.reviewOnlyWallProposal) continue;
         const id = group.userData.proposalId as string;
-        const selected = id === selectedDraftId || (multiSelect&&selectedGroup.has(id));
+        const selected = id === selectedDraftId || (multiSelect&&selectedGroup.has(id))||finishContext?.hit.hostId==="draft-wall:"+id;
         const hovered = id === hoveredDraftId;
         const highlightState=selected ? 2 : hovered ? 1 : 0;
         if(group.userData.lastDraftHighlight===highlightState)continue;
@@ -2002,12 +2111,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           if (part.userData.originalDraftColor === undefined)
             part.userData.originalDraftColor=material.color.getHex();
           const base = part.userData.originalDraftColor as number;
+          if(part.userData.selectionEdge){part.visible=selected||hovered;material.color.setHex(0x85dce8);continue;}
           if (material instanceof THREE.MeshStandardMaterial) {
-            material.emissive.setHex(selected ? 0x16ad83 : hovered ? 0xe5a324 : 0);
-            material.emissiveIntensity=selected||hovered ? .65 : 0;
+            material.emissive.setHex(selected ? 0x208b9e : 0);
+            material.emissiveIntensity=selected ? .055 : 0;
           } else material.color.setHex(selected ? 0x40eed8 : hovered ? 0xf2dc80 : base);
         }
       }
+      editHandles.update(selectedHandleShape());
       // One reusable on-model dimension sprite; no per-frame texture allocation.
       let target:THREE.Object3D|undefined;
       if(dimensions&&renderer.xr.isPresenting&&!toolsOpen){
@@ -2048,9 +2159,23 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           }
         }
       }
-      grid.visible = activeInspection.showGrid;
-      sunlight.castShadow = activeInspection.showShadows&&!renderer.xr.isPresenting;
-      presentationFloor.visible = activeInspection.showShadows&&!renderer.xr.isPresenting;
+      const outdoor=visualSettings.current.outdoor&&!topEditing();
+      environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z);
+      const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
+      garden.update(gardenBounds,outdoor&&budget.landscape);
+      const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items,renderer.xr.isPresenting];
+      if(!nextMaterialKey.every((v,i)=>v===materialBudgetKey[i])){
+        materialBudgetKey=nextMaterialKey;
+        for(const layer of [wallAdditionLayer,shellGroup])layer.traverse(obj=>{if(obj instanceof THREE.Mesh&&obj.material instanceof THREE.MeshStandardMaterial){const m=obj.material;const original=m.userData.originalBump??m.bumpMap;if(original)m.userData.originalBump=original;const map=budget.detail?original??null:null;if(m.bumpMap!==map){m.bumpMap=map;m.needsUpdate=true;}}});
+      }
+      grid.visible = activeInspection.showGrid&&!outdoor;
+      const useShadows=activeInspection.showShadows&&budget.shadows;
+      sunlight.castShadow=useShadows;renderer.shadowMap.enabled=useShadows;
+      presentationFloor.visible=useShadows&&!outdoor;
+      const nextShadowKey=[activeMood,activeQuality,useShadows,renderer.xr.isPresenting,openDoors,lastAddedWall,currentShell,itemControls.current.items,currentStage,construction.current.layers,interaction.current.visibleIds,resize.current.projection,draftMap.current,moveSettings.current.wallMoveState];
+      if(useShadows&&now-lastShadowRefresh>=budget.shadowRefreshMs&&(!nextShadowKey.every((v,i)=>v===shadowKey[i])||renderer.xr.isPresenting!==lastPresenting)){
+        shadowKey=nextShadowKey;lastShadowRefresh=now;renderer.shadowMap.needsUpdate=true;
+      }
       if (lastMood !== activeMood) {
         const preset = VISUAL_PRESETS[activeMood];
         scene.background = new THREE.Color(preset.background);
@@ -2082,6 +2207,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         lastDetail = activeDetail;
       }
       if (lastQuality !== activeQuality||lastPresenting!==renderer.xr.isPresenting) {
+        scene.environment=budget.detail?environmentMap.texture:null;scene.environmentIntensity=budget.environmentIntensity;
         const size = shadowMapSize(activeQuality);
         sunlight.shadow.mapSize.set(size, size);
         if (sunlight.shadow.map) {
@@ -2311,7 +2437,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           materials.forEach(m => m.dispose());
         }
       });
-      roughTile.dispose();wallTextures.dispose();
+      roughTile.dispose();wallTextures.dispose();details.dispose();environment.dispose();garden.dispose();environmentMap.dispose();
       buildOverlay.dispose();
       planOverview.dispose();
       presentationFloor.geometry.dispose();

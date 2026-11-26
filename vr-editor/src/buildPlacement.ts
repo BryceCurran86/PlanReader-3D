@@ -1,4 +1,5 @@
-import type { WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
+import {validLocalDoorMechanisms} from "./localDoorMotion.ts";
+import type { DoorHardwareFinish, DoorMechanism, WallAdditionOpening, WallAdditionSketch } from "./wallAdditionProtocol.ts";
 import { exactDraftOpening, exactDraftWall } from "./vrDraftGeometry.ts";
 import type { ExactWallField, OpeningField } from "./vrDraftGeometry.ts";
 import { editLocalOutline } from "./localOutline.ts";
@@ -47,7 +48,7 @@ export type BuildAction =
   | { kind: "done" | "undo" | "redo" }
   | { kind: "place"; hit: BuildHit; id: string }
   | { kind: "saved"; proposalId: string }
-  | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall }
+  | { kind: "adjust"; previous: PlacedWall; wall: PlacedWall; connected?: boolean; allowTJunctions?: boolean }
   | { kind: "rotate-local-wall"; previous: PlacedWall; angleDeg:number; pivot:WallRotationPivot; relative?:boolean; connected?:boolean }
   | { kind: "adjust-ceiling"; previous: CeilingDraft; ceiling: CeilingDraft }
   | { kind: "drag"; from: PlanPoint; to: PlanPoint; id: string; levelId: string;
@@ -58,6 +59,8 @@ export type BuildAction =
   | { kind: "delete-local-wall"; proposalId: string }
   | { kind: "duplicate-local-wall"; proposalId: string; id: string }
   | { kind: "exact-local-wall"; proposalId: string; field: ExactWallField; valueMm: number }
+  | {kind:"set-door-hardware";proposalId:string;openingId:string;finish:DoorHardwareFinish}
+  | { kind: "set-door-mechanism"; proposalId:string; openingId:string; mechanism:DoorMechanism }
   | { kind: "exact-local-opening"; proposalId: string; openingId: string;
       field: OpeningField; valueMm: number };
 
@@ -272,7 +275,7 @@ export function draftShape<T extends CeilingDraft>(
 
 export function validEditedWall(wall: PlacedWall) {
   return validWallLength(planLength(wall.start, wall.end)) && validHeight(wall.heightM) &&
-    wall.openings.every(opening => openingFits(wall, opening));
+    wall.openings.every(opening => openingFits(wall, opening)) && validLocalDoorMechanisms(wall);
 }
 
 // Reversible draft-only edits: callers must dispatch an "adjust" action with
@@ -339,6 +342,35 @@ function checkpoint(state: BuildState, geometry: DraftGeometry): BuildState {
     history: [...state.history, { walls: state.walls, ceilings: state.ceilings }].slice(-50), future: [] };
 }
 
+/** Follow a directly translated axis-aligned wall edge only for same-scope
+ * rectangular ceilings whose entire edge was hosted on that wall. No guessed
+ * ceiling ownership, arbitrary polygon reshape or source quantities. */
+export function followDraftCeilingEdges(ceilings:CeilingDraft[],before:PlacedWall,after:PlacedWall):CeilingDraft[]|null{
+ const eps=1e-7;
+ const axis=Math.abs(before.start[0]-before.end[0])<=eps?0:
+   Math.abs(before.start[1]-before.end[1])<=eps?1:null;
+ if(axis===null)return ceilings;
+ const span=axis===0?1:0,old=before.start[axis],next=after.start[axis];
+ if(Math.abs(after.end[axis]-next)>eps||Math.abs(next-old)<=eps||
+   Math.abs(after.start[span]-before.start[span])>eps||Math.abs(after.end[span]-before.end[span])>eps)return ceilings;
+ const lo=Math.min(before.start[span],before.end[span]),hi=Math.max(before.start[span],before.end[span]);
+ const result:CeilingDraft[]=[];
+ let changed=false;
+ for(const c of ceilings){
+  if(c.scopeKey!==before.scopeKey||c.levelId!==before.levelId||
+   Math.min(c.start[span],c.end[span])<lo-eps||Math.max(c.start[span],c.end[span])>hi+eps){
+   result.push(c);continue;
+  }
+  const isStart=Math.abs(c.start[axis]-old)<=eps,isEnd=Math.abs(c.end[axis]-old)<=eps;
+  if(isStart===isEnd){result.push(c);continue;}
+  const start:PlanPoint=[...c.start],end:PlanPoint=[...c.end];
+  if(isStart)start[axis]=next;else end[axis]=next;
+  if((c.end[axis]-c.start[axis])*(end[axis]-start[axis])<=0||!validCeiling(start,end))return null;
+  result.push({...c,start,end});changed=true;
+ }
+ return changed?result:ceilings;
+}
+
 export function updateBuild(
   state: BuildState, action: BuildAction, scopeKey: string,
   levelId: string | null, sizes: BuildSizes,
@@ -368,11 +400,18 @@ export function updateBuild(
   }
   if (action.kind === "adjust") {
     const { previous, wall } = action;
-    if (wall.scopeKey !== scopeKey || wall.proposalId !== previous.proposalId ||
+    if (!levelId || previous.levelId !== levelId || previous.scopeKey !== scopeKey ||
+        wall.scopeKey !== scopeKey || wall.proposalId !== previous.proposalId ||
         wall.levelId !== previous.levelId || !state.walls.includes(previous) ||
         !validEditedWall(wall)) return state;
-    return checkpoint(state, { walls: state.walls.map(item => item === previous ? wall : item),
-      ceilings: state.ceilings });
+    const walls = action.connected
+      ? connectedWallEdit(state.walls,previous,wall,action.allowTJunctions)
+      : state.walls.map(item => item === previous ? wall : item);
+    if (!walls || walls.some(w => !validEditedWall(w))) return state;
+    const ceilings = action.connected && action.allowTJunctions
+      ? followDraftCeilingEdges(state.ceilings,previous,wall) : state.ceilings;
+    if (!ceilings) return state;
+    return checkpoint(state, { walls, ceilings });
   }
   if (action.kind === "adjust-ceiling") {
     const { previous, ceiling } = action;
@@ -382,6 +421,21 @@ export function updateBuild(
         !validCeiling(ceiling.start, ceiling.end) || !validHeight(ceiling.heightM)) return state;
     return checkpoint(state, { walls: state.walls,
       ceilings: state.ceilings.map(item => item === previous ? ceiling : item) });
+  }
+  if(action.kind==="set-door-hardware"){
+    const wall=state.walls.find(w=>w.proposalId===action.proposalId&&w.scopeKey===scopeKey&&w.levelId===levelId);
+    const opening=wall?.openings.find(o=>o.openingId===action.openingId);
+    if(!wall||!opening||opening.openingKind!=="door"||!["chrome","matte-black","brushed-brass","brushed-nickel"].includes(action.finish)||opening.doorHardware===action.finish)return state;
+    const next={...wall,openings:wall.openings.map(o=>o===opening?{...o,doorHardware:action.finish}:o)};
+    return checkpoint(state,{walls:state.walls.map(w=>w===wall?next:w),ceilings:state.ceilings});
+  }
+  if(action.kind==="set-door-mechanism"){
+    const wall=state.walls.find(w=>w.proposalId===action.proposalId&&w.scopeKey===scopeKey&&w.levelId===levelId);
+    const opening=wall?.openings.find(o=>o.openingId===action.openingId);
+    if(!wall||!opening||opening.openingKind!=="door"||(opening.doorMechanism??"swing")===action.mechanism)return state;
+    const next={...wall,openings:wall.openings.map(o=>o===opening?{...o,doorMechanism:action.mechanism}:o)};
+    if(!validEditedWall(next))return state;
+    return checkpoint(state,{walls:state.walls.map(w=>w===wall?next:w),ceilings:state.ceilings});
   }
   if (action.kind === "exact-local-wall" || action.kind === "exact-local-opening") {
     const previous = state.walls.find(wall => wall.proposalId === action.proposalId &&
