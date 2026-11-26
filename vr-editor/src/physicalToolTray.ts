@@ -20,6 +20,7 @@ export function createPhysicalToolTray(parent:THREE.Object3D){
   keys.setColorAt(index,colour.setHex(b.disabled?disabled:highlight?hovered:b.active?selected:base));
  };
  function update(next:MenuLayout){
+  if(!Number.isFinite(next.width)||!Number.isFinite(next.height)||next.width<=0||next.height<=0){layout=null;lastHover=-1;keys.count=samples.count=0;return;}
   layout=next;lastHover=-1;
   keys.visible=samples.visible=!next.radial;
   keys.count=next.radial?0:Math.min(CAP,next.buttons.length);samples.count=0;
@@ -44,5 +45,5 @@ export function createPhysicalToolTray(parent:THREE.Object3D){
   tint(lastHover,false);tint(index,true);lastHover=index;
   if(keys.instanceColor)keys.instanceColor.needsUpdate=true;
  }
- return {keys,samples,update,highlight,dispose(){geometry.dispose();material.dispose();}};
+ return {keys,samples,update,highlight,dispose(){parent.remove(keys,samples);keys.dispose();samples.dispose();geometry.dispose();material.dispose();}};
 }
