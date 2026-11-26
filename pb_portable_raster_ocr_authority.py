@@ -538,14 +538,26 @@ class RapidOCRBackend(RasterOCRBackend):
         import numpy as np
 
         engine = self._get_engine()
-        array = np.array(image.convert("RGB"))
-        cache_key: Optional[tuple[int, str, tuple[int, ...], float, bool]] = None
+        rgb_image = image if image.mode == "RGB" else image.convert("RGB")
+        array = np.asarray(rgb_image)
+        cache_key: Optional[tuple[Any, ...]] = None
         if type(self) is RapidOCRBackend and engine is RapidOCRBackend._engine_cache:
             # Cache immutable OCRLine tuples strictly by exact engine identity,
-            # RGB pixel SHA-256, image shape, DPI, and detect mode (never caching
-            # authorization receipts or cross-engine results).
+            # active model/config signature, RGB pixel SHA-256, image shape,
+            # DPI, and detect mode (never reusing across incompatible configs
+            # or caching authorization receipts).
+            config_sig = (
+                type(engine).__qualname__,
+                getattr(engine, "use_det", None),
+                getattr(engine, "use_cls", None),
+                getattr(engine, "use_rec", None),
+                getattr(engine, "text_score", None),
+                getattr(engine, "box_thresh", None),
+                getattr(engine, "lang_type", None),
+            )
             cache_key = (
                 id(engine),
+                config_sig,
                 hashlib.sha256(array.tobytes()).hexdigest(),
                 tuple(array.shape),
                 float(dpi),
