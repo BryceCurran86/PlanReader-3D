@@ -10,6 +10,8 @@ import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,r
 import {createMaterialDetailLibrary,physicalUV} from "./materialDetail";
 import {createPresentationGarden} from "./presentationGarden";
 import {RoomEnvironment} from "three/addons/environments/RoomEnvironment.js";
+import {RGBELoader} from "three/addons/loaders/RGBELoader.js";
+import {architecturalAssetUrl} from "./architecturalAssets";
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
@@ -365,6 +367,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const environmentMap=pmrem.fromScene(lightingRoom,.04);
     lightingRoom.dispose();pmrem.dispose();
     scene.environment=environmentMap.texture;scene.environmentIntensity=.65;
+    let outdoorHdr:THREE.DataTexture|null=null,disposedScene=false;
+    const fallbackSky=new THREE.Color(initialPreset.background);
+    void new RGBELoader().loadAsync(architecturalAssetUrl("outdoor.hdr")).then(hdr=>{
+      if(disposedScene){hdr.dispose();return;}
+      hdr.mapping=THREE.EquirectangularReflectionMapping;outdoorHdr=hdr;
+    }).catch(error=>console.error("Local architectural HDR unavailable",error));
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local-floor");
     renderer.xr.setFramebufferScaleFactor(0.8);
@@ -2178,7 +2186,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
       }
       const outdoor=visualSettings.current.outdoor&&!topEditing();
-      environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z);
+      const photographicSky=outdoor&&activeMood==="daylight"&&outdoorHdr!==null;
+      environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z,photographicSky);
       const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
       garden.update(gardenBounds,outdoor&&budget.landscape);
       if(gardenBounds&&shadowHouseBounds!==gardenBounds){shadowHouseBounds=gardenBounds;lightCenter.set((gardenBounds.minX+gardenBounds.maxX)/2,1.2,(gardenBounds.minZ+gardenBounds.maxZ)/2);const extent=architecturalShadowExtent(gardenBounds.maxX-gardenBounds.minX,gardenBounds.maxZ-gardenBounds.minZ);const sc=sunlight.shadow.camera;sc.left=sc.bottom=-extent;sc.right=sc.top=extent;sc.near=.5;sc.far=80;sc.updateProjectionMatrix();sunlight.target.position.copy(lightCenter);scene.add(sunlight.target);sunlight.position.set(...VISUAL_PRESETS[activeMood].sunPosition).add(lightCenter);shadowKey=[];}
@@ -2197,7 +2206,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       if (lastMood !== activeMood) {
         const preset = VISUAL_PRESETS[activeMood];
-        scene.background = new THREE.Color(preset.background);
+        fallbackSky.setHex(preset.background);
         ambient.color.setHex(preset.ambientSky);
         ambient.groundColor.setHex(preset.ambientGround);
         ambient.intensity = preset.ambientIntensity;
@@ -2225,8 +2234,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         lastDetail = activeDetail;
       }
+      scene.background=photographicSky?outdoorHdr:fallbackSky;
+      const desiredEnvironment=budget.detail?(activeMood==="daylight"&&outdoorHdr?outdoorHdr:environmentMap.texture):null;
+      if(scene.environment!==desiredEnvironment)scene.environment=desiredEnvironment;
+      scene.environmentIntensity=budget.environmentIntensity*(activeMood==="daylight"&&outdoorHdr?0.6:1);
       if (lastQuality !== activeQuality||lastPresenting!==renderer.xr.isPresenting) {
-        scene.environment=budget.detail?environmentMap.texture:null;scene.environmentIntensity=budget.environmentIntensity;
         const size = shadowMapSize(activeQuality);
         sunlight.shadow.mapSize.set(size, size);
         if (sunlight.shadow.map) {
@@ -2462,6 +2474,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           materials.forEach(m => m.dispose());
         }
       });
+      disposedScene=true;outdoorHdr?.dispose();
       roughTile.dispose();wallTextures.dispose();details.dispose();environment.dispose();garden.dispose();environmentMap.dispose();
       buildOverlay.dispose();
       planOverview.dispose();

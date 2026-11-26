@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {materialDetailMaps} from "./materialDetail.ts";
+import {photoTexture} from "./architecturalAssets.ts";
 import type {DetailPattern} from "./materialDetail.ts";
 import type { ItemTarget, ItemVisual, Pattern, TrimProfile } from "./itemCatalogue";
 
@@ -155,7 +156,9 @@ function roofFinishGeometry(source: THREE.BufferGeometry, repeatX: number, repea
 export function finishMesh(
   host: THREE.Mesh, spec: FinishSpec, target: ItemTarget, normal: THREE.Vector3, side: number,
 ) {
-  const [repeatX, scaleY] = spec.repeatM ?? [0.12, 0.12];
+  const photoWood=target==="floor"&&spec.pattern==="plank"?photoTexture("wood-colour.jpg"):null;
+  const photoPlaster=spec.pattern==="solid"&&(target==="wall"||target==="ceiling")?photoTexture("plaster-normal.jpg"):null;
+  const [repeatX, scaleY] = photoWood?[1.7,1.7]:photoPlaster?[1,1]:spec.repeatM ?? [0.12, 0.12];
   const repeatY = spec.pattern === "masonry" ? scaleY * 2 : scaleY;
   const isRoof = target === "roof";
   const geometry = isRoof ? roofFinishGeometry(host.geometry, repeatX, repeatY) : host.geometry.clone();
@@ -170,7 +173,9 @@ export function finishMesh(
     geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   }
   const detail:DetailPattern|null=spec.pattern==="solid"&&(target==="wall"||target==="ceiling")?"plaster":(["plank","grain","tile","woven","fleck"].includes(spec.pattern)?spec.pattern as DetailPattern:null);
-  const maps=detail?materialDetailMaps(detail):null;
+  const maps=detail&&!photoWood&&!photoPlaster?materialDetailMaps(detail):null;
+  const normalMap=photoWood?photoTexture("wood-normal.jpg"):photoPlaster;
+  const roughnessMap=photoWood?photoTexture("wood-rough.jpg"):photoPlaster?photoTexture("plaster-rough.jpg"):null;
   // Cladding relief follows the same physically scaled UV as its colour pattern.
   const profiled=["masonry","lap","rib","seam","corrugation","profiled-tile","sheet"].includes(spec.pattern);
   const patternMap=!maps&&spec.pattern!=="solid"?makePattern(spec.pattern):null;
@@ -180,10 +185,11 @@ export function finishMesh(
     bumpMap:maps?.bumpMap??relief,bumpScale:profiled?.003:detail==="tile"?.002:detail==="plank"?.0015:.0008,
     side: isRoof ? THREE.FrontSide : vertical ? (side === 1 ? THREE.FrontSide : THREE.BackSide)
       : host.material instanceof THREE.Material ? host.material.side : THREE.DoubleSide,
-    map: maps?.map??patternMap,
+    map: photoWood??maps?.map??patternMap,
+    normalMap,normalScale:new THREE.Vector2(photoWood?.65:.18,photoWood?.65:.18),roughnessMap,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -1,
   }));
-  if (!isRoof) mesh.position.copy(normal).multiplyScalar(0.0008);
+  if (!isRoof) mesh.position.copy(normal).multiplyScalar(target==="wall"?.0025:.0008);
   mesh.receiveShadow = true;
   return mesh;
 }
