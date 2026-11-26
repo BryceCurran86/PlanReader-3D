@@ -162,11 +162,13 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
       for (let index = 0; index < bowls; index++) {
         const x = ((index + 0.5) / bowls - 0.5) * w;
         const span = w / bowls;
-        oval(span, h, d, x, h / 2, 0);
-        oval(span * 0.83, h * 0.035, d * 0.78, x, h * 0.81, 0, detail);
-        oval(span * 0.76, h * 0.04, d * 0.71, x, h * 0.832, 0, white);
-        cylinder(Math.min(0.033, span * 0.09), 0.002, x, h * 0.857, 0, detail);
-        cylinder(Math.min(.019,span*.05),.003,x,h*.859,0,body);
+        // Continuous outer shell, rolled rim and actual recessed bowl. No flat
+        // dark ellipse pretending to be a cavity. Nominal catalogue envelope retained.
+        const bowl=ceramicBowlGeometry(span,h,d);
+        const shell=mesh(bowl,x,0,0,body);shell.name="Ceramic bowl shell";
+        const drain=cylinder(Math.min(.028,span*.065),.003,x,h*.19+.002,0,detail);
+        drain.name="Bowl drain";
+        cylinder(Math.min(.017,span*.04),.004,x,h*.19+.004,0,white);
       }
       break;
     }
@@ -225,4 +227,16 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
   const used = new Set(group.children.flatMap(part => part instanceof THREE.Mesh ? [part.material] : []));
   for (const material of [body, detail, white, lens]) if (!used.has(material)) material.dispose();
   return { group, worktop };
+}
+
+/** Bounded, closed ring shell, suitable for a bath or basin without a costly CSG pass. */
+export function ceramicBowlGeometry(w:number,h:number,d:number){
+ const rings:[[number,number],[number,number],[number,number],[number,number],[number,number],[number,number],[number,number],[number,number]]=[[.001,0],[.72,0],[.94,.18],[1,.93],[.98,1],[.88,.97],[.65,.24],[.001,.19]];
+ const segments=40,positions:number[]=[],indices:number[]=[];
+ for(const [radius,y] of rings)for(let i=0;i<segments;i++){const t=i*2*Math.PI/segments;positions.push(Math.cos(t)*w*.5*radius,y*h,Math.sin(t)*d*.5*radius);}
+ for(let j=0;j<rings.length-1;j++)for(let i=0;i<segments;i++){const n=(i+1)%segments,a=j*segments+i,b=j*segments+n,c=(j+1)*segments+i,e=(j+1)*segments+n;indices.push(a,c,b,b,c,e);}
+ // Close tiny centre holes at the bottom and inside the bowl.
+ const bottom=positions.length/3;positions.push(0,0,0);const inner=positions.length/3;positions.push(0,h*.19,0);
+ for(let i=0;i<segments;i++){const n=(i+1)%segments;indices.push(bottom,i,n,inner,(rings.length-1)*segments+n,(rings.length-1)*segments+i);}
+ const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));g.setIndex(indices);g.computeVertexNormals();return g;
 }

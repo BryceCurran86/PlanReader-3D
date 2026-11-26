@@ -369,7 +369,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     scene.environment=environmentMap.texture;scene.environmentIntensity=.65;
     let outdoorHdr:THREE.DataTexture|null=null,disposedScene=false;
     const fallbackSky=new THREE.Color(initialPreset.background);
-    void new RGBELoader().loadAsync(architecturalAssetUrl("outdoor.hdr")).then(hdr=>{
+    // A source/example inspection scene uses the inexpensive neutral studio map.
+    // The photographic exterior is illustrative only for the editable starter house.
+    const architecturalStarter=manifest.scope.workspaceId==="starter-house-local";
+    if(architecturalStarter)void new RGBELoader().loadAsync(architecturalAssetUrl("outdoor.hdr")).then(hdr=>{
       if(disposedScene){hdr.dispose();return;}
       hdr.mapping=THREE.EquirectangularReflectionMapping;outdoorHdr=hdr;renderer.domElement.dataset.architecturalEnvironment="loaded";
     }).catch(error=>{if(!disposedScene)renderer.domElement.dataset.architecturalEnvironment="failed";console.error("Local architectural HDR unavailable",error);});
@@ -2186,7 +2189,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
       }
       const outdoor=visualSettings.current.outdoor&&!topEditing();
-      const photographicSky=outdoor&&activeMood==="daylight"&&outdoorHdr!==null;
+      const photographicSky=outdoor&&activeMood==="daylight"&&outdoorHdr!==null&&activeQuality!=="performance";
       environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z,photographicSky);
       const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
       garden.update(gardenBounds,outdoor&&budget.landscape);
