@@ -167,7 +167,7 @@ def editor_shapes(shapes):
     return out
 
 
-def normalise_answer(issue, decision, note, dimension_mm=None, correction_id=None):
+def normalise_answer(issue, decision, note, dimension_mm=None, correction_id=None, witness_points=None):
     if issue not in ISSUES or decision not in DECISIONS:
         raise ValueError("Unknown review question or decision")
     if not isinstance(note, str) or not note.strip() or len(note) > 2000:
@@ -184,7 +184,15 @@ def normalise_answer(issue, decision, note, dimension_mm=None, correction_id=Non
                 or dimension_mm is None or type(correction_id) is not str
                 or not _ID.fullmatch(correction_id)):
             raise ValueError("Select a valid dimension witness for the scale answer")
+        if not isinstance(witness_points, list) or len(witness_points) != 2:
+            raise ValueError("Reconfirm the two witness endpoints")
+        points = [_point(p) for p in witness_points]
+        if points[0] == points[1]:
+            raise ValueError("Witness endpoints must be distinct")
         result["correction_id"] = correction_id
+        result["witness_points"] = points
+    elif witness_points is not None:
+        raise ValueError("Witness points require an explicit correction selection")
     return result
 
 
@@ -247,8 +255,8 @@ def save_review(connect, scope, *, expected_revision, shapes, answers):
         selected = [shape for shape in clean_shapes
                     if shape["id"] == scale["correction_id"]
                     and shape["category"] == "dimension_witness"]
-        if len(selected) != 1:
-            raise ValueError("Scale witness was removed; clear or reselect the scale answer")
+        if len(selected) != 1 or selected[0]["points"] != scale["witness_points"]:
+            raise ValueError("Scale witness changed or was removed; clear or reconfirm the scale answer")
     payload = json.dumps({
         "coordinate_frame": "displayed_image_percent",
         "authority": "user_review_draft",
