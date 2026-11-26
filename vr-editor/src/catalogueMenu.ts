@@ -5,7 +5,8 @@ import { CATALOGUE_GROUPS, ITEM_CATALOGUE, itemCanRotate } from "./itemCatalogue
 import type { CatalogueItem,CatalogueGroup } from "./itemCatalogue.ts";
 import {contextGroups,contextChoices,contextTitle,finishGroupLabel} from "./contextFinishes.ts";
 import type {FinishContext} from "./contextFinishes.ts";
-import type {ItemHit} from "./itemPlacement.ts";
+import {canEditFloorFixture} from "./itemPlacement.ts";
+import type {ItemHit,FixtureEdit} from "./itemPlacement.ts";
 import type {DoorHardwareFinish} from "./wallAdditionProtocol.ts";
 import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages.ts";
 import type { ConstructionStage } from "./constructionStages.ts";
@@ -21,6 +22,7 @@ import type {LiningBoard} from "./constructionLiningVisual.ts";
 export type ItemAction =
   | { kind: "choose"; itemId: string }
   | { kind:"apply-finish";itemId:string;hit:ItemHit;replaceId?:string }
+  | {kind:"edit-fixture";id:string;edit:FixtureEdit}
   | { kind: "undo" | "redo" | "done" | "rotate" };
 type BrowseAction = { kind: "toggle" } | { kind: "groups" } | { kind: "category" | "page" | "group-page"; step: number }
   | { kind: "choose-group"; index: number };
@@ -123,7 +125,9 @@ export function buildMenuLayout(
       add("Previous",250,354,210,68,{area:"finish",action:"page",step:-1},{disabled:p===0});
       add("Next",476,354,210,68,{area:"finish",action:"page",step:1},{disabled:p===max});
       add("Close",702,354,210,68,{area:"finish",action:"close"});
-      return {buttons,title:finishGroupLabel(group)+" · "+(p+1)+"/"+(max+1),width:936,height:476,note:"Choose a finish to apply directly to the selected item or face."};
+      const editing=!!c.entry&&canEditFloorFixture(c.entry);
+      if(editing){const actions:[string,FixtureEdit][]=[["Rotate 90°","rotate"],["X −100","left"],["X +100","right"],["Z −100","forward"],["Z +100","back"],["Duplicate","duplicate"]];actions.forEach(([label,edit],i)=>add(label,24+i*150,438,142,64,items({kind:"edit-fixture",id:c.entry!.id,edit})));}
+      return {buttons,title:finishGroupLabel(group)+" · "+(p+1)+"/"+(max+1),width:936,height:editing?560:476,note:editing?"Change finish or edit this fitting · movement in mm, local design.":"Choose a finish to apply directly to the selected item or face."};
     }
     const max=Math.max(0,Math.ceil(groups.length/8)-1),p=Math.min(page,max);
     groups.slice(p*8,p*8+8).forEach((g,i)=>add(finishGroupLabel(g),24+(i%2)*460,86+Math.floor(i/2)*74,440,64,{area:"finish",action:"group",group:g}));

@@ -533,6 +533,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
+      if(choice.area==="items"&&choice.action.kind==="edit-fixture"){
+        const live=finishContext&&refreshFinishContext(finishContext,itemControls.current.items);
+        if(!live?.entry||live.entry.id!==choice.action.id){closeTools();reportTool("Select a current fitting first.");return;}
+        itemControls.current.onAction(choice.action);return;
+      }
       if(choice.area==="finish"){
         if(choice.action==="close"){closeTools();return;}
         if(choice.action==="back"){if(finishGroup){finishGroup=null;finishPage=0;}else finishContext=null;return;}

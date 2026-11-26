@@ -29,7 +29,7 @@ import { isRoughIn } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { ItemCataloguePanel } from "./ItemCataloguePanel";
 import { getCatalogueItem, itemCanRotate } from "./itemCatalogue";
-import { currentItemPlacements, emptyItemDraft, itemGuide, placeItem, replaceItemFinish, redoItem, removeItem, undoItem } from "./itemPlacement";
+import { currentItemPlacements, emptyItemDraft, itemGuide, placeItem, replaceItemFinish, editLocalFloorFixture, redoItem, removeItem, undoItem } from "./itemPlacement";
 import type { ItemDraft, ItemHit, PlacedItem } from "./itemPlacement";
 import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
@@ -432,6 +432,18 @@ export function App() {
   }
 
   function onItemAction(action: ItemAction) {
+    if(action.kind==="edit-fixture"){
+      if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect"){setToolMessage("Finish the active edit first.");return;}
+      const key=scopeKey(manifest),walls=[...activeBatchSketches,...buildState.walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])];
+      const newId=newPlacementId("item");
+      const apply=(draft:ItemDraft)=>editLocalFloorFixture(draft,key,action.id,action.edit,walls,newId);
+      const result=apply(catalogue.draft);
+      if(result.draft===catalogue.draft){setToolMessage(result.reason);return;}
+      const before=currentItemPlacements(catalogue.draft.items,manifest,walls,isDemo,buildState.ceilings);
+      const after=currentItemPlacements(result.draft.items,manifest,walls,isDemo,buildState.ceilings);
+      if(after.length<before.length||!after.some(p=>p.id===(action.edit==="duplicate"?newId:action.id))||before.some(p=>!after.some(q=>q.id===p.id))){setToolMessage("Edit would invalidate a hosted item.");return;}
+      setLastEdit("place");changeCatalogue(current=>({...current,draft:apply(current.draft).draft}));setToolMessage(result.reason+" · local design only.");return;
+    }
     if(action.kind==="apply-finish"){
       if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect"){setToolMessage("Finish or cancel the active edit before changing a finish.");return;}
       const item=getCatalogueItem(action.itemId);
@@ -863,6 +875,7 @@ export function App() {
               onCancel={() => onItemAction({ kind: "done" })}
               onRotate={() => onItemAction({ kind: "rotate" })}
               onUndo={() => onItemAction({ kind: "undo" })}
+              onEdit={(id,edit)=>onItemAction({kind:"edit-fixture",id,edit})}
               onRemove={id => { setLastEdit("place"); changeCatalogue(current => ({ ...current, draft: removeItem(current.draft, id) })); }} />
           </div>
           <div className="section-block">

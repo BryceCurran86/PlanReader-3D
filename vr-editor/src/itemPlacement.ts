@@ -315,3 +315,58 @@ export function itemScheduleCsv(rows: ItemScheduleRow[]) {
     quote(row.category), quote(row.name), String(row.placements),
   ].join(","))].join("\r\n") + "\r\n";
 }
+
+/** Local-design fixture editing only; no modification of source-owned geometry. */
+export type FixtureEdit="rotate"|"left"|"right"|"forward"|"back"|"duplicate";
+export function canEditFloorFixture(entry:PlacedItem){
+ return entry.target==="floor"&&entry.hostId.startsWith("draft-floor:")&&getCatalogueItem(entry.itemId)?.visual.kind==="fixture";
+}
+type FixtureRect={left:number;right:number;front:number;back:number};
+function fixtureRect(entry:PlacedItem):FixtureRect|null{
+ const v=getCatalogueItem(entry.itemId)?.visual;if(v?.kind!=="fixture")return null;
+ const w=(entry.turn%2?v.depthM:v.widthM)/2,d=(entry.turn%2?v.widthM:v.depthM)/2;
+ return {left:entry.point[0]-w,right:entry.point[0]+w,front:entry.point[2]-d,back:entry.point[2]+d};
+}
+function crossesRect(wall:WallVisual,r:FixtureRect){
+ // Liang-Barsky clipping of the wall centreline against the fixture envelope.
+ // A 5 mm margin rejects even near-contact; not a certified clearance check.
+ const p=wall.start,q=wall.end,dx=q[0]-p[0],dz=q[1]-p[1];let lo=0,hi=1;
+ for(const [a,b] of [[-dx,p[0]-r.left+.005],[dx,r.right-p[0]+.005],[-dz,p[1]-r.front+.005],[dz,r.back-p[1]+.005]]){
+  if(Math.abs(a)<1e-10){if(b<0)return false;continue;}
+  const t=b/a;if(a<0)lo=Math.max(lo,t);else hi=Math.min(hi,t);if(lo>hi)return false;
+ }
+ return true;
+}
+export function editLocalFloorFixture(draft:ItemDraft,sourceKey:string,id:string,action:FixtureEdit,walls:readonly WallVisual[],newId?:string):{draft:ItemDraft;reason:string}{
+ const reject=(reason:string)=>({draft,reason});
+ const old=draft.items.find(p=>p.id===id);
+ if(draft.sourceKey!==sourceKey||!old||!canEditFloorFixture(old))return reject("Select a floor-mounted fitting on an editable local floor.");
+ if(!["rotate","left","right","forward","back","duplicate"].includes(action))return reject("Unknown fitting edit.");
+ const level=old.hostId.slice("draft-floor:".length),peers=walls.filter(w=>w.levelId===level&&w.scopeKey===sourceKey);
+ const external=peers.filter(w=>profileDetails(w.assembly).role==="external");
+ const ring=localOutline((external.length?external:peers) as import("./buildPlacement.ts").PlacedWall[]);
+ if(!ring)return reject("Close the local floor outline first.");
+ const rect=fixtureRect(old);if(!rect)return reject("Fitting dimensions unavailable.");
+ const duplicate=action==="duplicate";
+ if(duplicate&&(!newId||draft.items.length>=300||draft.items.some(p=>p.id===newId)))return reject("Cannot add another fitting.");
+ if(duplicate&&draft.items.some(p=>p.hostId===worktopId(id)))return reject("Copy fittings with attached worktop items individually.");
+ const next:PlacedItem={...old,id:duplicate?newId!:old.id,point:[...old.point]};
+ if(action==="rotate")next.turn=(old.turn+1)%4;
+ else if(action==="left")next.point[0]-=.1;
+ else if(action==="right")next.point[0]+=.1;
+ else if(action==="forward")next.point[2]-=.1;
+ else if(action==="back")next.point[2]+=.1;
+ else next.point[0]+=rect.right-rect.left+.15;
+ next.point=[Math.round(next.point[0]*1000)/1000,next.point[1],Math.round(next.point[2]*1000)/1000];
+ const r=fixtureRect(next)!;
+ for(const x of [r.left,r.right])for(const z of [r.front,r.back])if(!pointInsideLocalFloor([x,next.point[1],z],ring.points))return reject("Fitting would extend outside the local floor.");
+ if(peers.some(w=>crossesRect(w,r)))return reject("Fitting would cross a wall.");
+ for(const entry of draft.items){
+  if((!duplicate&&entry.id===id)||entry.hostId!==old.hostId)continue;
+  const other=fixtureRect(entry);
+  if(other&&r.left<other.right-.001&&r.right>other.left+.001&&r.front<other.back-.001&&r.back>other.front+.001)return reject("Fitting would overlap another floor-mounted fitting.");
+ }
+ // Keep the original position in the list so worktop children remain bound
+ // to their parent and continue to inherit the parent's transform.
+ return {draft:checkpoint(draft,duplicate?[...draft.items,next]:draft.items.map(p=>p.id===id?next:p)),reason:duplicate?"Fitting duplicated.":action==="rotate"?"Fitting rotated 90° extra.":"Fitting moved 100 mm."};
+}
