@@ -195,24 +195,19 @@ def project_live_floor_finish_customer_rows(
     # Source-closed finish QuantityEvidence owns the canonical floor ID.
     # Physical floor IDs can differ; resolving them here silently drops
     # otherwise authenticated finish rows even though sealing uses canonical.
-    floors = {}
-    for floor in claim.canonical_floors:
-        canonical_id = _clean(floor.canonical_floor_id)
-        if not canonical_id:
-            continue
-        if canonical_id in floors:
-            # The upstream source trace builder rejects duplicates too,
-            # but never silently pick a last-writer-wins customer location.
-            raise ValueError("duplicate canonical floor identity in finish projection")
-        floors[canonical_id] = floor
+    # The source trace builder has verified one owner for each claimed floor.
+    claimed_floor_ids = {
+        _clean(quantity.input_entity_ids[0]) for quantity in quantities
+    }
+    floors = {
+        _clean(floor.canonical_floor_id): floor
+        for floor in claim.canonical_floors
+        if _clean(floor.canonical_floor_id) in claimed_floor_ids
+    }
     projected_quantities: list[QuantityEvidence] = []
     authorities: dict[str, CommercialMeasurementAuthority] = {}
     for quantity in quantities:
-        if len(quantity.input_entity_ids) != 1:
-            continue
-        floor = floors.get(_clean(quantity.input_entity_ids[0]))
-        if floor is None:
-            continue
+        floor = floors[_clean(quantity.input_entity_ids[0])]
         metadata = (
             dict(quantity.metadata)
             if isinstance(quantity.metadata, Mapping)

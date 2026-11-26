@@ -240,9 +240,46 @@ def rank_registrations(
     for name, mat in orientations.items():
         if identity_only and name != "identity":
             continue
-        scales = identity_scales if name == "identity" and not identity_only else (1.0,)
+        # A support viewport can have a different scale at any orientation.
+        # Keep identity_only as the legacy fixed-scale diagnostic mode.
+        scales = identity_scales if not identity_only else (1.0,)
         for scale in scales:
-            moved = orient_lines(src, tuple(scale * v for v in mat))
+            # Malformed viewport metadata must not manufacture a correspondence.
+            # Keep valid scale hypotheses available independently.
+            if type(scale) not in (int, float):
+                continue
+            try:
+                numeric_scale = float(scale)
+                if not math.isfinite(numeric_scale) or numeric_scale <= 0:
+                    continue
+            except (OverflowError, ValueError, TypeError):
+                continue
+            # Reject malformed orientation witnesses and overflowed products before
+            # they reach coordinate rounding or line indexing. A corrupt source
+            # viewport must not suppress other valid registration hypotheses.
+            try:
+                # Boolean entries are flags, not authenticated numeric orientation
+                # coefficients. Reject the entire witness instead of coercing True
+                # to 1.0 or False to 0.0 and manufacturing registration.
+                if len(mat) != 4 or any(type(v) not in (int, float) for v in mat):
+                    continue
+                matrix = tuple(float(v) for v in mat)
+                if not all(math.isfinite(v) for v in matrix):
+                    continue
+                scaled = tuple(numeric_scale * v for v in matrix)
+                if not all(math.isfinite(v) for v in scaled):
+                    continue
+            except (TypeError, ValueError, OverflowError):
+                continue
+            # Even finite matrix entries can overflow when multiplied by large
+            # source coordinates. Such a viewport is not a valid witness.
+            try:
+                moved = orient_lines(src, scaled)
+                if any(not math.isfinite(k) or any(not math.isfinite(v) for pair in ivs for v in pair)
+                       for axis in ("H", "V") for k, ivs in moved[axis].items()):
+                    continue
+            except (ValueError, OverflowError, TypeError):
+                continue
             xs, ys = _shift_votes(moved, index, topn)
             pool = sorted(
                 ((*min_axis_support(moved, index, dx, dy, tol), dx, dy) for dx in xs for dy in ys),
@@ -260,7 +297,7 @@ def rank_registrations(
             second = next((p for p in pool if abs(p[3] - best[3]) > 1.0 or abs(p[4] - best[4]) > 1.0), None)
             rows.append({
                 "orientation": name,
-                "scale": scale,
+                "scale": numeric_scale,
                 "dx": round(best[3], 2),
                 "dy": round(best[4], 2),
                 "min_support_pt": round(best[0], 1),
@@ -4016,7 +4053,14 @@ def resolve_registered_cross_sheet_floor_correspondences(
                    or w.target_page_id != record.target_page_id
                    or type(w.covered_interval_iou) not in (int, float)
                    or not math.isfinite(float(w.covered_interval_iou))
-                   or float(w.covered_interval_iou) < SIDE_FULL for w in walls)
+                   or float(w.covered_interval_iou) < (
+                       0.55
+                       if (
+                           record.side_kinds.get(w.side_name) in {"with_openings", "door"}
+                           or w.doorway_transition is not None
+                       )
+                       else SIDE_FULL
+                   ) for w in walls)
             or not doors
             or set(record.side_kinds) != {"x0", "x1", "y0", "y1"}
             # The existing source wall producer uses "with_openings" for a

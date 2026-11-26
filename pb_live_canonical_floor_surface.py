@@ -12,17 +12,26 @@ Structural slabs remain a separate canonical object family.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 import math
-from typing import Optional
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Optional
 
-from pb_geometry_takeoff_model import MeasurementAuthorityType
+from pb_geometry_takeoff_model import AuthorityStatus, MeasurementAuthorityType
 from pb_live_canonical_room_composition import (
     LiveCanonicalRoomComposition,
     LiveCanonicalRoomObject,
 )
-from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
+from pb_migration_contracts import (
+    EvidenceResolutionStatus,
+    QuantityEvidence,
+    stable_contract_id,
+)
 from pb_source_room_area_bridge import SourceRoomAreaBridgeResult
+
+if TYPE_CHECKING:
+    from pb_live_external_physical_net_wall_publication import LiveCanonicalWallObject
 
 
 LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION = "1.1.0"
@@ -120,6 +129,200 @@ class LiveCanonicalFloorSurfaceComposition:
     floors: tuple[LiveCanonicalFloorSurfaceObject, ...]
     source_pages: tuple[int, ...]
     schema_version: str = LIVE_CANONICAL_FLOOR_SURFACE_SCHEMA_VERSION
+
+
+def floor_finish_boundary_wall_failure(
+    room: LiveCanonicalRoomObject,
+    walls_by_id: Mapping[str, LiveCanonicalWallObject],
+    *,
+    quantity_id: str,
+) -> tuple[str, str] | None:
+    """Return the first unresolved finished-face requirement for this floor."""
+    raw_boundary_ids = getattr(room, "canonical_bounding_wall_ids", None)
+    if raw_boundary_ids is None:
+        raw_boundary_ids = getattr(room, "bounding_wall_ids", ())
+    boundary_ids = raw_boundary_ids or ()
+    if (any(not isinstance(wall_id, str) or not wall_id.strip() for wall_id in boundary_ids)
+            or len({wall_id.strip() for wall_id in boundary_ids}) != len(boundary_ids)):
+        return (
+            "floor_finish_bounding_wall_identity_unresolved",
+            f"floor-finish boundary wall identities are invalid or repeated: {quantity_id}",
+        )
+    if not boundary_ids:
+        return (
+            "floor_finish_bounding_wall_authority_incomplete",
+            f"floor-finish bounding wall authority incomplete: {quantity_id}",
+        )
+    if getattr(room, "wall_relationships_complete", None) is not True:
+        return (
+            "floor_finish_boundary_wall_relationships_incomplete",
+            f"room has no complete producer-owned wall relationships: {quantity_id}",
+        )
+    # Fail closed when mapping keys hide whitespace-colliding owner identities.
+    canonical_keys = [key.strip() for key in walls_by_id if isinstance(key, str)]
+    if (len(canonical_keys) != len(walls_by_id)
+            or len(set(canonical_keys)) != len(canonical_keys)
+            or any(not key for key in canonical_keys)):
+        return (
+            "floor_finish_bounding_wall_identity_unresolved",
+            f"floor-finish wall owner mapping contains ambiguous identities: {quantity_id}",
+        )
+    for wall_id in boundary_ids:
+        wall = walls_by_id.get(wall_id)
+        if wall is None:
+            return (
+                "floor_finish_bounding_wall_authority_incomplete",
+                f"floor-finish bounding wall authority incomplete: {quantity_id}",
+            )
+        # A mapping key alone does not authenticate the wall's own identity.
+        # A producer that collapses duplicate IDs must report that conflict
+        # before building this mapping; never accept a mismatched wall object.
+        if str(getattr(wall, "canonical_wall_id", "") or "") != str(wall_id):
+            return (
+                "floor_finish_bounding_wall_identity_unresolved",
+                f"floor-finish bounding wall identity does not match owner: {wall_id}",
+            )
+        if getattr(wall, "role", None) != "internal_finished_wall_face":
+            return (
+                "floor_finish_bounding_wall_not_finished_face",
+                f"floor-finish bounding wall is not an internal finished face: {wall_id}",
+            )
+        if getattr(wall, "physical_identity_resolved", None) is not True:
+            return (
+                "floor_finish_bounding_wall_identity_unresolved",
+                f"floor-finish bounding wall physical identity is not resolved: {wall_id}",
+            )
+    return None
+
+
+
+def ambiguous_canonical_wall_owner_ids(
+    wall_groups: Sequence[Sequence[LiveCanonicalWallObject]],
+) -> frozenset[str]:
+    """Find nonunique source wall owners before any last-writer-wins mapping.
+
+    Repeated views of one wall from separate producers are legitimate only
+    if their nonempty physical and source identity witnesses agree. Repetition
+    inside one producer is always nonunique. This never repairs source IDs.
+    """
+    conflicts: set[str] = set()
+    seen: dict[str, tuple[str, str, str, str]] = {}
+    for group in wall_groups:
+        group_seen: set[str] = set()
+        for wall in group:
+            raw_id = getattr(wall, "canonical_wall_id", None)
+            if not isinstance(raw_id, str) or not raw_id.strip():
+                continue  # unaddressable source objects cannot match a floor boundary
+            wall_id = raw_id.strip()
+            if wall_id in group_seen or wall_id != raw_id:
+                conflicts.add(wall_id)
+            group_seen.add(wall_id)
+            witness = tuple(
+                str(getattr(wall, field, "") or "").strip()
+                for field in (
+                    "physical_wall_id", "source_sha256", "document_id", "revision_id"
+                )
+            )
+            prior = seen.get(wall_id)
+            if prior is not None and any(
+                left and right and left != right
+                for left, right in zip(prior, witness)
+            ):
+                conflicts.add(wall_id)
+            if prior is None:
+                seen[wall_id] = witness
+    return frozenset(conflicts)
+
+
+def quarantine_unverified_floor_finish_boundaries(
+    quantities: Sequence[QuantityEvidence],
+    *,
+    floors: Sequence[LiveCanonicalFloorSurfaceObject],
+    rooms: Sequence[LiveCanonicalRoomObject],
+    walls_by_id: Mapping[str, LiveCanonicalWallObject],
+    ambiguous_wall_ids: frozenset[str] = frozenset(),
+) -> tuple[QuantityEvidence, ...]:
+    """Withhold live floor finishes that cannot pass the owned wall-face check."""
+    if not quantities:
+        return tuple(quantities)
+    # Normalize only for collision detection. Never silently repair an invalid
+    # producer identity or allow whitespace variants to impersonate owners.
+    floor_owner_counts = Counter(str(floor.canonical_floor_id).strip() for floor in floors)
+    room_owner_counts = Counter(str(room.canonical_room_id).strip() for room in rooms)
+    # Two canonical floor IDs must never independently claim one physical surface.
+    # Missing physical identities are handled by the existing resolved-owner gate.
+    physical_floor_owner_counts = Counter(
+        str(getattr(floor, "physical_floor_surface_id", "") or "").strip()
+        for floor in floors
+        if str(getattr(floor, "physical_floor_surface_id", "") or "").strip()
+    )
+    floors_by_id = {floor.canonical_floor_id: floor for floor in floors}
+    rooms_by_id = {room.canonical_room_id: room for room in rooms}
+
+    result = []
+    for quantity in quantities:
+        if (
+            quantity.family != "floor_finish_area"
+            or quantity.status != AuthorityStatus.FIRM.value
+            or quantity.abstained
+            or quantity.value is None
+        ):
+            result.append(quantity)
+            continue
+        floor_id = quantity.input_entity_ids[0] if len(quantity.input_entity_ids) == 1 else ""
+        floor = floors_by_id.get(floor_id)
+        room_id = floor.room_entity_id if floor is not None else ""
+        room = rooms_by_id.get(room_id) if room_id else None
+        if not isinstance(floor_id, str) or not floor_id or floor_id != floor_id.strip():
+            reason = "floor_finish_canonical_floor_scope_missing"
+        elif floor is None:
+            reason = "floor_finish_canonical_floor_owner_missing"
+        elif floor_owner_counts[floor_id.strip()] > 1:
+            reason = "floor_finish_canonical_floor_owner_ambiguous"
+        elif (str(getattr(floor, "physical_floor_surface_id", "") or "").strip()
+              and physical_floor_owner_counts[str(floor.physical_floor_surface_id).strip()] > 1):
+            reason = "floor_finish_physical_floor_owner_ambiguous"
+        elif str(getattr(floor, "canonical_floor_id", "") or "") != str(floor_id):
+            reason = "floor_finish_canonical_floor_identity_mismatch"
+        elif getattr(floor, "physical_floor_surface_identity_resolved", None) is not True:
+            reason = "floor_finish_physical_floor_identity_unresolved"
+        elif not isinstance(room_id, str) or not room_id or room_id != room_id.strip():
+            reason = "floor_finish_canonical_room_owner_missing"
+        elif room is None:
+            reason = "floor_finish_canonical_room_owner_missing"
+        elif room_owner_counts[room_id.strip()] > 1:
+            reason = "floor_finish_canonical_room_owner_ambiguous"
+        elif any(
+            wall_id in ambiguous_wall_ids
+            for wall_id in (
+                (
+                    getattr(room, "canonical_bounding_wall_ids", None)
+                    if getattr(room, "canonical_bounding_wall_ids", None) is not None
+                    else getattr(room, "bounding_wall_ids", ())
+                )
+                or ()
+            )
+        ):
+            reason = "floor_finish_canonical_wall_owner_ambiguous"
+        else:
+            failure = floor_finish_boundary_wall_failure(
+                room, walls_by_id, quantity_id=quantity.quantity_id,
+            )
+            reason = failure[0] if failure is not None else None
+        if reason is None and quantity.blocking_reasons:
+            reason = "floor_finish_preexisting_authority_block"
+        if reason is None:
+            result.append(quantity)
+        else:
+            result.append(replace(
+                quantity,
+                value=None,
+                status=EvidenceResolutionStatus.ABSTAINED.value,
+                confidence=0.0,
+                abstained=True,
+                blocking_reasons=tuple(dict.fromkeys((*quantity.blocking_reasons, reason))),
+            ))
+    return tuple(result)
 
 
 def _floor_from_room(room: LiveCanonicalRoomObject) -> LiveCanonicalFloorSurfaceObject:
@@ -535,4 +738,7 @@ __all__ = [
     "LiveCanonicalFloorSurfaceObject",
     "compose_live_canonical_floor_surfaces",
     "enrich_live_canonical_floor_metric_areas",
+    "ambiguous_canonical_wall_owner_ids",
+    "floor_finish_boundary_wall_failure",
+    "quarantine_unverified_floor_finish_boundaries",
 ]

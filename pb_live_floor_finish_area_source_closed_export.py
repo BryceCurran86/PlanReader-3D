@@ -13,7 +13,10 @@ from types import MappingProxyType
 from pb_geometry_takeoff_model import AuthorityStatus
 from pb_live_floor_area_quantity_publication import _valid_original_source_sha
 from pb_live_floor_area_source_closed_export import _same_original_floor_room_ring
-from pb_live_canonical_floor_surface import LiveCanonicalFloorSurfaceObject
+from pb_live_canonical_floor_surface import (
+    LiveCanonicalFloorSurfaceObject,
+    floor_finish_boundary_wall_failure,
+)
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import EvidenceResolutionStatus, QuantityEvidence
 from pb_quantity_takeoff_adapter import CommercialTakeoffSourceTrace
@@ -109,6 +112,16 @@ def build_live_floor_finish_area_source_traces(
             "floor finish source workspace_id must be an original positive integer"
         )
 
+    # Only numeric finishes need a unique floor owner. Abstained quantities
+    # still participate in the original quantity and material-evidence census.
+    claimed_floor_ids = {
+        _clean(quantity.input_entity_ids[0])
+        for quantity in claim.floor_finish_quantity_evidence
+        if isinstance(quantity, QuantityEvidence)
+        and not quantity.abstained
+        and quantity.value is not None
+        and len(quantity.input_entity_ids) == 1
+    }
     floors_by_id: dict[str, LiveCanonicalFloorSurfaceObject] = {}
     for floor in claim.canonical_floors:
         if type(floor) is not LiveCanonicalFloorSurfaceObject:
@@ -116,7 +129,7 @@ def build_live_floor_finish_area_source_traces(
                 "canonical_floors must contain LiveCanonicalFloorSurfaceObject"
             )
         floor_id = _clean(floor.canonical_floor_id)
-        if not floor_id:
+        if not floor_id or floor_id not in claimed_floor_ids:
             continue
         if floor_id in floors_by_id:
             raise SourceClosedRunConflictError(
@@ -661,23 +674,12 @@ def build_live_floor_finish_area_source_traces(
                     if getattr(r, "canonical_room_id", None) == floor.room_entity_id
                 )
                 if len(owners_for_walls) == 1:
-                    r_walls = owners_for_walls[0]
-                    b_ids = getattr(r_walls, "canonical_bounding_wall_ids", ()) or getattr(r_walls, "bounding_wall_ids", ())
-                    if b_ids:
-                        for wid in b_ids:
-                            if wid not in wall_by_id:
-                                raise SourceClosedRunConflictError(
-                                    f"floor-finish bounding wall authority incomplete: {quantity.quantity_id}"
-                                )
-                            w_obj = wall_by_id[wid]
-                            if getattr(w_obj, "role", None) != "internal_finished_wall_face":
-                                raise SourceClosedRunConflictError(
-                                    f"floor-finish bounding wall is not an internal finished face: {wid}"
-                                )
-                            if getattr(w_obj, "physical_identity_resolved", None) is not True:
-                                raise SourceClosedRunConflictError(
-                                    f"floor-finish bounding wall physical identity is not resolved: {wid}"
-                                )
+                    failure = floor_finish_boundary_wall_failure(
+                        owners_for_walls[0], wall_by_id, quantity_id=quantity.quantity_id,
+                    )
+                    if failure is not None:
+                        _, message = failure
+                        raise SourceClosedRunConflictError(message)
             owners = tuple(
                 room for room in claim.canonical_rooms
                 if getattr(room, "canonical_room_id", None) == floor.room_entity_id
