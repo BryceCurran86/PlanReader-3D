@@ -39,6 +39,6 @@ export function photoTexture(name:ArchitecturalMap):THREE.Texture|null{
  const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=colour?THREE.SRGBColorSpace:THREE.NoColorSpace;
  texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.anisotropy=4;texture.magFilter=THREE.LinearFilter;texture.minFilter=THREE.LinearMipmapLinearFilter;
  let disposed=false;texture.addEventListener("dispose",()=>{disposed=true;});
- void sourceFor(name).then(source=>{if(!disposed){texture.source=source;texture.needsUpdate=true;}}).catch(error=>console.error(error));
+ void sourceFor(name).then(source=>{if(!disposed){texture.image=source.data;texture.needsUpdate=true;}}).catch(error=>console.error(error));
  return texture;
 }

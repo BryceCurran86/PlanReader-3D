@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import {photoTexture} from "./architecturalAssets.ts";
 export type DetailPattern="plaster"|"plank"|"grain"|"tile"|"woven"|"fleck"|"stone"|"roof";
 const SIZE=256;
 const noise=(x:number,y:number)=>((Math.imul(x+197,374761393)^Math.imul(y+123,668265263))>>>0)%1021/1020;
@@ -43,11 +44,11 @@ function texture(bytes:Uint8Array,colorSpace:THREE.ColorSpace){
 }
 export function materialDetailMaps(pattern:DetailPattern){const p=detailPixels(pattern);return {map:texture(p.albedo,THREE.SRGBColorSpace),bumpMap:texture(p.relief,THREE.NoColorSpace)};}
 export function createMaterialDetailLibrary(){
- const cache=new Map<DetailPattern,{map:THREE.DataTexture;bumpMap:THREE.DataTexture}>();
+ const cache=new Map<DetailPattern,ReturnType<typeof materialDetailMaps>&{normalMap?:THREE.Texture;roughnessMap?:THREE.Texture}>();
  function get(pattern:DetailPattern){
-  let pair=cache.get(pattern);if(!pair){pair=materialDetailMaps(pattern);cache.set(pattern,pair);}return pair;
+  let pair=cache.get(pattern);if(!pair){pair=materialDetailMaps(pattern);if(pattern==="plaster"){pair.normalMap=photoTexture("plaster-normal.jpg")??undefined;pair.roughnessMap=photoTexture("plaster-rough.jpg")??undefined;}cache.set(pattern,pair);}return pair;
  }
- return {get,dispose(){for(const t of cache.values()){t.map.dispose();t.bumpMap.dispose();}cache.clear();}};
+ return {get,dispose(){for(const t of cache.values()){t.map.dispose();t.bumpMap.dispose();t.normalMap?.dispose();t.roughnessMap?.dispose();}cache.clear();}};
 }
 export type MaterialDetailLibrary=ReturnType<typeof createMaterialDetailLibrary>;
 export function physicalUV(geometry:THREE.BufferGeometry,repeatX:number,repeatY:number,tangent?:readonly [number,number]){

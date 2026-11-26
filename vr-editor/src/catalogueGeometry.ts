@@ -178,7 +178,7 @@ export function finishMesh(
   const roughnessMap=photoWood?photoTexture("wood-rough.jpg"):photoPlaster?photoTexture("plaster-rough.jpg"):null;
   // Cladding relief follows the same physically scaled UV as its colour pattern.
   const profiled=["masonry","lap","rib","seam","corrugation","profiled-tile","sheet"].includes(spec.pattern);
-  const patternMap=!maps&&spec.pattern!=="solid"?makePattern(spec.pattern):null;
+  const patternMap=!maps&&!photoWood&&!photoPlaster&&spec.pattern!=="solid"?makePattern(spec.pattern):null;
   const relief=profiled?patternMap:null;
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
     color: spec.color, roughness: spec.roughness,
@@ -186,7 +186,7 @@ export function finishMesh(
     side: isRoof ? THREE.FrontSide : vertical ? (side === 1 ? THREE.FrontSide : THREE.BackSide)
       : host.material instanceof THREE.Material ? host.material.side : THREE.DoubleSide,
     map: photoWood??maps?.map??patternMap,
-    normalMap,normalScale:new THREE.Vector2(photoWood?.65:.18,photoWood?.65:.18),roughnessMap,
+    normalMap,normalScale:new THREE.Vector2(photoWood ? .65 : .18,photoWood ? .65 : .18),roughnessMap,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -1,
   }));
   if (!isRoof) mesh.position.copy(normal).multiplyScalar(target==="wall"?.0025:.0008);

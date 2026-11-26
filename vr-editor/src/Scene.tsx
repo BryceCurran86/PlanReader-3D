@@ -371,8 +371,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const fallbackSky=new THREE.Color(initialPreset.background);
     void new RGBELoader().loadAsync(architecturalAssetUrl("outdoor.hdr")).then(hdr=>{
       if(disposedScene){hdr.dispose();return;}
-      hdr.mapping=THREE.EquirectangularReflectionMapping;outdoorHdr=hdr;
-    }).catch(error=>console.error("Local architectural HDR unavailable",error));
+      hdr.mapping=THREE.EquirectangularReflectionMapping;outdoorHdr=hdr;renderer.domElement.dataset.architecturalEnvironment="loaded";
+    }).catch(error=>{if(!disposedScene)renderer.domElement.dataset.architecturalEnvironment="failed";console.error("Local architectural HDR unavailable",error);});
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local-floor");
     renderer.xr.setFramebufferScaleFactor(0.8);
@@ -2194,7 +2194,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items,renderer.xr.isPresenting];
       if(!nextMaterialKey.every((v,i)=>v===materialBudgetKey[i])){
         materialBudgetKey=nextMaterialKey;
-        for(const layer of [wallAdditionLayer,shellGroup])layer.traverse(obj=>{if(obj instanceof THREE.Mesh&&obj.material instanceof THREE.MeshStandardMaterial){const m=obj.material;const original=m.userData.originalBump??m.bumpMap;if(original)m.userData.originalBump=original;const map=budget.detail?original??null:null;if(m.bumpMap!==map){m.bumpMap=map;m.needsUpdate=true;}}});
+        for(const layer of [wallAdditionLayer,shellGroup])layer.traverse(obj=>{if(obj instanceof THREE.Mesh&&obj.material instanceof THREE.MeshStandardMaterial){const m=obj.material;const original=m.userData.originalBump??m.bumpMap;if(original)m.userData.originalBump=original;const map=budget.detail?original??null:null;if(m.bumpMap!==map){m.bumpMap=map;m.needsUpdate=true;}const originalNormal=m.userData.originalNormal??m.normalMap;if(originalNormal)m.userData.originalNormal=originalNormal;const normal=budget.detail?originalNormal??null:null;if(m.normalMap!==normal){m.normalMap=normal;m.needsUpdate=true;}}});
       }
       grid.visible = activeInspection.showGrid&&!outdoor;
       const useShadows=activeInspection.showShadows&&budget.shadows;

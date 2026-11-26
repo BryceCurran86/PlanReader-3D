@@ -125,11 +125,12 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
       new THREE.Float32BufferAttribute(vertices, 3));
     if(wallFace)geometry.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
     geometry.computeVertexNormals();
-    if(wallFace&&details)physicalUV(geometry,.4,.4,[(wall.end[0]-wall.start[0])/length,(wall.end[1]-wall.start[1])/length]);
+    const plaster=wallFace&&details?details.get("plaster"):null;
+    if(plaster){const repeat=plaster.normalMap?1:.4;physicalUV(geometry,repeat,repeat,[(wall.end[0]-wall.start[0])/length,(wall.end[1]-wall.start[1])/length]);}
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
       color:wallFace?0xffffff:color,vertexColors:wallFace, side: THREE.DoubleSide, transparent: opacity < 1, opacity, depthWrite: opacity === 1, roughness: 0.82,
     }));
-    if(wallFace&&details){const material=mesh.material as THREE.MeshStandardMaterial;material.bumpMap=details.get("plaster").bumpMap;material.bumpScale=.0012;material.roughness=.86;mesh.receiveShadow=true;mesh.castShadow=true;}
+    if(plaster){const material=mesh.material as THREE.MeshStandardMaterial;material.bumpMap=plaster.normalMap?null:plaster.bumpMap;material.normalMap=plaster.normalMap??null;material.normalScale.set(.18,.18);material.roughnessMap=plaster.roughnessMap??null;material.bumpScale=.0012;material.roughness=.86;mesh.receiveShadow=true;mesh.castShadow=true;}
     mesh.userData.catalogueWallFace = wallFace;
     if (doorId) mesh.userData.catalogueDoorLeaf = doorId;
     group.add(mesh);
