@@ -93,6 +93,33 @@ def _diagonals(page: fitz.Page) -> list[tuple[float, float, float, int, int]]:
     return sorted(strokes, key=lambda s: (s[0], s[3]))
 
 
+from collections import OrderedDict
+import threading
+
+_GREEN_DIAGONALS_CACHE_MAX = 8
+_GREEN_DIAGONALS_CACHE: "OrderedDict[tuple[str, int], tuple[tuple[float, float, float, int, int], ...]]" = OrderedDict()
+_GREEN_DIAGONALS_CACHE_LOCK = threading.Lock()
+
+
+def _diagonals_cached(
+    source_sha256: str, page_index: int, page: fitz.Page
+) -> tuple[tuple[float, float, float, int, int], ...]:
+    """Return immutable green-ink diagonal hatch strokes with bounded SHA-256+page LRU reuse."""
+    key = (source_sha256, int(page_index))
+    with _GREEN_DIAGONALS_CACHE_LOCK:
+        cached = _GREEN_DIAGONALS_CACHE.get(key)
+        if cached is not None:
+            _GREEN_DIAGONALS_CACHE.move_to_end(key)
+            return cached
+    strokes = tuple(_diagonals(page))
+    with _GREEN_DIAGONALS_CACHE_LOCK:
+        _GREEN_DIAGONALS_CACHE[key] = strokes
+        _GREEN_DIAGONALS_CACHE.move_to_end(key)
+        while len(_GREEN_DIAGONALS_CACHE) > _GREEN_DIAGONALS_CACHE_MAX:
+            _GREEN_DIAGONALS_CACHE.popitem(last=False)
+    return strokes
+
+
 def collect_native_green_hatch_exclusions(
     source_pdf_bytes: bytes, canonical_floors: Sequence[object],
 ) -> tuple[SourceGreenHatchRoomWitness, ...]:
@@ -135,7 +162,7 @@ def collect_native_green_hatch_exclusions(
             if valid and _source_polygon_is_simple(tuple(polygon)):
                 by_page.setdefault(int(page_id) - 1, []).append(floor)
         for index, floors in by_page.items():
-            strokes = _diagonals(pdf[index])
+            strokes = _diagonals_cached(digest, index, pdf[index])
             xpos = [s[0] for s in strokes]
             for floor in floors:
                 polygon = tuple(floor.polygon_pdf_pts)
