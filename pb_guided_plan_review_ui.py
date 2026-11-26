@@ -84,8 +84,24 @@ def render_guided_plan_review(st, *, workspace, page, native_trace, doc_path,
         st.caption("Choose a correction category, then Line (two points) or Outline "
                    "(room or exclusion). Select, move or delete your own shapes. "
                    "Use 'Reject an existing wall / opening candidate' to flag unwanted automatic ink.")
+        from pb_guided_plan_review_snap import build_review_snap_targets
+        snap_cache_key = f"guided_snap_targets_{scope.key}"
+        if snap_cache_key not in st.session_state:
+            targets = []
+            if overlay_matches:
+                try:
+                    targets = build_review_snap_targets(
+                        scope=scope, pdf_path=doc_path, image_bytes=image, report=report,
+                    )
+                except (ValueError, OSError, RuntimeError, TypeError, KeyError):
+                    pass  # Preserve manual editing if source snap provenance is incomplete.
+            st.session_state[snap_cache_key] = targets
+        targets = st.session_state[snap_cache_key]
+        st.caption(f"Magnetic placement: {len(targets)} source endpoint candidates plus "
+                   "your own drawn vertices. Toggle Snap or hold Alt for free placement. "
+                   "Snapping is a positioning aid, not proof of a physical wall or opening.")
         result = line_editor(image, pending[1], editor_rows(), 0.0, saved["revision"],
-                             key=prefix + "_canvas", height=760)
+                             key=prefix + "_canvas", height=760, review_snap_targets=targets)
         if result is not None:
             st.session_state[pending_key] = (saved["revision"], result)
             pending = st.session_state[pending_key]
