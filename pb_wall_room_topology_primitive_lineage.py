@@ -17,6 +17,7 @@ import copy
 import json
 import math
 import sys
+from operator import is_
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 Point = Tuple[float, float]
@@ -634,7 +635,9 @@ def _copy_json_like(value: Any) -> Any:
     if kind is list:
         return [item if type(item) in _JSON_ATOMS else _copy_json_like(item) for item in value]
     if kind is tuple:
-        return tuple([item if type(item) in _JSON_ATOMS else _copy_json_like(item) for item in value])
+        copied = [item if type(item) in _JSON_ATOMS else _copy_json_like(item) for item in value]
+        # As ``copy.deepcopy``: a tuple whose items all come back unchanged is itself returned.
+        return value if all(map(is_, copied, value)) else tuple(copied)
     if kind in _JSON_ATOMS:
         return value
     return copy.deepcopy(value)

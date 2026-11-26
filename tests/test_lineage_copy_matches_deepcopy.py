@@ -50,6 +50,8 @@ def _assert_same(copied, expected, original):
             _assert_same(copied[key], expected[key], original[key])
     elif type(expected) in (list, tuple):
         assert len(copied) == len(expected)
+        if type(expected) is tuple:  # shared exactly when deepcopy would share it
+            assert (copied is original) == (expected is original)
         if type(expected) is list:
             assert copied is not original
         for item, other, source in zip(copied, expected, original):
