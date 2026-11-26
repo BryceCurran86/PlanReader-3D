@@ -85,6 +85,7 @@ def test_only_unresolved_post_aperture_endpoints_are_navigable(tmp_path, rotatio
     path, scope, image, report = sample(tmp_path, rotation)
     unmatched = "unmatched_raw_wall_ink_terminal_needs_post_opening_review"
     report["source_wall_endpoint_aperture_review"] = {"endpoint_reviews": [
+        {"status": "ambiguous_competing_hosted_apertures", "endpoint_pdf_pts": [-1,50]},
         {"status": unmatched, "endpoint_pdf_pts": [100,75]},
         {"status": unmatched, "endpoint_pdf_pts": [100,75]},
         {"status": "source_hosted_aperture_terminal_candidate", "endpoint_pdf_pts": [200,150]},
