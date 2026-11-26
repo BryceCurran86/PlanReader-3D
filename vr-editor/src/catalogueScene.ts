@@ -16,6 +16,9 @@ import { makeItemHostId, openingFitMessage, openingHostId, timberFitsWall, workt
 import type { ItemHit, OpeningSize, PlacedItem, Vector, WallSection } from "./itemPlacement.ts";
 import { createCatalogueFixture } from "./catalogueFixtures.ts";
 import { finishMesh, trimRun } from "./catalogueGeometry.ts";
+import {architraveMitres} from "./architraveMitres.ts";
+import {skirtingEndCuts,applySkirtingCuts} from "./skirtingMitres.ts";
+import type {WallCornerJoins} from "./wallCornerJoin.ts";
 import { createEntryAssembly, createTimberSection } from "./exteriorGeometry.ts";
 import { createDesignAssembly, createOpeningStyle } from "./extensionGeometry.ts";
 import { SITE_HOST_ID } from "./itemPlacement.ts";
@@ -34,6 +37,7 @@ export type CatalogueHost = {
   roofEdges?: RoofEdge[];
   ceilingDraft?: CeilingDraft;
   halfThickness?:number;
+  cornerJoins?:WallCornerJoins;
   finishFaces?:{left:THREE.Mesh;right:THREE.Mesh};
 };
 
@@ -45,7 +49,7 @@ function xy(point: PlanPoint, y = 0) {
   return new THREE.Vector3(point[0], y, point[1]);
 }
 
-export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): CatalogueHost[] {
+export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group,cornerJoins?:WallCornerJoins): CatalogueHost[] {
   const hosts: CatalogueHost[] = [];
   const face = group.children.find(child=>child.userData.catalogueMountFace) ?? group.children.find(child => child.userData.catalogueWallFace);
   const floorGaps: [number, number][] = [];
@@ -81,7 +85,7 @@ export function draftCatalogueHosts(wall: WallVisual, group: THREE.Group): Catal
   if (face instanceof THREE.Mesh) {
     const left=group.children.find(c=>c.userData.draftFinishFace==="left"),right=group.children.find(c=>c.userData.draftFinishFace==="right");
     const finishFaces=left instanceof THREE.Mesh&&right instanceof THREE.Mesh?{left,right}:undefined;
-    hosts.push({ id: makeItemHostId("draft-wall", wall.proposalId), target: "wall", mesh: face, finishFaces,halfThickness:wallAssembly(wall.assembly).thicknessMm/2000,
+    hosts.push({ id: makeItemHostId("draft-wall", wall.proposalId), target: "wall", mesh: face, finishFaces,cornerJoins,halfThickness:wallAssembly(wall.assembly).thicknessMm/2000,
       run: { start: wall.start, end: wall.end, heightM: wall.heightM, gaps: floorGaps, apertures } });
   }
   return hosts;
@@ -119,36 +123,33 @@ function trimMount(host: CatalogueHost, item: CatalogueItem, normal: THREE.Vecto
   const spec = item.visual;
   if (spec.kind !== "trim") return group;
   const vertical = new THREE.Vector3(0, 1, 0);
-  const add = (a: THREE.Vector3, b: THREE.Vector3, across: THREE.Vector3) => {
-    const mesh = trimRun(a, b, across, normal, spec);
-    if (mesh) group.add(mesh);
-  };
   if (host.run) {
     const { start, end, gaps } = host.run;
     const length = planLength(start, end);
     const origin = xy(start);
     const along = xy(end).sub(origin).normalize();
     const at = (distance: number) => origin.clone().addScaledVector(along, distance);
+    const cuts=host.halfThickness?skirtingEndCuts(start,end,host.halfThickness,normal,host.cornerJoins):null;
+    const segment=(from:number,to:number)=>{const a=at(from),b=at(to),mesh=trimRun(a,b,vertical,normal,spec);if(!mesh)return;applySkirtingCuts(mesh,a,b,normal,spec.depthM,cuts,from===0,to===length);group.add(mesh);};
     let left = 0;
     for (const [from, until] of gaps) {
-      add(at(left), at(from), vertical);
+      segment(left,from);
       left = until;
     }
-    add(at(left), at(length), vertical);
+    segment(left,length);
   }
   if (host.opening) {
     const { start, end, bottom, top } = host.opening;
     const left = xy(start, top), right = xy(end, top);
-    const across = right.clone().sub(left).normalize();
-    add(xy(start, bottom), left, across.clone().negate());
-    add(xy(end, bottom), right, across);
-    add(left.addScaledVector(across, -spec.widthM), right.addScaledVector(across, spec.widthM), vertical);
+    const mitres=architraveMitres(left,right,bottom,normal,spec);
+    group.add(...mitres.children.slice());
   }
   return group;
 }
 
 function dispose(root: THREE.Object3D) {
   const materials = new Set<THREE.Material>();
+  const textures = new Set<THREE.Texture>();
   root.traverse(object => {
     if (!(object instanceof THREE.Mesh)) return;
     object.geometry.dispose();
@@ -156,9 +157,10 @@ function dispose(root: THREE.Object3D) {
     for (const material of faces) materials.add(material);
   });
   for (const material of materials) {
-    if (material instanceof THREE.MeshStandardMaterial) {material.map?.dispose();material.bumpMap?.dispose();material.roughnessMap?.dispose();}
+    if (material instanceof THREE.MeshStandardMaterial) for(const texture of [material.map,material.bumpMap,material.roughnessMap])if(texture)textures.add(texture);
     material.dispose();
   }
+  for(const texture of textures)texture.dispose();
 }
 
 function surfaceKey(entry: PlacedItem) {

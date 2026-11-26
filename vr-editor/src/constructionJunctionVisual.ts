@@ -13,6 +13,7 @@ const length=(w:WallVisual)=>planLength(w.start,w.end);
 export function junctionBacking(walls:readonly WallVisual[]):Backing[]{
  const result:Backing[]=[],seen=new Set<string>();
  const groups=new Map<string,WallVisual[]>();
+ const layouts=new Map<WallVisual,ReturnType<typeof nominalFrameLayout>|null>();
  for(const w of walls){
   const l=length(w);
   if(!timber(w)||!Number.isFinite(l)||l<.15||l>200||!Number.isFinite(w.heightM)||w.heightM<.2||w.heightM>20)continue;
@@ -25,9 +26,11 @@ export function junctionBacking(walls:readonly WallVisual[]):Backing[]{
   // Do not put backing through an opening, even above/below a partial-height opening.
   if((host.openings??[]).some(o=>openingFits(host,o)&&o.offsetM<x+width/2+EPS&&o.offsetM+o.widthM>x-width/2-EPS))return;
   // Existing full-depth studs/plates already supply backing in this location.
-  const holes=(host.openings??[]).filter(o=>openingFits(host,o)).map(o=>({x0:o.offsetM,x1:o.offsetM+o.widthM,y0:o.sillHeightM,y1:o.sillHeightM+o.heightM}));
-  let existing:ReturnType<typeof nominalFrameLayout>;
-  try{existing=nominalFrameLayout(l,host.heightM,holes);}catch{return;}
+  if(!layouts.has(host)){
+   const holes=(host.openings??[]).filter(o=>openingFits(host,o)).map(o=>({x0:o.offsetM,x1:o.offsetM+o.widthM,y0:o.sillHeightM,y1:o.sillHeightM+o.heightM}));
+   try{layouts.set(host,nominalFrameLayout(l,host.heightM,holes));}catch{layouts.set(host,null);}
+  }
+  const existing=layouts.get(host);if(!existing)return;
   if(existing.some(m=>["stud","king","trimmer","end-backing","cripple"].includes(m.role)&&m.x0<x+width/2-EPS&&m.x1>x-width/2+EPS))return;
   const k=[host.proposalId,Math.round(x*1e6),side].join(":");
   if(seen.has(k))return;seen.add(k);
