@@ -148,6 +148,43 @@ def _query_midpoint_grid(
     return tuple(sorted(found))
 
 
+def _mark_parallel_neighbours(
+    segments: Sequence[Segment],
+    local: Sequence[int],
+    marked: set[int],
+    *,
+    max_distance: float,
+) -> None:
+    """Mark every segment of ``local`` that has a parallel segment of ``local`` within ``max_distance``.
+
+    Same members as testing every pair with the legacy predicates. A marked segment cannot change, so only unmarked
+    ones search; their neighbours are visited outwards in centre-x order (a partner is never further in x than in
+    straight-line distance), stopping at the first one.
+    """
+    ordered = sorted(local, key=lambda index: segments[index].cx)
+    centres = [segments[index].cx for index in ordered]
+    reach = max_distance + 1e-6
+    for position, index in enumerate(ordered):
+        segment = segments[index]
+        if id(segment) in marked:
+            continue
+        centre = centres[position]
+        for step in (-1, 1):
+            other = position + step
+            while 0 <= other < len(ordered) and not abs(centres[other] - centre) > reach:
+                neighbour = segments[ordered[other]]
+                if (
+                    legacy._segments_parallel(segment, neighbour)
+                    and legacy._segment_distance(segment, neighbour) <= max_distance
+                ):
+                    marked.add(id(segment))
+                    marked.add(id(neighbour))
+                    break
+                other += step
+            if id(segment) in marked:
+                break
+
+
 def detect_door_candidates_indexed(
     segments: Sequence[Segment],
     wall_lines: Sequence[WallLine],
@@ -162,6 +199,7 @@ def detect_door_candidates_indexed(
     max_leaf = legacy._physical_pt(1.5, pt_per_m, 150.0)
     proximity = legacy._physical_pt(0.6, pt_per_m, 30.0)
     tag_radius = legacy._physical_pt(0.6, pt_per_m, 120.0)
+    parallel_distance = legacy._physical_pt(2.0, pt_per_m, 100.0)
 
     candidate_leaf_indexes = tuple(
         index
@@ -193,17 +231,9 @@ def detect_door_candidates_indexed(
             ) <= proximity
         )
         local_by_wall.append(local)
-        for left_pos, left_index in enumerate(local):
-            left = segments[left_index]
-            for right_index in local[left_pos + 1 :]:
-                right = segments[right_index]
-                if (
-                    legacy._segments_parallel(left, right)
-                    and legacy._segment_distance(left, right)
-                    <= legacy._physical_pt(2.0, pt_per_m, 100.0)
-                ):
-                    wall_local_parallel.add(id(left))
-                    wall_local_parallel.add(id(right))
+        _mark_parallel_neighbours(
+            segments, local, wall_local_parallel, max_distance=parallel_distance
+        )
 
     for wall_pos, wall_line in enumerate(wall_lines):
         wall = wall_line.segment
