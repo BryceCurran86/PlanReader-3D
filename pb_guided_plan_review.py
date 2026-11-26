@@ -23,6 +23,7 @@ KINDS = (
     ("room_outline", "Room outline for review", "#a855f7", "polygon"),
     ("exclusion", "Exclude from measured scope", "#dc2626", "polygon"),
     ("dimension_witness", "Known dimension line", "#0891b2", "line"),
+    ("reject_candidate", "Reject an existing wall / opening candidate", "#dc2626", "line"),
 )
 ISSUES = {
     "exterior": "Check the external footprint (include garage, exclude porch / alfresco where applicable)",
@@ -226,6 +227,8 @@ def load_review(connect, scope):
 
 def save_review(connect, scope, *, expected_revision, shapes, answers):
     """Explicit local save with optimistic locking; never modifies takeoff rows."""
+    if type(expected_revision) is not int or expected_revision < 0:
+        raise ValueError("Invalid review revision")
     clean_shapes = normalise_editor_shapes(shapes)
     if not isinstance(answers, dict):
         raise ValueError("Invalid review answers")
