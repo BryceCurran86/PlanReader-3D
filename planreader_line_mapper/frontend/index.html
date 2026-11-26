@@ -46,7 +46,8 @@
     activeRowId: null, tool: 'line', drawing: null,
     selectedId: null, hover: null, natW: 0, natH: 0, cw: 0, ch: 0, imgEl: null, review: false,
     zoom: 1, fitW: 1100, labels: false, drag: null,
-    snapMode: false, snapEnabled: true, snapTargets: [], snapHit: null
+    snapMode: false, snapEnabled: true, snapTargets: [], snapHit: null,
+    reviewFocus: null, focusPending: false, resetView: false
   };
 
   function post(type, payload) {
@@ -358,6 +359,22 @@
       }
       ctx.restore();
     }
+    if (state.snapMode && state.reviewFocus) {
+      var fx = state.reviewFocus.x / 100 * w, fy = state.reviewFocus.y / 100 * h;
+      var fr = cv.getBoundingClientRect();
+      var factor = fr.width > 0 ? w / fr.width : 1;
+      var r = 15 * factor;
+      ctx.save();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 6 * factor;
+      ctx.beginPath(); ctx.arc(fx, fy, r, 0, 2*Math.PI); ctx.stroke();
+      ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 3 * factor;
+      ctx.beginPath(); ctx.arc(fx, fy, r, 0, 2*Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(fx-r*1.6, fy); ctx.lineTo(fx-r, fy);
+      ctx.moveTo(fx+r, fy); ctx.lineTo(fx+r*1.6, fy);
+      ctx.moveTo(fx, fy-r*1.6); ctx.lineTo(fx, fy-r);
+      ctx.moveTo(fx, fy+r); ctx.lineTo(fx, fy+r*1.6); ctx.stroke();
+      ctx.restore();
+    }
     if (state.snapMode && state.snapHit) {
       ctx.save();
       ctx.strokeStyle = '#00d1b2'; ctx.lineWidth = 2;
@@ -658,7 +675,16 @@
     }
   }
 
+  function reviewFocusScroll(point, width, height, clientWidth, clientHeight) {
+    return {
+      left: Math.max(0, Math.min(Math.max(0, width-clientWidth), point.x*width/100-clientWidth/2)),
+      top: Math.max(0, Math.min(Math.max(0, height-clientHeight), point.y*height/100-clientHeight/2))
+    };
+  }
+
   function render() {
+    var priorStage = state.snapMode && !state.resetView ? root.querySelector('.stage') : null;
+    var priorScroll = priorStage ? {left:priorStage.scrollLeft, top:priorStage.scrollTop} : null;
     root.innerHTML = '';
     if (!state.imageKey) {
       var h0 = document.createElement('div');
@@ -860,6 +886,7 @@
 
     var img = new Image();
     img.onload = function () {
+      if (canvasEl() !== cv) return; // ignore replaced canvas image load
       state.natW = img.naturalWidth || 0;
       state.natH = img.naturalHeight || 0;
       var fit = fitDisplay(state.natW, state.natH);
@@ -875,7 +902,20 @@
       cv.addEventListener('pointercancel', function () { if (state.drag) { state.drag = null; postValue(); } state.hover = null; state.snapHit = null; updateLive(); draw(); });
       cv.addEventListener('touchstart', function (ev) { if (ev.touches.length === 1) ev.preventDefault(); }, { passive: false });
       state.fitW = Math.min(1100, state.cw);
+      if (state.snapMode && state.focusPending && state.reviewFocus) {
+        state.zoom = Math.max(state.zoom || 1, 2.25);
+      }
       applyZoom();
+      if (state.snapMode && state.focusPending && state.reviewFocus) {
+        var display = cv.getBoundingClientRect();
+        var pos = reviewFocusScroll(state.reviewFocus, display.width, display.height,
+                                    stage.clientWidth, stage.clientHeight);
+        stage.scrollLeft = pos.left; stage.scrollTop = pos.top;
+        state.focusPending = false;
+      } else if (priorScroll) {
+        stage.scrollLeft = priorScroll.left; stage.scrollTop = priorScroll.top;
+      }
+      state.resetView = false;
       updateChip();
       updateLive();
       draw();
@@ -976,6 +1016,18 @@
     var newPx = num(args.px_per_m, 0);
     var newActive = parseInt(args.active_row_id, 10);
     var newSnapMode = args.review_snap_mode === true;
+    var nextFocus = newSnapMode && args.review_focus && typeof args.review_focus.id === 'string'
+      && Number.isFinite(args.review_focus.x) && Number.isFinite(args.review_focus.y)
+      && args.review_focus.x >= 0 && args.review_focus.x <= 100
+      && args.review_focus.y >= 0 && args.review_focus.y <= 100 ? args.review_focus : null;
+    var pageChanged = image !== state.imageKey;
+    if (pageChanged) state.resetView = true;
+    if (nextFocus && (pageChanged || !state.reviewFocus || nextFocus.id !== state.reviewFocus.id)) {
+      state.focusPending = true;
+    } else if (!nextFocus) {
+      state.focusPending = false;
+    }
+    state.reviewFocus = nextFocus;
     if (newSnapMode !== state.snapMode) { state.snapEnabled = true; state.snapHit = null; }
     state.snapMode = newSnapMode;
     state.snapTargets = newSnapMode && Array.isArray(args.review_snap_targets) ?
