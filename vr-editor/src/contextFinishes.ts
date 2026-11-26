@@ -1,7 +1,7 @@
 import {ITEM_CATALOGUE,getCatalogueItem,catalogueGroupLabel} from "./itemCatalogue.ts";
 import type {CatalogueGroup,CatalogueItem,ItemTarget} from "./itemCatalogue.ts";
-import type {ItemHit,PlacedItem} from "./itemPlacement.ts";
-export type FinishContext={hit:ItemHit;entry?:PlacedItem};
+import type {ItemHit,PlacedItem,Vector} from "./itemPlacement.ts";
+export type FinishContext={hit:ItemHit;entry?:PlacedItem;worldPoint?:Vector};
 const priority:CatalogueGroup[]=["paint","substrates","facades","doors","entry","sliding-doors","windows","tapware","cabinets","lights","electrical","floors","walls","bathroom","skirting","architraves","boards","roofing","window-coverings"];
 export function sameFixtureFamily(a:CatalogueItem,b:CatalogueItem){
  const x=a.visual,y=b.visual;

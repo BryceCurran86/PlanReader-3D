@@ -38,6 +38,7 @@ import { LocalOutlinePanel } from "./LocalOutlinePanel";
 import {PreciseCommandPanel} from "./PreciseCommandPanel";
 import {localBuildingShell,DEFAULT_SHELL} from "./connectedDraftShell";
 import {starterManifest,starterBuild,starterBounds,STARTER_SHELL} from "./starterHouse";
+import {starterFurnishings} from "./starterFurnishings";
 import type {DraftPickKind} from "./buildScene";
 import type {ShellSettings} from "./connectedDraftShell";
 import { PcVr2SetupPanel } from "./PcVr2SetupPanel";
@@ -106,7 +107,7 @@ export function App() {
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
   const [previewLights,setPreviewLights]=useState(true);
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
-  const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("smooth");
+  const [surfaceDetail, setSurfaceDetail] = useState<SurfaceDetail>("subtle");
   const [inspection, setInspection] = useState<InspectionSettings>({ ...DEFAULT_INSPECTION });
   const [sourceSheet, setSourceSheet] = useState("");
   const [cameraRequest, setCameraRequest] = useState<{mode: CameraView; focus: FocusTarget; serial: number}>({mode:"isometric",focus:"scene",serial:0});
@@ -198,7 +199,7 @@ export function App() {
     setDraftState(freshDrafts(result)); setReviewNotes(freshReviewNotes(result));
     setWallMoveState(freshWallMoves(result)); setMoveMode("inspect"); setMoveError(null);
     setTeleportMode(false); setTeleportMessage(null);
-    setPlaced(origin==="starter"?{scene:result,build:starterBuild(result)}:null); setCatalogueSession(null); setResize(null);
+    setPlaced(origin==="starter"?{scene:result,build:starterBuild(result)}:null); setCatalogueSession(origin==="starter"?{scene:result,itemId:null,turn:0,draft:starterFurnishings(result)}:null); setResize(null);
     setShellStore(origin==="starter"?{scene:result,settings:STARTER_SHELL}:null);
     setAddedWallSketch(null); setAddedWallBatchSketches([]); setWallReview(null);
     setSelectedId(null); setClipboardMessage(null); setCaptureStatus(null);
@@ -794,7 +795,7 @@ export function App() {
               <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                outdoor={outdoor} onOutdoor={setOutdoor} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} detail={surfaceDetail} inspection={inspection}
+                outdoor={outdoor} onOutdoor={setOutdoor} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
@@ -1027,7 +1028,7 @@ export function App() {
             <label><input type="checkbox" checked={previewLights} onChange={e=>setPreviewLights(e.currentTarget.checked)}/> Local fixture lights (preview)</label>
             <label htmlFor="render-quality">Render quality
               <select id="render-quality" value={renderQuality} onChange={event => setRenderQuality(event.currentTarget.value as RenderQuality)}>
-                <option value="balanced">Balanced</option><option value="high">High fidelity</option>
+                <option value="performance">Performance · lightest</option><option value="balanced">Realistic · recommended</option><option value="high">Ultra · PC VR</option>
               </select>
             </label>
             <label htmlFor="surface-detail">Wall surface detail
