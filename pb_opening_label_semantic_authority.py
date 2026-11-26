@@ -1,9 +1,10 @@
 """Authenticated semantic label evidence for proven physical openings."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
 from pb_opening_label_dimension_authority import (
@@ -224,10 +225,47 @@ class OpeningLabelSemanticProducer:
         self._bifold_descriptor_shadow = bifold_descriptor_shadow
         self._source = source
         self._physical = source.physical_opening_authority()
+        self._page_lines_cache: dict[tuple[Any, ...], tuple[tuple[Any, ...], dict[str, tuple[str, tuple[str, ...]]], set[str]]] = {}
 
     @classmethod
     def from_source_visibility_producer(cls, source, *, bifold_descriptor_shadow: bool = False):
         return cls(source, bifold_descriptor_shadow=bifold_descriptor_shadow)
+
+    def _cached_page_lines_and_legend(self, opening):
+        published = self._source.published_snapshot_for_revision(opening.revision_id)
+        if published is None or published.snapshot.snapshot_id != opening.snapshot_id:
+            return (), {}, set()
+        integrity = self._source.text_integrity_authority()
+        receipts = getattr(integrity, "_receipts", None)
+        if isinstance(receipts, Mapping):
+            page_text_ids = integrity.observation_ids_with_receipt_page(
+                opening.snapshot_id, published.text_observation_ids, opening.page_id
+            )
+            snap_id = str(opening.snapshot_id)
+            receipt_refs = tuple(
+                receipts.get((snap_id, oid)) for oid in page_text_ids
+            )
+            cache_key = (
+                opening.document_id,
+                opening.revision_id,
+                opening.source_sha256,
+                snap_id,
+                str(opening.page_id),
+                page_text_ids,
+                receipt_refs,
+            )
+            cached = self._page_lines_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            lines = _trusted_native_lines(self._source, opening)
+            legend, legend_conflicts = _legend_semantics(lines)
+            if len(self._page_lines_cache) >= 64:
+                self._page_lines_cache.clear()
+            self._page_lines_cache[cache_key] = (lines, legend, legend_conflicts)
+            return lines, legend, legend_conflicts
+        lines = _trusted_native_lines(self._source, opening)
+        legend, legend_conflicts = _legend_semantics(lines)
+        return lines, legend, legend_conflicts
 
     def publish_scope(self, selector: ObservationSelector) -> OpeningLabelSemanticResult:
         physical = self._physical.prove_existence(selector)
@@ -245,8 +283,7 @@ class OpeningLabelSemanticProducer:
         if not primaries:
             return OpeningLabelSemanticResult(EvidenceResolutionStatus.ABSTAINED, (OPENING_LABEL_SEMANTIC_UNAVAILABLE,))
 
-        lines = _trusted_native_lines(self._source, opening)
-        legend, legend_conflicts = _legend_semantics(lines)
+        lines, legend, legend_conflicts = self._cached_page_lines_and_legend(opening)
         candidates = []
         for _block_no, _line_no, line in lines:
             if not _label_matches_owned_opening(line, primaries, siblings):

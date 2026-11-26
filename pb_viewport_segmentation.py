@@ -37,6 +37,8 @@ absent or False the output is unchanged.
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
+from collections import OrderedDict
+import copy
 from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
@@ -3445,6 +3447,49 @@ def _native_multipath_semantic_frame_candidates_shadow(
     return sorted(set(new))
 
 
+_SEGMENT_PAGE_VIEWPORTS_CACHE: OrderedDict[tuple[Any, ...], tuple[SegmentedViewport, ...]] = OrderedDict()
+_SEGMENT_PAGE_VIEWPORTS_CACHE_MAX = 64
+
+
+def _segment_page_viewports_cache_key(
+    page: Any,
+    *,
+    page_number: int,
+    source_connected_table_cell_shadow: bool,
+    source_native_multipath_semantic_frame_shadow: bool,
+    source_connected_text_cell_plan_frame_shadow: bool,
+) -> Optional[tuple[Any, ...]]:
+    if fitz is None or not isinstance(page, fitz.Page):
+        return None
+    doc = getattr(page, "parent", None)
+    if doc is None or getattr(doc, "is_dirty", True):
+        return None
+    try:
+        xref = int(page.xref)
+        if xref <= 0:
+            return None
+        rect = page.rect
+        content_sha = hashlib.sha256(bytes(page.read_contents() or b"")).digest()
+        xobjects = tuple(page.get_xobjects() or ())
+        fonts = tuple(page.get_fonts() or ())
+        return (
+            int(page_number),
+            int(page.number),
+            xref,
+            int(getattr(page, "rotation", 0) or 0),
+            (float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)),
+            int(doc.page_count),
+            content_sha,
+            xobjects,
+            fonts,
+            source_connected_table_cell_shadow,
+            source_native_multipath_semantic_frame_shadow,
+            source_connected_text_cell_plan_frame_shadow,
+        )
+    except Exception:
+        return None
+
+
 def segment_page_viewports(
     page: Any, *, page_number: int,
     source_connected_table_cell_shadow: bool = False,
@@ -3459,6 +3504,39 @@ def segment_page_viewports(
         raise ValueError("source_table_shadow_requires_explicit_bool")
     if type(source_connected_text_cell_plan_frame_shadow) is not bool:
         raise ValueError("source_plan_frame_shadow_requires_explicit_bool")
+    cache_key = _segment_page_viewports_cache_key(
+        page,
+        page_number=page_number,
+        source_connected_table_cell_shadow=source_connected_table_cell_shadow,
+        source_native_multipath_semantic_frame_shadow=source_native_multipath_semantic_frame_shadow,
+        source_connected_text_cell_plan_frame_shadow=source_connected_text_cell_plan_frame_shadow,
+    )
+    if cache_key is not None:
+        cached = _SEGMENT_PAGE_VIEWPORTS_CACHE.get(cache_key)
+        if cached is not None:
+            _SEGMENT_PAGE_VIEWPORTS_CACHE.move_to_end(cache_key)
+            return _stamp_segment_page_viewports_product(copy.deepcopy(list(cached)))
+    result = _segment_page_viewports_uncached(
+        page,
+        page_number=page_number,
+        source_connected_table_cell_shadow=source_connected_table_cell_shadow,
+        source_native_multipath_semantic_frame_shadow=source_native_multipath_semantic_frame_shadow,
+        source_connected_text_cell_plan_frame_shadow=source_connected_text_cell_plan_frame_shadow,
+    )
+    if cache_key is not None:
+        _SEGMENT_PAGE_VIEWPORTS_CACHE[cache_key] = tuple(copy.deepcopy(result))
+        _SEGMENT_PAGE_VIEWPORTS_CACHE.move_to_end(cache_key)
+        while len(_SEGMENT_PAGE_VIEWPORTS_CACHE) > _SEGMENT_PAGE_VIEWPORTS_CACHE_MAX:
+            _SEGMENT_PAGE_VIEWPORTS_CACHE.popitem(last=False)
+    return result
+
+
+def _segment_page_viewports_uncached(
+    page: Any, *, page_number: int,
+    source_connected_table_cell_shadow: bool = False,
+    source_native_multipath_semantic_frame_shadow: bool = False,
+    source_connected_text_cell_plan_frame_shadow: bool = False,
+) -> list[SegmentedViewport]:
     try:
         calibration = calibrate_viewport_layout(page)
     except NativePageFrameUnresolved:
