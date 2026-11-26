@@ -6527,7 +6527,14 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
         }
     native_trace=st.session_state[native_trace_key]
     zones=lquery("SELECT * FROM mapped_zones WHERE page_id=? ORDER BY id",(int(page["id"]),))
-    tab0,tab1,tab2,tab3=st.tabs(["Draw measurements","Scale","Map zone","Saved zones"])
+    tab_review,tab0,tab1,tab2,tab3=st.tabs(["Guided plan review","Draw measurements","Scale","Map zone","Saved zones"])
+    with tab_review:
+        from pb_guided_plan_review_ui import render_guided_plan_review
+        render_guided_plan_review(
+            st, workspace=workspace, page=page, native_trace=native_trace,
+            doc_path=doc_path, registered_sha=doc_rows[0].get("sha256") if doc_rows else None,
+            connect=local_connect, line_editor=plan_line_editor,
+        )
     with tab0:
         pxpm=to_float(page.get("px_per_m"))
         st.markdown("### New source-native wall trace — first stage")
