@@ -439,7 +439,7 @@ export function App() {
       if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect"){setToolMessage("Finish the active edit first.");return;}
       const key=scopeKey(manifest),walls=[...activeBatchSketches,...buildState.walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])];
       const newId=newPlacementId("item");
-      const apply=(draft:ItemDraft)=>editLocalFloorFixture(draft,key,action.id,action.edit,walls,newId);
+      const apply=(draft:ItemDraft)=>editLocalFloorFixture(draft,key,action.id,action.edit,walls,newId,action.move);
       const result=apply(catalogue.draft);
       if(result.draft===catalogue.draft){setToolMessage(result.reason);return;}
       const before=currentItemPlacements(catalogue.draft.items,manifest,walls,isDemo,buildState.ceilings);

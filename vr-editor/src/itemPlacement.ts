@@ -317,7 +317,7 @@ export function itemScheduleCsv(rows: ItemScheduleRow[]) {
 }
 
 /** Local-design fixture editing only; no modification of source-owned geometry. */
-export type FixtureEdit="rotate"|"left"|"right"|"forward"|"back"|"duplicate";
+export type FixtureEdit="rotate"|"left"|"right"|"forward"|"back"|"duplicate"|"move-to";
 export function canEditFloorFixture(entry:PlacedItem){
  return entry.target==="floor"&&entry.hostId.startsWith("draft-floor:")&&getCatalogueItem(entry.itemId)?.visual.kind==="fixture";
 }
@@ -337,11 +337,11 @@ function crossesRect(wall:WallVisual,r:FixtureRect){
  }
  return true;
 }
-export function editLocalFloorFixture(draft:ItemDraft,sourceKey:string,id:string,action:FixtureEdit,walls:readonly WallVisual[],newId?:string):{draft:ItemDraft;reason:string}{
+export function editLocalFloorFixture(draft:ItemDraft,sourceKey:string,id:string,action:FixtureEdit,walls:readonly WallVisual[],newId?:string,move?:{from:Vector;to:[number,number]}):{draft:ItemDraft;reason:string}{
  const reject=(reason:string)=>({draft,reason});
  const old=draft.items.find(p=>p.id===id);
  if(draft.sourceKey!==sourceKey||!old||!canEditFloorFixture(old))return reject("Select a floor-mounted fitting on an editable local floor.");
- if(!["rotate","left","right","forward","back","duplicate"].includes(action))return reject("Unknown fitting edit.");
+ if(!["rotate","left","right","forward","back","duplicate","move-to"].includes(action))return reject("Unknown fitting edit.");
  const level=old.hostId.slice("draft-floor:".length),peers=walls.filter(w=>w.levelId===level&&w.scopeKey===sourceKey);
  const external=peers.filter(w=>profileDetails(w.assembly).role==="external");
  const ring=localOutline((external.length?external:peers) as import("./buildPlacement.ts").PlacedWall[]);
@@ -351,7 +351,11 @@ export function editLocalFloorFixture(draft:ItemDraft,sourceKey:string,id:string
  if(duplicate&&(!newId||draft.items.length>=300||draft.items.some(p=>p.id===newId)))return reject("Cannot add another fitting.");
  if(duplicate&&draft.items.some(p=>p.hostId===worktopId(id)))return reject("Copy fittings with attached worktop items individually.");
  const next:PlacedItem={...old,id:duplicate?newId!:old.id,point:[...old.point]};
- if(action==="rotate")next.turn=(old.turn+1)%4;
+ if(action==="move-to"){
+  if(!move||!move.to.every(n=>Number.isFinite(n)&&Math.abs(n)<=10000)||move.from.some((n,i)=>Math.abs(n-old.point[i])>1e-6))return reject("Fitting changed during the grab; select it again.");
+  next.point[0]=move.to[0];next.point[2]=move.to[1];
+  if(Math.hypot(next.point[0]-old.point[0],next.point[2]-old.point[2])<.025)return reject("Hold trigger and move the fitting to a new position.");
+ }else if(action==="rotate")next.turn=(old.turn+1)%4;
  else if(action==="left")next.point[0]-=.1;
  else if(action==="right")next.point[0]+=.1;
  else if(action==="forward")next.point[2]-=.1;
@@ -368,5 +372,5 @@ export function editLocalFloorFixture(draft:ItemDraft,sourceKey:string,id:string
  }
  // Keep the original position in the list so worktop children remain bound
  // to their parent and continue to inherit the parent's transform.
- return {draft:checkpoint(draft,duplicate?[...draft.items,next]:draft.items.map(p=>p.id===id?next:p)),reason:duplicate?"Fitting duplicated.":action==="rotate"?"Fitting rotated 90° extra.":"Fitting moved 100 mm."};
+ return {draft:checkpoint(draft,duplicate?[...draft.items,next]:draft.items.map(p=>p.id===id?next:p)),reason:duplicate?"Fitting duplicated.":action==="rotate"?"Fitting rotated 90°.":action==="move-to"?"Fitting moved.":"Fitting moved 100 mm."};
 }

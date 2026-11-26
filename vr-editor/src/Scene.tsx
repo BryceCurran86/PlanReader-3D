@@ -65,7 +65,7 @@ import {layerVisible,editableSurfaceVisible,draftWallLayerVisible,cycleLayer,ite
 import type {LayerOverrides} from "./constructionLayers";
 import type { ImmersiveBudget } from "./vrAssemblyStudy";
 import type { CatalogueItem } from "./itemCatalogue";
-import { localFloorHostId, ceilingDraftHostId, itemGuide, makeItemHostId } from "./itemPlacement";
+import { localFloorHostId, ceilingDraftHostId, itemGuide, makeItemHostId,canEditFloorFixture } from "./itemPlacement";
 import type { ItemHit, PlacedItem } from "./itemPlacement";
 import { evaluateSourceFloorTeleport,describeTeleportReason } from "./verifiedTeleport";
 import { scopeKey } from "./reviewDraft";
@@ -1313,7 +1313,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function draftGesture() {
       const { buildState, buildLevel } = build.current;
       if (resize.current.projection||resize.current.enabled||itemControls.current.active) return null;
-      if(interaction.current.mode==="inspect"&&!teleportSettings.current.teleportMode){
+      if(interaction.current.mode==="inspect"&&!multiSelect&&!teleportSettings.current.teleportMode){
         const shape=selectedHandleShape();
         const handle=shape&&editHandles.group.visible?pickDraftEditHandle(shape,raycaster.ray):null;
         if(handle)return handle;
@@ -1474,6 +1474,16 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         [head.x,head.y,head.z],
       );
     }
+    type FixtureGrab={entry:PlacedItem;hand:THREE.Vector3;planePoint:THREE.Vector3|null};
+    const fixtureGrabs:(FixtureGrab|null)[]=[null,null];
+    const fixturePlane=new THREE.Plane(new THREE.Vector3(0,1,0),-.002);
+    function fixtureDestination(grab:FixtureGrab,index:number):[number,number]{
+      const hand=controllers[index].getWorldPosition(new THREE.Vector3());
+      const at=topEditing()&&grab.planePoint?raycaster.ray.intersectPlane(fixturePlane,new THREE.Vector3()):null;
+      const dx=at&&grab.planePoint?at.x-grab.planePoint.x:hand.x-grab.hand.x;
+      const dz=at&&grab.planePoint?at.z-grab.planePoint.z:hand.z-grab.hand.z;
+      return [Math.round((grab.entry.point[0]+dx)*20)/20,Math.round((grab.entry.point[2]+dz)*20)/20];
+    }
     const xrGestures: (DraftGesture | null)[] = [null, null];
     const xrResize: (ResizeDrag | null)[] = [null, null];
     const xrPress: ({ context: PointerContext; menu: string | null; wallKey?:string|null } | null)[] = [null, null];
@@ -1526,6 +1536,13 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (toolsOpen && (itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen || menu !== null)) return;
       xrResize[index] = startResize();
       if (!xrResize[index]) {
+        if(interaction.current.mode==="inspect"&&!resize.current.projection&&!resize.current.enabled&&!multiSelect&&!itemControls.current.active&&!teleportSettings.current.teleportMode){
+          syncItems();const context=itemView.contextAt(raycaster),entry=context?.entry;
+          if(entry&&canEditFloorFixture(entry)){
+            fixtureGrabs[index]={entry,hand:controllers[index].getWorldPosition(new THREE.Vector3()),planePoint:raycaster.ray.intersectPlane(fixturePlane,new THREE.Vector3())};
+            reportTool("Fitting grabbed · move controller, then release trigger.");return;
+          }
+        }
         const gesture = draftGesture();
         if (gesture && "previous" in gesture) {
           if(gesture.direct){updateDraftSelection(gesture.previous.proposalId);select(null);}
@@ -1537,11 +1554,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     const selectStart0 = () => beginXrGesture(0), selectStart1 = () => beginXrGesture(1);
     const selectEnd = (index: number) => {
-      xrGestures[index] = null; xrResize[index] = null; xrPress[index] = null;
+      xrGestures[index] = null; xrResize[index] = null; xrPress[index] = null;fixtureGrabs[index]=null;
     };
     // Some XR runtimes deliver selectend before select. Commit a held edit once,
     // then consume a possible trailing select rather than losing the drag.
-    const finishNativeSelect=(index:number)=>{if(xrPress[index]&&(xrResize[index]||xrGestures[index])){trigger(index);menuConsumed[index]=true;}selectEnd(index);};
+    const finishNativeSelect=(index:number)=>{if(xrPress[index]&&(xrResize[index]||xrGestures[index]||fixtureGrabs[index])){trigger(index);menuConsumed[index]=true;}selectEnd(index);};
     const selectEnd0 = () => finishNativeSelect(0), selectEnd1 = () => finishNativeSelect(1);
     const trigger=(index:number)=>{
       if (!renderer.xr.isPresenting) return;
@@ -1560,6 +1577,13 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if (resizing) {
         xrResize[index] = null;
         resizeDrag(resizing);
+        return;
+      }
+      const fixture=fixtureGrabs[index];fixtureGrabs[index]=null;
+      if(fixture){
+        const to=fixtureDestination(fixture,index);
+        if(Math.hypot(to[0]-fixture.entry.point[0],to[1]-fixture.entry.point[2])>=.025)itemControls.current.onAction({kind:"edit-fixture",id:fixture.entry.id,edit:"move-to",move:{from:fixture.entry.point,to}});
+        else reportTool("Fitting selected · hold trigger and move it, or right grip for finishes.");
         return;
       }
       const gesture = xrGestures[index];
@@ -1799,7 +1823,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       buildOverlay.hideMenu();
       itemBrowser = EMPTY_ITEM_BROWSER;
       stageMenuOpen = false;
-      xrGestures.fill(null);
+      xrGestures.fill(null);fixtureGrabs.fill(null);
       xrResize.fill(null);
       xrPress.fill(null);menuConsumed.fill(false);
       inputSources[0] = null;
@@ -2108,7 +2132,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         buildOverlay.showWallGhost(draftAction?.kind==="adjust" ? draftAction.wall :
           draftAction?.kind==="drag" && drag?.mode==="wall"
           ? {start:draftAction.from,end:draftAction.to,heightM:buildSizes.wallHeightM,assembly:buildSizes.wallAssembly} : null);
-        itemView.aim(finishContext?.hit??itemPick?.hit ?? null);
+        const heldFixture=fixtureGrabs.findIndex(Boolean);
+        if(heldFixture>=0&&xrPress[heldFixture]&&samePointerContext(xrPress[heldFixture]!.context)){
+          aimController(controllers[heldFixture]);const grabbed=fixtureGrabs[heldFixture]!,to=fixtureDestination(grabbed,heldFixture);
+          itemView.aim({...grabbed.entry,point:[to[0],grabbed.entry.point[1],to[1]]});
+        }else itemView.aim(finishContext?.hit??itemPick?.hit ?? null);
         buildOverlay.showAim(buildTarget, item || itemBrowser.open ? null : origin);
         if (layout && !simpleHome && !finishContext && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :

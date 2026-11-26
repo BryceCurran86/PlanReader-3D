@@ -39,3 +39,12 @@ test("immersive fitting palette exposes direct edits without replacing finish co
  assert.equal(edits.length,6);assert.ok(edits.every(b=>b.action.action.id==="cab"&&b.y+b.h<=layout.height));
  assert.ok(layout.buttons.some(b=>b.action.area==="finish"&&b.action.action==="apply"));
 });
+
+test("trigger drag moves the selected fitting to a snapped destination, rejects stale grabs",()=>{
+ const d=initial(),entry=d.items[0];
+ const moved=editLocalFloorFixture(d,key,"cab","move-to",build.walls,undefined,{from:entry.point,to:[3,2.5]}).draft;
+ assert.notEqual(moved,d);assert.deepEqual(moved.items[0].point,[3,.002,2.5]);assert.equal(moved.items[0].id,"cab");
+ assert.equal(editLocalFloorFixture(moved,key,"cab","move-to",build.walls,undefined,{from:entry.point,to:[4,2.5]}).draft,moved);
+ assert.equal(editLocalFloorFixture(d,key,"cab","move-to",build.walls,undefined,{from:entry.point,to:[-1,2]}).draft,d);
+ assert.equal(editLocalFloorFixture(d,key,"cab","move-to",build.walls,undefined,{from:entry.point,to:[NaN,2]}).draft,d);
+});

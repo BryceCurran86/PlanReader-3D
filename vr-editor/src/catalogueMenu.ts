@@ -6,7 +6,7 @@ import type { CatalogueItem,CatalogueGroup } from "./itemCatalogue.ts";
 import {contextGroups,contextChoices,contextTitle,finishGroupLabel} from "./contextFinishes.ts";
 import type {FinishContext} from "./contextFinishes.ts";
 import {canEditFloorFixture} from "./itemPlacement.ts";
-import type {ItemHit,FixtureEdit} from "./itemPlacement.ts";
+import type {ItemHit,FixtureEdit,Vector} from "./itemPlacement.ts";
 import type {DoorHardwareFinish} from "./wallAdditionProtocol.ts";
 import { CONSTRUCTION_STAGES, stageDetails } from "./constructionStages.ts";
 import type { ConstructionStage } from "./constructionStages.ts";
@@ -22,7 +22,7 @@ import type {LiningBoard} from "./constructionLiningVisual.ts";
 export type ItemAction =
   | { kind: "choose"; itemId: string }
   | { kind:"apply-finish";itemId:string;hit:ItemHit;replaceId?:string }
-  | {kind:"edit-fixture";id:string;edit:FixtureEdit}
+  | {kind:"edit-fixture";id:string;edit:FixtureEdit;move?:{from:Vector;to:[number,number]}}
   | { kind: "undo" | "redo" | "done" | "rotate" };
 type BrowseAction = { kind: "toggle" } | { kind: "groups" } | { kind: "category" | "page" | "group-page"; step: number }
   | { kind: "choose-group"; index: number };
