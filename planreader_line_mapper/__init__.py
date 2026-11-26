@@ -54,6 +54,7 @@ def plan_line_editor(
     height=760,
     active_row_id=None,
     review_snap_targets=None,
+    review_focus=None,
 ):
     """Render a plan page for drawing take-off measurements.
 
@@ -122,6 +123,15 @@ def plan_line_editor(
                     and math.isfinite(x) and math.isfinite(y)
                     and 0 <= x <= 100 and 0 <= y <= 100):
                 snap_targets.append({"x": x, "y": y})
+    focus = None
+    if review_snap_targets is not None and isinstance(review_focus, dict):
+        x, y = review_focus.get("x"), review_focus.get("y")
+        identity = review_focus.get("id")
+        if (isinstance(identity, str) and 0 < len(identity) <= 128
+                and type(x) in (int, float) and type(y) in (int, float)
+                and math.isfinite(x) and math.isfinite(y)
+                and 0 <= x <= 100 and 0 <= y <= 100):
+            focus = {"id": identity, "x": x, "y": y}
     return _plan_line_mapper(
         image=image_data_uri,
         lines=cleaned_lines,
@@ -134,6 +144,7 @@ def plan_line_editor(
         active_row_id=_active_row_id(active_row_id, cleaned_rows),
         review_snap_mode=review_snap_targets is not None,
         review_snap_targets=snap_targets,
+        review_focus=focus,
     )
 
 
