@@ -232,6 +232,22 @@ def _clip_scissor_by_seqno(pdf_page: Any) -> _ClipAssociationTable:
         if level < 0:
             level = 0
 
+        if dtype == "group":
+            # PyMuPDF levels include non-clip group nodes (transparency groups,
+            # non-Normal blend modes). A group at ``level`` closes clips opened
+            # at that level or deeper and owns the slot without adding a clip.
+            # A group without a usable level proves no boundary: leave the
+            # stack untouched rather than close a scope that may still be open.
+            raw_level = drawing.get("level")
+            if not isinstance(raw_level, int) or raw_level < 0:
+                continue
+            while len(stack) > level:
+                stack.pop()
+            while len(stack) < level:
+                stack.append(None)
+            stack.append(None)
+            continue
+
         if dtype.startswith("clip"):
             while len(stack) > level:
                 stack.pop()
