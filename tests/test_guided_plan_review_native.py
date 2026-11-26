@@ -103,3 +103,37 @@ def test_false_canonical_provenance_refused(tmp_path):
         build_native_review_packet(scope=scope, pdf_path=path, image_bytes=image,
                                    saved=_draft(), canonical_report={
             "source_sha256": scope.source_sha256, "page_index": 0, "producer": "other"})
+
+
+def test_saved_selected_dimension_reaches_existing_scale_request(tmp_path):
+    from pb_guided_plan_review import normalise_answer
+    from pb_guided_review_source_questions import (
+        build_review_to_issuer_handoff, build_user_assisted_scale_issuer_request,
+    )
+    path, image, scope = _source(tmp_path, 0)
+    marks = [{"id": "dim1", "category": "dimension_witness", "kind": "line",
+              "points": [[25,25], [50,25]]}]
+    answers = {"scale": normalise_answer("scale", "correction_recorded", "Figured dimension",
+        2000, correction_id="dim1", witness_points=marks[0]["points"])}
+    packet = build_native_review_packet(scope=scope, pdf_path=path, image_bytes=image,
+        saved=_draft(shapes=marks, answers=answers))
+    request = build_user_assisted_scale_issuer_request(
+        handoff=build_review_to_issuer_handoff(native_review_packet=packet))
+    assert request.status == "USER_ASSISTED_SCALE_INPUT_READY"
+    assert request.figured_mm == 2000
+    assert request.span_pdf_pts == pytest.approx(100)
+    assert request.implied_mm_per_pt == pytest.approx(20)
+    assert request.commercial_projection_allowed is False
+    assert request.automatic_source_verified is False
+    assert request.viewport_id is None
+    unbound = {"scale": normalise_answer("scale", "correction_recorded", "Unbound note", 2000)}
+    packet2 = build_native_review_packet(scope=scope, pdf_path=path, image_bytes=image,
+        saved=_draft(revision=2, shapes=marks, answers=unbound))
+    request2 = build_user_assisted_scale_issuer_request(
+        handoff=build_review_to_issuer_handoff(native_review_packet=packet2))
+    assert request2.status == "ABSTAINED"
+    assert "scale" in changed_review_stages(packet, packet2)
+    marks[0]["points"][1] = [60,25]
+    with pytest.raises(ValueError, match="Scale witness changed"):
+        build_native_review_packet(scope=scope, pdf_path=path, image_bytes=image,
+            saved=_draft(revision=3, shapes=marks, answers=answers))
