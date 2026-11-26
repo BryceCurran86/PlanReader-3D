@@ -130,15 +130,15 @@ def source_record_from_segment(
         "kind_present": field_is_present(segment, "kind"),
         "width": segment.get("width") if "width" in segment else None,
         "width_present": field_is_present(segment, "width"),
-        "stroke": copy.deepcopy(segment.get("stroke")) if "stroke" in segment else None,
+        "stroke": _copy_json_like(segment.get("stroke")) if "stroke" in segment else None,
         "stroke_present": field_is_present(segment, "stroke"),
-        "fill": copy.deepcopy(segment.get("fill")) if "fill" in segment else None,
+        "fill": _copy_json_like(segment.get("fill")) if "fill" in segment else None,
         "fill_present": field_is_present(segment, "fill"),
         "layer": segment.get("layer") if "layer" in segment else None,
         "layer_present": field_is_present(segment, "layer"),
         "dashes": segment.get("dashes") if "dashes" in segment else None,
         "dashes_present": field_is_present(segment, "dashes"),
-        "clip": copy.deepcopy(segment.get("clip")) if "clip" in segment else None,
+        "clip": _copy_json_like(segment.get("clip")) if "clip" in segment else None,
         "clip_present": field_is_present(segment, "clip"),
     }
     # clip_known is additive and independent of clip_present: known-absent
@@ -157,13 +157,13 @@ def source_record_from_segment(
         record["clip_shape_known"] = segment["clip_shape_known"] is True
     if retain_native_clip_sequence_shadow and "clip_exact_rect" in segment:
         raw_rect = segment.get("clip_exact_rect")
-        record["clip_exact_rect"] = copy.deepcopy(raw_rect)
+        record["clip_exact_rect"] = _copy_json_like(raw_rect)
         record["clip_exact_rect_present"] = (
             record.get("clip_shape_known") is True and _finite_rect(raw_rect) is not None
         )
     if retain_native_clip_sequence_shadow and "sequence_number" in segment:
         raw_sequence = segment.get("sequence_number")
-        record["sequence_number"] = copy.deepcopy(raw_sequence)
+        record["sequence_number"] = _copy_json_like(raw_sequence)
         record["sequence_number_present"] = type(raw_sequence) is int
     # Priority-1: retain structured path indices and native page coordinates on
     # the source record so later snap/merge cannot erase native span provenance.
@@ -199,7 +199,7 @@ def source_record_from_segment(
     record["page_coords_present"] = page_coords_present
     for field in _OWNERSHIP_FIELDS:
         if field in segment:
-            record[field] = copy.deepcopy(segment[field])
+            record[field] = _copy_json_like(segment[field])
     return record
 
 
@@ -272,7 +272,7 @@ def union_lineage(*payloads: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         if not payload:
             continue
         for record in payload.get("source_records") or []:
-            copied = copy.deepcopy(dict(record))
+            copied = _copy_json_like(dict(record))
             key = _record_dedupe_key(copied)
             if key in seen_keys:
                 continue
@@ -496,7 +496,7 @@ def _containment_grid_candidates(
 
 
 def isolated_lineage(payload: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-    return copy.deepcopy(payload) if payload else empty_lineage()
+    return _copy_json_like(payload) if payload else empty_lineage()
 
 
 def isolate_graph_lineage(graph: Mapping[str, Any]) -> Dict[str, Any]:
@@ -618,20 +618,24 @@ def _fragment_box(pair: SegmentPair) -> Optional[Tuple[float, float, float, floa
     return (min(x1, x2), max(x1, x2), min(y1, y2), max(y1, y2))
 
 
+_JSON_ATOMS = frozenset((str, int, float, bool, type(None)))
+
+
 def _copy_json_like(value: Any) -> Any:
     """``copy.deepcopy`` for the plain dict/list/tuple/scalar structures a lineage payload is made of.
 
     Any other type is delegated to ``copy.deepcopy`` so the result is always what a deep copy would return.  Lineage payloads
-    hold no shared or cyclic substructure, so the missing memo table cannot change the result.
+    hold no shared or cyclic substructure, so the missing memo table cannot change the result.  Scalar items are returned
+    in place, without a call each.
     """
     kind = type(value)
     if kind is dict:
-        return {key: _copy_json_like(item) for key, item in value.items()}
+        return {key: item if type(item) in _JSON_ATOMS else _copy_json_like(item) for key, item in value.items()}
     if kind is list:
-        return [_copy_json_like(item) for item in value]
+        return [item if type(item) in _JSON_ATOMS else _copy_json_like(item) for item in value]
     if kind is tuple:
-        return tuple(_copy_json_like(item) for item in value)
-    if kind in (str, int, float, bool, type(None)):
+        return tuple([item if type(item) in _JSON_ATOMS else _copy_json_like(item) for item in value])
+    if kind in _JSON_ATOMS:
         return value
     return copy.deepcopy(value)
 
