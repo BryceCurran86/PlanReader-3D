@@ -206,19 +206,8 @@ def _intersect_exact_rects(
     return (x0, y0, x1, y1)
 
 
-def _clip_scissor_by_seqno(pdf_page: Any) -> _ClipAssociationTable:
-    """Map drawing seqno values to active clip state and exact shape proof.
-
-    The primary non-extended drawing enumeration remains untouched, preserving
-    historical primitive IDs. The separate extended pass is used only to prove
-    clip provenance. PyMuPDF scissor is never itself accepted as shape
-    authority.
-    """
-    try:
-        extended = pdf_page.get_drawings(extended=True) or []
-    except Exception:
-        return _ClipAssociationTable(available=False, by_seqno={})
-
+def _build_clip_table_from_extended(extended: Sequence[Any]) -> _ClipAssociationTable:
+    """Build exact clip-provenance table from an already-fetched extended drawings sequence."""
     stack: List[Optional[_ClipShapeProof]] = []
     by_seqno: Dict[int, _ClipAssociation] = {}
     for drawing in extended:
@@ -288,6 +277,57 @@ def _clip_scissor_by_seqno(pdf_page: Any) -> _ClipAssociationTable:
             exact_rect=exact_rect,
         )
     return _ClipAssociationTable(available=True, by_seqno=by_seqno)
+
+
+def _clip_scissor_by_seqno(pdf_page: Any) -> _ClipAssociationTable:
+    """Map drawing seqno values to active clip state and exact shape proof.
+
+    The primary non-extended drawing enumeration remains untouched, preserving
+    historical primitive IDs. The separate extended pass is used only to prove
+    clip provenance. PyMuPDF scissor is never itself accepted as shape
+    authority.
+    """
+    try:
+        extended = pdf_page.get_drawings(extended=True) or []
+    except Exception:
+        return _ClipAssociationTable(available=False, by_seqno={})
+    return _build_clip_table_from_extended(extended)
+
+
+def _extract_drawings_and_clip_table(
+    pdf_page: Any,
+) -> Tuple[List[Any], _ClipAssociationTable]:
+    """Decode drawings + exact clip table in a single PyMuPDF pass when safe.
+
+    On a real ``fitz.Page``, ``get_drawings(extended=True)`` emits every drawing
+    from ``get_drawings()`` in identical order interleaved with ``clip``/``group``
+    entries. Filtering out ``type in ("clip", "group")`` avoids decoding the
+    PDF content stream twice while preserving identical primitive IDs and clip
+    provenance. Mock/non-PyMuPDF pages or failing extended calls keep the
+    original two-call path.
+    """
+    try:
+        import fitz  # type: ignore
+        is_real_fitz_page = isinstance(pdf_page, fitz.Page)
+    except Exception:
+        is_real_fitz_page = False
+
+    if is_real_fitz_page:
+        try:
+            extended = pdf_page.get_drawings(extended=True) or []
+        except Exception:
+            extended = None
+        if extended is not None:
+            clip_table = _build_clip_table_from_extended(extended)
+            drawings = [
+                d for d in extended
+                if not (isinstance(d, dict) and d.get("type") in ("clip", "group"))
+            ]
+            return drawings, clip_table
+
+    drawings = list(pdf_page.get_drawings() or [])
+    clip_table = _clip_scissor_by_seqno(pdf_page)
+    return drawings, clip_table
 
 
 def _resolve_clip_proof_fields(
@@ -383,8 +423,7 @@ def extract_native_page(pdf_page: Any) -> Dict[str, Any]:
     """
     segments: List[Dict[str, Any]] = []
     rects: List[Dict[str, Any]] = []   # ADDITIVE: closed native rectangles
-    drawings = pdf_page.get_drawings() or []
-    clip_table = _clip_scissor_by_seqno(pdf_page)
+    drawings, clip_table = _extract_drawings_and_clip_table(pdf_page)
     for draw_index, drawing in enumerate(drawings):
         width = _num(drawing.get("width"), 0.0) if isinstance(drawing, dict) else 0.0
         stroke = drawing.get("color") if isinstance(drawing, dict) else None
