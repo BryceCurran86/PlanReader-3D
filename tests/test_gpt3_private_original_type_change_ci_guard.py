@@ -25,10 +25,19 @@ def _git(repo: Path, *args: str, capture: bool = False) -> bytes:
 
 def test_pr_and_push_ci_both_include_type_changed_paths():
     text = WORKFLOW.read_text(encoding="utf-8")
-    # Both PR and push must feed the same complete NUL-delimited Git path set.
-    assert text.count("git diff --diff-filter=AMRCT --name-only -z") == 2
+    # Both automatic shards and the required verification job must protect
+    # PR and push comparison ranges, including symlink/type changes.
+    shard = text.split("\n  shard:\n", 1)[1].split("\n  test:\n", 1)[0]
+    required = text.split("\n  test:\n", 1)[1].split("\n  focused:\n", 1)[0]
+    command = 'git diff --diff-filter=AMRCT --name-only -z "$BASE_SHA" "$HEAD_SHA" | python scripts/check_private_original_source_additions.py'
+    assert text.count(command) == 4
     assert "git diff --diff-filter=AMRC --name-only -z" not in text
-    assert text.count("| python scripts/check_private_original_source_additions.py") == 2
+    for gate in (shard, required):
+        assert gate.count(command) == 2
+        for event in ("pull_request", "push"):
+            assert f"if: github.event_name == '{event}'" in gate
+        for label in ("PR", "push"):
+            assert f"Reject newly committed private original-source files ({label})" in gate
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX symlink semantics")

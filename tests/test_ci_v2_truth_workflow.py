@@ -17,7 +17,15 @@ def test_v2_truth_separation_runs_for_pull_requests_and_pushes() -> None:
         'git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" '
         '| python scripts/check_v2_truth_separation.py --nul'
     )
-    assert WORKFLOW.count(command) == 2
+    shard = WORKFLOW.split("\n  shard:\n", 1)[1].split("\n  test:\n", 1)[0]
+    required = WORKFLOW.split("\n  test:\n", 1)[1].split("\n  focused:\n", 1)[0]
+    assert WORKFLOW.count(command) == 4
+    for gate in (shard, required):
+        assert gate.count(command) == 2
+        assert "if: github.event_name == 'pull_request'" in gate
+        assert "if: github.event_name == 'push'" in gate
+        assert 'git cat-file -e "${BASE_SHA}^{commit}"' in gate
+        assert 'git cat-file -e "${HEAD_SHA}^{commit}"' in gate
     assert 'git diff --name-only "$BASE_SHA" "$HEAD_SHA"' not in WORKFLOW
 
 

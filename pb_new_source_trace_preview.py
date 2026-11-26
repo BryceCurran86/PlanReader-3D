@@ -39,6 +39,7 @@ from pb_new_source_dark_ink_scope import include_source_neutral_dark_strokes
 from pb_new_source_modality_router import classify_source_page_modality
 from pb_new_typed_vector_ink_scope import scope_outlined_vector_lettering
 from pb_next_wall_ring_preview import (
+    KIND_SOURCE_OWNED_CHORD,
     _clip_drawing_items,
     _collect_cavity_multi_face_strips,
     _collect_dark_fill_strips,
@@ -54,6 +55,13 @@ from pb_source_internal_door_completeness_shadow import inspect_source_internal_
 from pb_source_native_figured_window_bridge_review import (
     inspect_original_window_figured_bridge_review,
 )
+from pb_source_owned_doorway_chord_preview_shadow import (
+    source_owned_doorway_chord_shadow as _source_owned_doorway_chord_shadow_block,
+)
+
+# The summary key of the opt-in shadow block of source-owned doorway chords (read-only evidence, never applied to the rings).
+_CHORD_SHADOW_KEY = "source_owned_doorway_chord_shadow"
+_CHORD_CLOSURES_KEY = "source_owned_doorway_chord_closures"
 
 
 def _full_page_source_tiles(width: float, height: float, drawing_count: int):
@@ -69,6 +77,21 @@ def _full_page_source_tiles(width: float, height: float, drawing_count: int):
         )
         for y in range(n) for x in range(n)
     )
+
+
+def _mark_applied_doorway_chords(block: dict, closures: Sequence) -> None:
+    """Say, in the chord block itself, which chords the tracer actually used as closures."""
+    used = {
+        (c.horizontal, tuple(c.band), tuple(c.gap_interval)) for c in closures if c.kind == KIND_SOURCE_OWNED_CHORD
+    }
+    for chord in block["chords"]:
+        chord["applied_to_preview_topology"] = (
+            chord["horizontal"], tuple(chord["wall_band_pdf_pts"]), tuple(chord["door_interval_pdf_pts"])
+        ) in used
+    applied = sum(1 for chord in block["chords"] if chord["applied_to_preview_topology"])
+    block["applied_count"] = applied
+    block["applied_to_preview_topology"] = applied > 0
+    block["preview_rings_and_closures_unchanged"] = applied == 0
 
 
 def _new_native_frame_canvas(preview, document, page_index, frame):
@@ -125,6 +148,8 @@ def source_native_trace_preview(
     *,
     viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
     progress_callback: Callable[[dict], None] | None = None,
+    source_owned_doorway_chord_shadow: bool = False,
+    source_owned_doorway_chord_closures: bool = False,
 ) -> tuple[dict, bytes]:
     """Return actual native-source trace evidence + PNG on the original PDF page.
 
@@ -141,12 +166,28 @@ def source_native_trace_preview(
     canvas cover that native extent; on a rotated page the PNG is rendered in the displayed orientation and the summary
     carries a ``native_page_frame`` receipt. A /Rotate 180, 270 or unreadable frame is not promoted there, so the trace
     fails closed with ``ValueError("new_trace_native_page_frame_unresolved")`` instead of running in the wrong frame.
+
+    ``source_owned_doorway_chord_shadow`` (default False, an explicit boolean) additionally reports the source-owned doorway chords
+    that the layered dark-painted builder recovers on the rows this preview scoped, as ONE additive summary key of counts and
+    topology-only receipts. It is read-only evidence: the rings, closures, strips, overlay and PNG are identical with it on or
+    off, and with it off the whole output is byte-identical to what this function always returned.
+
+    ``source_owned_doorway_chord_closures`` (default False, an explicit boolean) gives those same chords to the room tracer as
+    topology-only doorway closures, wherever the tracer did not close that doorway itself. Rings, closures, overlay and PNG may then
+    differ; no quantity, opening or wall authority follows. One additive summary key says which chords were applied. It cannot be
+    combined with the read-only channel above, whose contract is that nothing was applied. With it off nothing changes.
     """
     pdf_path = Path(pdf_path)
     if pdf_path.suffix.lower() != ".pdf":
         raise ValueError("new_trace_original_pdf_required_no_legacy_fallback")
     if type(page_index) is not int or page_index < 0:
         raise ValueError("new_trace_page_index_invalid")
+    if type(source_owned_doorway_chord_shadow) is not bool:
+        raise ValueError("new_trace_source_owned_doorway_chord_shadow_must_be_bool")
+    if type(source_owned_doorway_chord_closures) is not bool:
+        raise ValueError("new_trace_source_owned_doorway_chord_closures_must_be_bool")
+    if source_owned_doorway_chord_shadow and source_owned_doorway_chord_closures:
+        raise ValueError("new_trace_doorway_chord_shadow_and_closures_are_exclusive")
     source_bytes = pdf_path.read_bytes()
     sha = hashlib.sha256(source_bytes).hexdigest()
     with fitz.open(stream=source_bytes, filetype="pdf") as document:
@@ -294,6 +335,16 @@ def source_native_trace_preview(
         # The new tracing producer reads the original native PDF paths, within
         # the unchanged 20,000 primitive cap per source-scope viewport.
         _report("resolving_wall_and_room_topology", .44)
+        doorway_chords = None
+        if source_owned_doorway_chord_closures:
+            # Proven on the rows the preview scoped; a raster underlay page never reaches the layered builder.
+            doorway_chords = _source_owned_doorway_chord_shadow_block(
+                vector_scope.drawings,
+                source_sha256=sha,
+                page_index=page_index,
+                viewport_pdf_pts=outer_wall.viewport_pdf_pts,
+                native_vector_rows_architectural=source_modality.route != "tiled_raster_underlay",
+            )
         result = build_layered_wall_doorway_room_rings(
             wall_drawings,
             source_sha256=sha,
@@ -320,7 +371,21 @@ def source_native_trace_preview(
             ),
             wall_end_stroke_closures=False,
             viewport_pdf_pts=panes,
+            source_owned_doorway_chords=() if doorway_chords is None else tuple(doorway_chords["chords"]),
         )
+        if doorway_chords is not None:
+            _mark_applied_doorway_chords(doorway_chords, result.closures)
+        doorway_chord_shadow = None
+        if source_owned_doorway_chord_shadow:
+            # Read-only: nothing below reads this block, so the rings, closures, strips and overlay cannot depend on it. The rows
+            # are the ones the preview's own selector received; a raster underlay page never reaches the layered builder.
+            doorway_chord_shadow = _source_owned_doorway_chord_shadow_block(
+                vector_scope.drawings,
+                source_sha256=sha,
+                page_index=page_index,
+                viewport_pdf_pts=outer_wall.viewport_pdf_pts,
+                native_vector_rows_architectural=source_modality.route != "tiled_raster_underlay",
+            )
         _report("wall_room_topology_ready", .56)
         preview = fitz.open()
         canvas = _new_native_frame_canvas(preview, document, page_index, frame)
@@ -753,5 +818,10 @@ def source_native_trace_preview(
             # additive and on a rotated page only, so an upright page's summary is unchanged
             summary["native_page_frame"] = asdict(frame)
             summary["preview_png_orientation"] = "displayed"
+        if doorway_chord_shadow is not None:
+            # additive and only when explicitly requested, so a default summary is unchanged
+            summary[_CHORD_SHADOW_KEY] = doorway_chord_shadow
+        if doorway_chords is not None:
+            summary[_CHORD_CLOSURES_KEY] = doorway_chords
         _report("trace_complete", 1.0, wall_candidates=sum(native_wall_counts.values()))
         return summary, png

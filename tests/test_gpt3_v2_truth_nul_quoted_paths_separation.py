@@ -131,7 +131,17 @@ def test_required_ci_uses_nul_paths_on_pr_and_push() -> None:
         'git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" '
         '| python scripts/check_v2_truth_separation.py --nul'
     )
-    assert workflow.count(command) == 2
+    # Each automatic shard and the required verification job independently
+    # protect both pull-request and push comparison ranges.
+    shard = workflow.split("\n  shard:\n", 1)[1].split("\n  test:\n", 1)[0]
+    required = workflow.split("\n  test:\n", 1)[1].split("\n  focused:\n", 1)[0]
+    assert workflow.count(command) == 4
+    for gate in (shard, required):
+        assert gate.count(command) == 2
+        for event in ("pull request", "push"):
+            assert f"Enforce Full Plan V2 truth / production separation ({event})" in gate
+        assert "if: github.event_name == 'pull_request'" in gate
+        assert "if: github.event_name == 'push'" in gate
     assert 'git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA"' not in workflow
 
 

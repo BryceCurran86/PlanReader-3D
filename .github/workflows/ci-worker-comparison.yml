@@ -1,0 +1,62 @@
+name: Python worker comparison (not release CI)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-worker-comparison-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        workers: [0, 2, 4, 8]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ci-v1228.txt
+      - run: pip install -r requirements.txt -r requirements-ci-v1228.txt ruff
+      - name: Full identical source-free test suite
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: '1'
+          PLANREADER_PRIVATE_ORIGINAL_POLICY: skip_missing_in_public_ci
+          WORKERS: ${{ matrix.workers }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python -m pytest -q -n "$WORKERS" --dist loadfile --durations=20 --junitxml="$RUNNER_TEMP/raw.xml" tests/
+          python scripts/ci_compare_worker_runs.py receipt "$RUNNER_TEMP/raw.xml" "$WORKERS" "$RUNNER_TEMP/worker-receipt.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worker-${{ matrix.workers }}
+          path: ${{ runner.temp }}/worker-receipt.json
+          if-no-files-found: error
+          retention-days: 2
+  compare:
+    needs: measure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: worker-*
+          path: ${{ runner.temp }}/workers
+      - run: |
+          set -euo pipefail
+          python scripts/ci_compare_worker_runs.py compare "$RUNNER_TEMP/workers" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo 'Experimental Python 3.13 timings only; never a release verdict.' >> "$GITHUB_STEP_SUMMARY"

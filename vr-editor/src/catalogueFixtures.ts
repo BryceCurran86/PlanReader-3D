@@ -18,6 +18,7 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
     const part = new THREE.Mesh(geometry, material);
     part.position.set(x, y, z);
     part.receiveShadow = true;
+    part.castShadow = true;
     group.add(part);
     return part;
   }
@@ -177,6 +178,23 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
         const rail = cylinder(0.011, w, 0, y, d);
         rail.rotation.z = Math.PI / 2;
       }
+      break;
+    case "sofa":
+      box(w*.94,h*.20,d*.9,0,h*.17,0);
+      box(w*.94,h*.57,d*.18,0,h*.67,-d*.39);
+      for(let i=0;i<3;i++){const x=(i-1)*w*.28;box(w*.27,h*.19,d*.68,x,h*.40,d*.04);box(w*.27,h*.35,d*.13,x,h*.65,-d*.27);}
+      for(const sign of [-1,1]){box(w*.105,h*.43,d*.91,sign*w*.447,h*.48,0);for(const z of [-1,1])box(.045,.11,.045,sign*w*.43,.055,z*d*.39,detail);}
+      break;
+    case "bed":
+      box(w,h*.26,d,0,h*.19,0,detail);
+      box(w*.98,h*.27,d*.98,0,h*.45,0,white);
+      box(w*.98,h*.075,d*.71,0,h*.62,d*.14);
+      box(w,h*.8,.07,0,h*.60,-d*.48);
+      for(const sign of [-1,1])oval(w*.41,.12,d*.22,sign*w*.25,h*.65,-d*.30,white);
+      break;
+    case "coffee-table":
+      cylinder(w*.5,.035,0,h-.0175,0);
+      cylinder(w*.30,h-.035,0,(h-.035)/2,0,detail);
       break;
     case "vanity":
     case "cabinet":

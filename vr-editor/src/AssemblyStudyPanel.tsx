@@ -9,14 +9,14 @@ export function useAssemblyStudy(build:StudyGeometry,scope:string|null){
  const change=(update:(previous:AssemblyStudyConfig)=>AssemblyStudyConfig)=>setStored(previous=>previous.scope===scope?{scope,study:update(previous.study)}:previous);
  const evaluation=useMemo(()=>evaluateAssemblyStudy(build,study),[build,study]);
  const summary=useMemo(()=>immersiveBudget(build,study,evaluation),[build,study,evaluation]);
- const capture=()=>change(s=>s.enabled&&evaluation.result?{...s,baseline:structuredClone({walls:build.walls,ceilings:build.ceilings})}:s);
+ const capture=()=>change(s=>s.enabled&&evaluation.result?{...s,baseline:structuredClone(build)}:s);
  const clear=()=>change(s=>({...s,baseline:null}));
- return {study,change,evaluation,summary,capture,clear};
+ return {study,change,evaluation,summary,capture,clear,shellAvailable:!!build.shellMetrics};
 }
 type Props={controller:ReturnType<typeof useAssemblyStudy>};
 const qty=(n:number|null)=>n===null?"Not specified":n.toLocaleString("en-AU",{maximumFractionDigits:3});
 export function AssemblyStudyPanel({controller}:Props){
- const {study,change,evaluation,summary,capture,clear}=controller;
+ const {study,change,evaluation,summary,capture,clear,shellAvailable}=controller;
  const {enabled,inputs,rates,mode,margin,gst,baseline}=study;
  const {result,prior,error,baselineError}=evaluation;
  const setEnabled=(enabled:boolean)=>change(s=>({...s,enabled}));
@@ -30,7 +30,9 @@ export function AssemblyStudyPanel({controller}:Props){
   <p className="muted">Opt-in estimating allowances only. Not engineered framing, a certified takeoff, or a customer quote. Existing source geometry, catalogue prices and approved costs are excluded. Do not add the separate lining-only illustration to this subtotal.</p>
   <label><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.currentTarget.checked)}/> Enable indicative construction budget</label>
   {enabled&&<>
-   <p>Review all starting assumptions. Gross studs and noggins are conservative allowances, not cut lists. Opening heads are spans, not specified lintels. Ceiling rectangles may overlap. Floor, roof and service allowances must be entered separately.</p>
+   <p>Review all starting assumptions. Gross studs and noggins are conservative allowances, not cut lists. Opening heads are spans, not specified lintels. Ceiling rectangles may overlap. Floor and roof follow a valid local shell when enabled; services remain separately entered allowances.</p>
+   <label><input type="checkbox" checked={study.followShell!==false} onChange={e=>change(s=>({...s,followShell:e.currentTarget.checked}))}/> Use current local shell floor, slab and roof quantities</label>
+   <p>{study.followShell!==false&&shellAvailable?"Following actual draft shell geometry; manual floor/roof/slab assumptions are ignored.":"Using manually entered floor/roof/slab allowances."}</p>
    <details><summary>Assembly assumptions</summary>
     {fields.map(([key,label,step])=><label key={key}>{label}<input type="number" min="0" step={step} value={inputs[key]} placeholder={nullable.has(key)?"Unknown":undefined} onChange={e=>{const v=e.currentTarget.value;setInputs(old=>({...old,[key]:v}));}}/></label>)}
    </details>
@@ -53,7 +55,7 @@ export function AssemblyStudyPanel({controller}:Props){
      {baseline&&<button type="button" onClick={clear}>Clear baseline</button>}
     </div>
     {baselineError&&<p role="alert">{baselineError}</p>}
-    {prior&&<p role="status">Geometry comparison at current assumptions and rates: {money(hasPricedWork(prior)?prior.total:null)} → {money(summary.total)} · change {money(summary.delta)}. Both totals may be partial; manual allowances remain fixed.</p>}
+    {prior&&<p role="status">Geometry comparison at current assumptions and rates: {money(hasPricedWork(prior)?prior.total:null)} → {money(summary.total)} · change {money(summary.delta)}. Both totals may be partial; captured shell geometry follows its own dimensions and manual allowances remain fixed.</p>}
     <details><summary>Trade breakdown</summary><ul>{summary.trades.map(t=><li key={t.trade}>{t.trade}: {money(t.cents)}{t.partial?" (partial)":""}</li>)}</ul></details>
     <details><summary>Quantities and separate rates</summary>
      <p>Enter local AUD ex-GST component rates, not bundled supply/install rates. Material rates apply to purchase quantities; labour rates apply to net quantities. Blank means unpriced; zero is an explicit zero allowance.</p>
