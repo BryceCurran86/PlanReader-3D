@@ -1039,6 +1039,51 @@ def _source_attested_overprint_word_glyphs(*, page, receipt, font_key, spans):
         return None
 
 
+_IMMUTABLE_EVIDENCE_SCALARS = frozenset((str, int, float, bool, bytes, type(None)))
+
+
+def _clone_evidence_value(value: Any) -> Any:
+    vtype = type(value)
+    if vtype in _IMMUTABLE_EVIDENCE_SCALARS:
+        return value
+    if vtype is tuple:
+        for item in value:
+            if type(item) not in _IMMUTABLE_EVIDENCE_SCALARS:
+                return tuple(_clone_evidence_value(elem) for elem in value)
+        return value
+    if vtype is dict:
+        return {k: _clone_evidence_value(v) for k, v in value.items()}
+    if vtype is list:
+        return [_clone_evidence_value(item) for item in value]
+    if vtype is set:
+        return {_clone_evidence_value(item) for item in value}
+    return deepcopy(value)
+
+
+def _clone_evidence_atoms(atoms: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Return defensive clones of cached frozen EvidenceAtom tuples without deepcopy overhead."""
+    if not atoms:
+        return ()
+    new_instance = object.__new__
+    set_attribute = object.__setattr__
+    cloned_items = []
+    for atom in atoms:
+        state = getattr(atom, "__dict__", None)
+        if state is None:
+            cloned_items.append(deepcopy(atom))
+            continue
+        cloned = new_instance(type(atom))
+        copied_state = state.copy()
+        meta = copied_state.get("metadata")
+        if type(meta) is dict:
+            copied_state["metadata"] = {k: _clone_evidence_value(v) for k, v in meta.items()}
+        elif meta is not None:
+            copied_state["metadata"] = _clone_evidence_value(meta)
+        set_attribute(cloned, "__dict__", copied_state)
+        cloned_items.append(cloned)
+    return tuple(cloned_items)
+
+
 class SourceVisibilityProducer:
     """Trusted producer wrapper that mints visibility receipts from PDF bytes.
 
@@ -1696,7 +1741,7 @@ class SourceVisibilityProducer:
                     cache.popitem(last=False)
             else:
                 batch['selected_evidence_cache'].move_to_end(ordered_ids)
-            return deepcopy(cached)
+            return _clone_evidence_atoms(cached)
         if authenticated is None:
             rows = visibility.authenticated_visible_observations(published)
         else:
@@ -1850,7 +1895,7 @@ class SourceVisibilityProducer:
             cache[tuple(sorted(selected))] = atoms
             if len(cache) > 64:
                 cache.popitem(last=False)
-            return deepcopy(atoms)
+            return _clone_evidence_atoms(atoms)
         return atoms
 
     def raster_opening_image_placements(

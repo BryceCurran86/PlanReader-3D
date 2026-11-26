@@ -344,6 +344,24 @@ class _SnapshotChainMap(MutableMapping[tuple[str, str], Any]):
                 layer = layer.parent
         return total
 
+    def get_pair(
+        self, snapshot_id: str, observation_id: str, default: Any = None
+    ) -> Any:
+        snap = self._snaps.get(snapshot_id)
+        if snap is None:
+            return default
+        flat = snap.flat
+        if flat is not None:
+            return flat.get(observation_id, default)
+        found, value = _find(snap.layer, observation_id)
+        return value if found else default
+
+    def get(self, key: tuple[str, str], default: Any = None) -> Any:
+        if type(key) is not tuple or len(key) != 2:
+            return default
+        snapshot_id, observation_id = key
+        return self.get_pair(snapshot_id, observation_id, default)
+
     def __getitem__(self, key: tuple[str, str]) -> Any:
         snapshot_id, observation_id = key
         try:
@@ -525,6 +543,7 @@ class _SourceObservationStore:
         # One page's private read views and validated returned clones. This
         # replaces its predecessor; source observations are never evicted.
         self.visible_page_bound_rows: tuple | None = None
+        self._last_snapshot_membership_id: str | None = None
 
     def source_bytes_match_revision(
         self,
@@ -532,20 +551,22 @@ class _SourceObservationStore:
         source_bytes: bytes,
         expected_sha256: str,
     ) -> bool:
-        cached = self.verified_source_integrity_by_revision.get(str(revision_id))
+        rev_key = revision_id if type(revision_id) is str else str(revision_id)
+        exp_sha = expected_sha256 if type(expected_sha256) is str else str(expected_sha256)
+        cached = self.verified_source_integrity_by_revision.get(rev_key)
         if (
             cached is not None
             and cached[0] is source_bytes
-            and cached[1] == str(expected_sha256)
+            and cached[1] == exp_sha
         ):
             return True
 
         actual = hashlib.sha256(source_bytes).hexdigest()
-        if actual != str(expected_sha256):
-            self.verified_source_integrity_by_revision.pop(str(revision_id), None)
+        if actual != exp_sha:
+            self.verified_source_integrity_by_revision.pop(rev_key, None)
             return False
 
-        self.verified_source_integrity_by_revision[str(revision_id)] = (
+        self.verified_source_integrity_by_revision[rev_key] = (
             source_bytes,
             actual,
         )
@@ -556,6 +577,7 @@ class _SourceObservationStore:
         cached = (snapshot, frozenset(snapshot.observation_ids))
         self.snapshot_observation_id_sets[snapshot.snapshot_id] = cached
         self.snapshot_observation_id_sets.move_to_end(snapshot.snapshot_id)
+        self._last_snapshot_membership_id = snapshot.snapshot_id
         _REGISTERED_STORES_BY_SNAPSHOT[snapshot.snapshot_id] = self
         _REGISTERED_STORES_BY_SNAPSHOT[snapshot.revision_id] = self
         while len(self.snapshot_observation_id_sets) > _SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS:
@@ -567,12 +589,15 @@ class _SourceObservationStore:
         snapshot: ProducerSnapshotRecord,
         observation_id: str,
     ) -> bool:
-        cached = self.snapshot_observation_id_sets.get(snapshot.snapshot_id)
+        snap_id = snapshot.snapshot_id
+        cached = self.snapshot_observation_id_sets.get(snap_id)
         if cached is None or cached[0] is not snapshot:
             cached = self.cache_snapshot_membership(snapshot)
-        else:
-            self.snapshot_observation_id_sets.move_to_end(snapshot.snapshot_id)
-        return str(observation_id) in cached[1]
+        elif self._last_snapshot_membership_id != snap_id:
+            self.snapshot_observation_id_sets.move_to_end(snap_id)
+            self._last_snapshot_membership_id = snap_id
+        obs_key = observation_id if type(observation_id) is str else str(observation_id)
+        return obs_key in cached[1]
 
     def next_generation(self) -> int:
         self.generation += 1
@@ -649,10 +674,53 @@ def _shallow_cloner(cls):
     ):
         raise TypeError(f"{cls.__name__} is not safe to clone field for field")
     known = frozenset(names)
+    field_count = len(names)
     getter = attrgetter(*names)
     new_instance = object.__new__
     set_attribute = object.__setattr__
     slotted = "__slots__" in cls.__dict__
+
+    if slotted:
+        slot_setters = {name: getattr(cls, name).__set__ for name in names}
+        ns: dict[str, Any] = {"_new": new_instance, "_cls": cls}
+        defaults = ["_new=_new", "_cls=_cls"]
+        body = ["    copy = _new(_cls)"]
+        for idx, name in enumerate(names):
+            ns[f"_g{idx}"] = getattr(cls, name).__get__
+            ns[f"_s{idx}"] = slot_setters[name]
+            defaults.append(f"_g{idx}=_g{idx}")
+            defaults.append(f"_s{idx}=_s{idx}")
+            body.append(f"    _s{idx}(copy, _g{idx}(obj))")
+        body.append("    return copy")
+        src = f"def _clone_exact(obj, {', '.join(defaults)}):\n" + "\n".join(body)
+        exec(src, ns)
+        clone_exact = ns["_clone_exact"]
+
+        def clone(obj, **changes):
+            if changes:
+                if not known.issuperset(changes):
+                    raise TypeError(
+                        f"{cls.__name__} clone got unexpected field names: "
+                        + ", ".join(sorted(set(changes) - known))
+                    )
+                copy = clone_exact(obj)
+                for name, value in changes.items():
+                    slot_setters[name](copy, value)
+                return copy
+            return clone_exact(obj)
+
+        clone._exact = clone_exact  # type: ignore[attr-defined]
+        clone._slot_setters = slot_setters  # type: ignore[attr-defined]
+        return clone
+
+    def clone_dict_exact(obj):
+        state = obj.__dict__
+        copy = new_instance(cls)
+        if type(obj) is cls and state.keys() == known:
+            set_attribute(copy, "__dict__", state.copy())
+        else:
+            copy.__dict__.update(zip(names, getter(obj)))
+        return copy
 
     def clone(obj, **changes):
         if changes and not known.issuperset(changes):
@@ -660,20 +728,12 @@ def _shallow_cloner(cls):
                 f"{cls.__name__} clone got unexpected field names: "
                 + ", ".join(sorted(set(changes) - known))
             )
-        values = getter(obj)
-        copy = new_instance(cls)
-        if slotted:
-            for name, value in zip(names, values):
-                set_attribute(copy, name, value)
-            for name, value in changes.items():
-                set_attribute(copy, name, value)
-        else:
-            state = copy.__dict__
-            state.update(zip(names, values))
-            if changes:
-                state.update(changes)
+        copy = clone_dict_exact(obj)
+        if changes:
+            copy.__dict__.update(changes)
         return copy
 
+    clone._exact = clone_dict_exact  # type: ignore[attr-defined]
     return clone
 
 
@@ -681,6 +741,29 @@ _clone_revision = _shallow_cloner(SourceRevisionRecord)
 _clone_snapshot = _shallow_cloner(ProducerSnapshotRecord)
 _clone_observation = _shallow_cloner(SourceObservationRecord)
 _clone_result = _shallow_cloner(SourceObservationAuthorityResult)
+
+_clone_revision_exact = _clone_revision._exact
+_clone_snapshot_exact = _clone_snapshot._exact
+_clone_observation_exact = _clone_observation._exact
+_clone_result_exact = _clone_result._exact
+_obs_set_snapshot_id = _clone_observation._slot_setters["snapshot_id"]
+_obs_set_producer_generation = _clone_observation._slot_setters["producer_generation"]
+_res_set_source_revision = _clone_result._slot_setters["source_revision"]
+_res_set_snapshot = _clone_result._slot_setters["snapshot"]
+_res_set_observation = _clone_result._slot_setters["observation"]
+
+
+def _clone_result_bound(
+    base: SourceObservationAuthorityResult,
+    source_revision: SourceRevisionRecord,
+    snapshot: ProducerSnapshotRecord,
+    observation: SourceObservationRecord,
+) -> SourceObservationAuthorityResult:
+    copy = _clone_result_exact(base)
+    _res_set_source_revision(copy, source_revision)
+    _res_set_snapshot(copy, snapshot)
+    _res_set_observation(copy, observation)
+    return copy
 
 
 def _bind_record_to_snapshot(
@@ -693,16 +776,14 @@ def _bind_record_to_snapshot(
     they resolved against, exactly as when each generation held its own clone.
     """
 
+    copy = _clone_observation_exact(record)
     if (
-        record.snapshot_id == snapshot.snapshot_id
-        and record.producer_generation == snapshot.producer_generation
+        record.snapshot_id != snapshot.snapshot_id
+        or record.producer_generation != snapshot.producer_generation
     ):
-        return _clone_observation(record)
-    return _clone_observation(
-        record,
-        snapshot_id=snapshot.snapshot_id,
-        producer_generation=snapshot.producer_generation,
-    )
+        _obs_set_snapshot_id(copy, snapshot.snapshot_id)
+        _obs_set_producer_generation(copy, snapshot.producer_generation)
+    return copy
 
 
 def _validated_clip_pt(
@@ -2146,44 +2227,49 @@ class SourceObservationAuthority:
         )
 
     def resolve(self, selector: ObservationSelector) -> SourceObservationAuthorityResult:
-        if not isinstance(selector, ObservationSelector):
+        if type(selector) is not ObservationSelector and not isinstance(selector, ObservationSelector):
             raise TypeError("selector must be ObservationSelector")
-        current = self._store.current_revision_by_document.get(selector.document_id)
+        store = self._store
+        rev_id = selector.revision_id
+        current = store.current_revision_by_document.get(selector.document_id)
         if current is None:
             return self._blocked(SOURCE_UNAVAILABLE)
-        if current != selector.revision_id:
+        if current != rev_id:
             return self._blocked(STALE_REVISION)
-        revision = self._store.revisions.get(selector.revision_id)
-        source_bytes = self._store.source_bytes_by_revision.get(selector.revision_id)
+        revision = store.revisions.get(rev_id)
+        source_bytes = store.source_bytes_by_revision.get(rev_id)
         if revision is None or source_bytes is None:
             return self._integrity_failure()
-        if not self._store.source_bytes_match_revision(
-            selector.revision_id,
-            source_bytes,
-            revision.source_sha256,
+        rev_sha = revision.source_sha256
+        cached_sig = store.verified_source_integrity_by_revision.get(rev_id)
+        if (
+            cached_sig is None
+            or cached_sig[0] is not source_bytes
+            or cached_sig[1] != rev_sha
         ):
-            return self._integrity_failure()
-        if selector.source_sha256 != revision.source_sha256:
+            if not store.source_bytes_match_revision(rev_id, source_bytes, rev_sha):
+                return self._integrity_failure()
+        if selector.source_sha256 != rev_sha:
             return self._blocked(SOURCE_HASH_MISMATCH)
-        snapshot = self._store.snapshots.get(selector.snapshot_id)
+        snap_id = selector.snapshot_id
+        snapshot = store.snapshots.get(snap_id)
         if (
             snapshot is None
             or snapshot.document_id != selector.document_id
-            or snapshot.revision_id != selector.revision_id
+            or snapshot.revision_id != rev_id
             or snapshot.source_sha256 != selector.source_sha256
         ):
             return self._blocked(SNAPSHOT_MISMATCH)
-        record = self._store.observations.get((selector.snapshot_id, selector.observation_id))
+        obs_id = selector.observation_id
+        observations = store.observations
+        record = observations.get_pair(snap_id, obs_id)
         if record is None:
             return self._blocked(OBSERVATION_UNAVAILABLE)
-        if not self._store.snapshot_contains_observation(
-            snapshot,
-            selector.observation_id,
-        ):
+        if not store.snapshot_contains_observation(snapshot, obs_id):
             return self._integrity_failure()
-        key = (selector.snapshot_id, selector.observation_id)
-        expected = self._store.record_fingerprints.get(key)
-        cached = self._store.verified_resolution_cache.get(key)
+        key = (snap_id, obs_id)
+        expected = store.record_fingerprints.get_pair(snap_id, obs_id)
+        cached = store.verified_resolution_cache.get(key)
         if (
             expected is not None
             and cached is not None
@@ -2191,55 +2277,58 @@ class SourceObservationAuthority:
             and cached[1] is snapshot
             and cached[2] is record
             and cached[3] == expected
-            and all(
-                (selector.snapshot_id, parent_id) in self._store.observations
-                for parent_id in record.derivation_parent_ids
+            and (
+                not record.derivation_parent_ids
+                or all(
+                    (snap_id, parent_id) in observations
+                    for parent_id in record.derivation_parent_ids
+                )
             )
         ):
             # The cached object is internal validation state. Return fresh
             # defensive copies so even object.__setattr__ on a frozen value
             # cannot poison subsequent authority reads.
-            return _clone_result(
+            return _clone_result_bound(
                 cached[4],
-                source_revision=_clone_revision(revision),
-                snapshot=_clone_snapshot(snapshot),
-                observation=_bind_record_to_snapshot(record, snapshot),
+                _clone_revision_exact(revision),
+                _clone_snapshot_exact(snapshot),
+                _bind_record_to_snapshot(record, snapshot),
             )
 
         if not committed_record_is_trusted(
-            self._store, selector.snapshot_id, record, expected
+            store, snap_id, record, expected
         ):
             actual = _content_sha256(_record_payload(record))
             if expected is None or expected != actual or record.observation_payload_sha256 != actual:
-                self._store.verified_resolution_cache.pop(key, None)
+                store.verified_resolution_cache.pop(key, None)
                 return self._integrity_failure()
             for parent_id in record.derivation_parent_ids:
-                if (selector.snapshot_id, parent_id) not in self._store.observations:
-                    self._store.verified_resolution_cache.pop(key, None)
+                if (snap_id, parent_id) not in observations:
+                    store.verified_resolution_cache.pop(key, None)
                     return self._blocked(LINEAGE_UNAVAILABLE)
         result = SourceObservationAuthorityResult(
             status=EvidenceResolutionStatus.CORROBORATED,
             proposition=SOURCE_OBSERVATION_EXISTS,
             physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
             reason_codes=("producer_owned_source_observation_resolved",),
-            source_revision=_clone_revision(revision),
-            snapshot=_clone_snapshot(snapshot),
+            source_revision=_clone_revision_exact(revision),
+            snapshot=_clone_snapshot_exact(snapshot),
             observation=_bind_record_to_snapshot(record, snapshot),
             semantic_enumeration_complete=None,
             decision_scope_complete=None,
         )
-        self._store.verified_resolution_cache[key] = (
+        store.verified_resolution_cache[key] = (
             revision,
             snapshot,
             record,
             expected,
             result,
         )
-        return _clone_result(
+        return _clone_result_bound(
             result,
-            source_revision=_clone_revision(revision),
-            snapshot=_clone_snapshot(snapshot),
-            observation=_bind_record_to_snapshot(record, snapshot),
+            _clone_revision_exact(revision),
+            _clone_snapshot_exact(snapshot),
+            _bind_record_to_snapshot(record, snapshot),
         )
 
     def coverage(
