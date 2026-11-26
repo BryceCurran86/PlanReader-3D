@@ -722,3 +722,25 @@ def test_unmapped_source_alternative_cannot_poison_one_authentic_floor_owner():
     published = publish_live_floor_area_quantities(claim)
     assert len(published) == 1
     assert published[0].metadata["upstream_room_area_quantity_id"] == source.quantity_id
+
+
+def test_recovered_explicit_commercial_veto_survives_both_canonical_reissuers():
+    """Recover the narrow #4232 veto, including conflicting FIRM replay order."""
+    original = _source_area()
+    blocked = replace(original, metadata={
+        **original.metadata, "commercial_projection_allowed": False,
+    })
+    allowed = replace(original, metadata={
+        **original.metadata, "commercial_projection_allowed": True,
+    })
+    for quantities in ((blocked,), (blocked, allowed), (allowed, blocked),
+                       (allowed, blocked, allowed)):
+        claim = _claim_with_canonical_room(*quantities)
+        assert publish_live_floor_area_quantities(claim) == ()
+        assert publish_live_canonical_room_area_quantities(claim) == ()
+        assert claim.room_area_quantity_evidence == quantities
+    assert blocked.metadata["commercial_projection_allowed"] is False
+    for source in (original, allowed):
+        claim = _claim_with_canonical_room(source)
+        assert len(publish_live_floor_area_quantities(claim)) == 1
+        assert len(publish_live_canonical_room_area_quantities(claim)) == 1
