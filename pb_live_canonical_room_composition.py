@@ -132,6 +132,16 @@ class LiveCanonicalRoomObject:
         }
 
 
+@dataclass(frozen=True, order=True)
+class ViewportWallIdentityLink:
+    """A drawing-area wall candidate and the whole-page candidate that traces the same wall."""
+
+    page_id: str
+    viewport_decision_scope_id: str
+    viewport_wall_candidate_id: str
+    page_wall_candidate_id: str
+
+
 @dataclass(frozen=True)
 class LiveCanonicalRoomComposition:
     status: EvidenceResolutionStatus
@@ -144,6 +154,8 @@ class LiveCanonicalRoomComposition:
         repr=False,
         compare=False,
     )
+    # The links rooms used to name their walls; only with viewport_wall_identity_links.
+    viewport_wall_identity_links: tuple[ViewportWallIdentityLink, ...] = ()
 
     def room_face_authority_binding_for(
         self,
@@ -259,6 +271,42 @@ def _authority_binding(
 
 def _dedupe(values: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in values if value))
+
+
+def _viewport_to_page_wall_candidate_ids(page_scope, viewport_scope) -> dict[str, str]:
+    """Drawing-area wall candidate ID -> whole-page candidate ID, only where both trace the same wall.
+
+    Candidate IDs hash their scope, so one wall has a different ID in each scope. The same wall means the identical traced path
+    and the identical source primitive IDs on the same source page. Anything not exactly one-to-one in both scopes stays
+    unlinked: no proximity, no string rewriting, no tie-break.
+    """
+    if any(scope.status is not EvidenceResolutionStatus.CORROBORATED for scope in (page_scope, viewport_scope)) or any(
+        getattr(page_scope, name) != getattr(viewport_scope, name)
+        for name in ("document_id", "revision_id", "source_sha256", "page_id")
+    ):
+        return {}
+
+    def unique_by_signature(records) -> dict:
+        by_signature: dict = {}
+        for record in records:
+            identity = record.physical_identity
+            if (
+                identity is None
+                or not identity.usable
+                or identity.wall_candidate_id != record.wall_candidate_id
+                or not identity.source_primitive_ids
+            ):
+                continue
+            signature = (identity.path_fingerprint, identity.source_primitive_ids)
+            by_signature.setdefault(signature, []).append(str(record.wall_candidate_id))
+        return {signature: ids[0] for signature, ids in by_signature.items() if len(ids) == 1}
+
+    page = unique_by_signature(page_scope.records)
+    return {
+        viewport_id: page[signature]
+        for signature, viewport_id in unique_by_signature(viewport_scope.records).items()
+        if signature in page
+    }
 
 
 def _canonical_polygon_identity(
@@ -820,12 +868,17 @@ def compose_live_canonical_rooms(
     layered_finished_face_gate: bool = False,
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
+    viewport_wall_identity_links: bool = False,
 ) -> LiveCanonicalRoomComposition:
     """Project sealed room-face authority into persistent canonical room objects.
 
     ``layered_doorway_room_rings`` (default False: nothing changes) replaces the page room-face
     scope with doorway-closed rings read from the SHA-pinned native wall-layer ink, for pages
     where at least one ring closes. The W2/W4 wall scope that walls and openings use is untouched.
+
+    ``viewport_wall_identity_links`` (default False: nothing changes) lets a room recovered from an authenticated drawing area name
+    its walls in ``canonical_wall_ids_by_candidate``, which is keyed by the whole-page scope. A drawing-area wall is linked only to
+    the one page wall with the identical traced path and source primitives; the links used are recorded on the composition.
     """
 
     if type(layered_doorway_room_rings) is not bool:
@@ -853,6 +906,8 @@ def compose_live_canonical_rooms(
         )
     if type(layered_wall_end_stroke_closures) is not bool:
         raise ValueError("layered_wall_end_stroke_closures must be an explicit boolean")
+    if type(viewport_wall_identity_links) is not bool:
+        raise ValueError("viewport_wall_identity_links must be an explicit boolean")
     if layered_wall_end_stroke_closures and not layered_dark_painted_wall_source:
         raise ValueError(
             "layered_wall_end_stroke_closures requires layered_dark_painted_wall_source"
@@ -941,6 +996,7 @@ def compose_live_canonical_rooms(
     unresolved_pages: list[str] = []
     viewport_fallback_used = False
     authority_bindings: list[_RoomFaceAuthorityBinding] = []
+    used_wall_links: set[ViewportWallIdentityLink] = set()
 
     for page_id in wall_opening_composition.page_ids:
         selector = page_room_selectors[page_id]
@@ -1079,6 +1135,19 @@ def compose_live_canonical_rooms(
                 )
                 page_resolved = False
                 page_face_universe_complete = True
+                page_wall_scope = None
+                if viewport_wall_identity_links and canonical_wall_ids_by_candidate is not None:
+                    # The same page scope the canonical wall map was keyed from.
+                    page_wall_scope = wall_opening_composition.physical_wall_candidate_authority.resolve_scope(
+                        PhysicalWallCandidateSelector(
+                            document_id=published.revision.document_id,
+                            revision_id=published.revision.revision_id,
+                            source_sha256=published.revision.source_sha256,
+                            snapshot_id=published.snapshot.snapshot_id,
+                            page_id=page_id,
+                            decision_scope_id=f"wall-source:page-{page_id}",
+                        )
+                    )
                 for wall_selector in selectors:
                     wall_scope = viewport_wall_authority.resolve_scope(wall_selector)
                     if (
@@ -1168,24 +1237,54 @@ def compose_live_canonical_rooms(
                             room_result.records, composite_records
                         )
                     )
-                    rooms.extend(
+                    wall_ids_by_candidate = canonical_wall_ids_by_candidate
+                    unresolved_ids = unresolved_wall_candidate_ids
+                    wall_links: dict[str, str] = {}
+                    if page_wall_scope is not None:
+                        wall_links = {
+                            viewport_wall: page_wall
+                            for viewport_wall, page_wall in _viewport_to_page_wall_candidate_ids(
+                                page_wall_scope, wall_scope
+                            ).items()
+                            if page_wall in canonical_wall_ids_by_candidate
+                            and viewport_wall not in canonical_wall_ids_by_candidate
+                        }
+                    if wall_links:
+                        page_unresolved = {str(value) for value in (unresolved_wall_candidate_ids or ())}
+                        wall_ids_by_candidate = {
+                            **canonical_wall_ids_by_candidate,
+                            **{v: canonical_wall_ids_by_candidate[w] for v, w in wall_links.items()},
+                        }
+                        # A link never resolves a wall: an unresolved page wall stays unresolved.
+                        unresolved_ids = page_unresolved | {v for v, w in wall_links.items() if w in page_unresolved}
+                    viewport_rooms = [
                         _room_object_from_record(
                             record,
                             viewport_id=wall_scope.viewport_id,
-                            canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
-                            unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
+                            canonical_wall_ids_by_candidate=wall_ids_by_candidate,
+                            unresolved_wall_candidate_ids=unresolved_ids,
                             room_label_record=label_records_by_face.get(str(record.face_id)),
                         )
                         for record in canonical_source_records
-                    )
-                    rooms.extend(
+                    ]
+                    viewport_rooms.extend(
                         _room_object_from_composite_record(
                             record,
                             viewport_id=wall_scope.viewport_id,
-                            canonical_wall_ids_by_candidate=canonical_wall_ids_by_candidate,
-                            unresolved_wall_candidate_ids=unresolved_wall_candidate_ids,
+                            canonical_wall_ids_by_candidate=wall_ids_by_candidate,
+                            unresolved_wall_candidate_ids=unresolved_ids,
                         )
                         for record in composite_records
+                    )
+                    rooms.extend(viewport_rooms)
+                    used_wall_links.update(
+                        ViewportWallIdentityLink(
+                            str(page_id), str(wall_selector.decision_scope_id), str(wall_id), wall_links[wall_id]
+                        )
+                        for room in viewport_rooms
+                        if room.canonical_bounding_wall_ids
+                        for wall_id in room.bounding_wall_ids
+                        if wall_id in wall_links
                     )
                     page_resolved = True
                     if not room_result.face_universe_complete:
@@ -1213,6 +1312,7 @@ def compose_live_canonical_rooms(
             rooms=tuple(rooms),
             source_pages=tuple(sorted(room_pages)),
             _room_face_authority_bindings=tuple(authority_bindings),
+            viewport_wall_identity_links=tuple(sorted(used_wall_links)),
         )
     if rooms:
         return LiveCanonicalRoomComposition(
@@ -1229,6 +1329,7 @@ def compose_live_canonical_rooms(
             rooms=tuple(rooms),
             source_pages=tuple(sorted(room_pages)),
             _room_face_authority_bindings=tuple(authority_bindings),
+            viewport_wall_identity_links=tuple(sorted(used_wall_links)),
         )
     return LiveCanonicalRoomComposition(
         status=EvidenceResolutionStatus.ABSTAINED,
@@ -1239,6 +1340,7 @@ def compose_live_canonical_rooms(
 
 
 __all__ = [
+    "ViewportWallIdentityLink",
     "LIVE_CANONICAL_ROOM_PARTIAL",
     "LIVE_CANONICAL_ROOM_FACE_UNIVERSE_PARTIAL",
     "LIVE_CANONICAL_ROOM_RESOLVED",
