@@ -178,3 +178,75 @@ def test_hosted_run_fails_before_opening_any_original(tmp_path, monkeypatch, cap
     assert stopped.value.code == 2
     assert "local only" in capsys.readouterr().err
     assert not (tmp_path / "attempt").exists()
+
+
+def test_parallel_projects_are_bounded_and_published_in_frozen_order(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Lock
+
+    source, maps, output = (tmp_path / name for name in ("sources", "maps", "attempt"))
+    source.mkdir()
+    maps.mkdir()
+    sizes = dict(zip(handoff.PROJECTS, (2, 1, 1, 6), strict=True))
+    monkeypatch.setattr(handoff, "original_roster", lambda project, root: [None] * sizes[project])
+    barrier = Barrier(2, timeout=10)
+    lock = Lock()
+    active = 0
+    peak = 0
+    calls = []
+
+    # Exercise orchestration with mock producers only; production uses spawn,
+    # never threads for PDF decoding.
+    def pool(*, max_workers, mp_context):
+        assert max_workers == 2
+        assert mp_context.get_start_method() == "spawn"
+        return ThreadPoolExecutor(max_workers=max_workers)
+
+    def produce(**kwargs):
+        nonlocal active, peak
+        project, directory = kwargs["project_id"], kwargs["output_dir"]
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            calls.append(project)
+        try:
+            barrier.wait()
+            if project == handoff.PROJECTS[0]:
+                raise RuntimeError("failed source role")
+            directory.mkdir(parents=True)
+            (directory / "ALL_SOURCE_ROLES.sealed.json").write_text("{}")
+            (directory / "ALL_SOURCE_ROLES.customer_rows.json").write_text("[]")
+            return {"status": "COMPLETE",
+                    "native_source_input_coverage_verified": True,
+                    "source_role_coverage_verified": True,
+                    "customer_bijection_verified": True}
+        finally:
+            with lock:
+                active -= 1
+
+    def score(args):
+        status = json.loads((output / "attempt_status.json").read_text())
+        assert [p["project_id"] for p in status["projects"]] == list(handoff.PROJECTS)
+        assert status["projects"][0]["status"] == "ROLE_REPLAY_FAILED"
+        assert len(list((output / "sealed").iterdir())) == 3
+        assert len(list((output / "customer").iterdir())) == 3
+        return 2
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor", pool)
+    monkeypatch.setattr(handoff, "produce_all_source_roles", produce)
+    monkeypatch.setattr(runner, "report_evidence", score)
+    assert runner.run_benchmark(
+        source_dir=source, identity_map_dir=maps, output_dir=output,
+        timeout_min=20, project_workers=2,
+    ) == 2
+    assert peak == 2
+    assert sorted(calls) == sorted(handoff.PROJECTS)
+
+
+@pytest.mark.parametrize("workers", (0, 3, True))
+def test_unsafe_project_worker_counts_rejected(tmp_path, workers):
+    with pytest.raises(ValueError, match="project_workers"):
+        runner.run_benchmark(
+            source_dir=tmp_path / "sources", identity_map_dir=tmp_path / "maps",
+            output_dir=tmp_path / "attempt", timeout_min=20, project_workers=workers,
+        )

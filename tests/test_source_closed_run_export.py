@@ -639,3 +639,38 @@ def test_original_producer_lineage_arrays_still_verify_byte_identity() -> None:
     ):
         assert type(encoded["quantities"][0][field]) is list
     assert export.sealed_source_closed_run_from_dict(encoded).fingerprint == sealed.fingerprint
+
+
+def test_single_pass_wire_serialization_preserves_fingerprints_and_roundtrip(monkeypatch):
+    run = export.seal_source_closed_run(
+        [quantity()], project_id="project-a", traces_by_quantity_id={"qty-1": trace()},
+    )
+    expected = {**run.payload(), "fingerprint": run.fingerprint}
+    original = export.SealedSourceClosedQuantity.payload
+    calls = []
+
+    def counted(self):
+        calls.append(self.quantity_id)
+        return original(self)
+
+    monkeypatch.setattr(export.SealedSourceClosedQuantity, "payload", counted)
+    wire = run.to_dict()
+    assert wire == expected
+    assert calls == ["qty-1"]
+    restored = export.sealed_source_closed_run_from_dict(wire)
+    assert restored.to_dict() == expected
+
+
+def test_single_pass_serialization_does_not_cache_stale_fingerprints():
+    run = export.seal_source_closed_run(
+        [quantity()], project_id="project-a", traces_by_quantity_id={"qty-1": trace()},
+    )
+    wire = run.to_dict()
+    # Returned payloads remain independent. A changed wire receipt must still
+    # be rejected by the existing independent verifier.
+    wire["quantities"][0]["value"] += 1
+    with pytest.raises(export.SourceClosedRunConflictError):
+        export.sealed_source_closed_run_from_dict(wire)
+    fresh = run.to_dict()
+    assert fresh["quantities"][0]["value"] == 13.270425
+    assert fresh["fingerprint"] == run.fingerprint
