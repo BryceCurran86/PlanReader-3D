@@ -53,10 +53,12 @@ export function immersiveBudget(build:StudyGeometry,study:AssemblyStudyConfig,ev
  summary.material=result.rows.some(r=>r.quantity!==null&&r.quantity>0&&r.material!==null)?result.material:null;
  summary.labour=result.rows.some(r=>r.quantity!==null&&r.quantity>0&&r.labour!==null)?result.labour:null;
  summary.delta=priced&&prior&&hasPricedWork(prior)?result.total-prior.total:null;
- summary.trades=result.trades.map(t=>({trade:t.trade,cents:result.rows.some(r=>r.trade===t.trade&&r.quantity!==null&&r.quantity>0&&(r.material!==null||r.labour!==null))?t.cents:null,partial:t.partial}));
+ const pricedTrades=new Set(result.rows.filter(r=>r.quantity!==null&&r.quantity>0&&(r.material!==null||r.labour!==null)).map(r=>r.trade));
+ summary.trades=result.trades.map(t=>({trade:t.trade,cents:pricedTrades.has(t.trade)?t.cents:null,partial:t.partial}));
  return summary;
 }
-export const budgetMoney=(cents:number|null)=>cents===null?"Unpriced":new Intl.NumberFormat("en-AU",{style:"currency",currency:"AUD"}).format(cents/100);
+const moneyFormat=new Intl.NumberFormat("en-AU",{style:"currency",currency:"AUD"});
+export const budgetMoney=(cents:number|null)=>cents===null?"Unpriced":moneyFormat.format(cents/100);
 export function budgetHeadline(b:ImmersiveBudget){
  if(b.status==="disabled")return "Budget off · enable in desktop review";
  if(b.status==="invalid")return "Budget unavailable · check desktop assumptions";
