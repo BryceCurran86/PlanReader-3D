@@ -15,6 +15,7 @@ import type { CatalogueItem, ItemTarget, ItemVisual } from "./itemCatalogue.ts";
 import { makeItemHostId, openingFitMessage, openingHostId, timberFitsWall, worktopId } from "./itemPlacement.ts";
 import type { ItemHit, OpeningSize, PlacedItem, Vector, WallSection } from "./itemPlacement.ts";
 import { createCatalogueFixture } from "./catalogueFixtures.ts";
+import {applyMaterialDetailBudget,ownedDetailTextures} from "./materialQuality.ts";
 import { finishMesh, trimRun } from "./catalogueGeometry.ts";
 import {architraveMitres} from "./architraveMitres.ts";
 import {skirtingEndCuts,applySkirtingCuts} from "./skirtingMitres.ts";
@@ -157,7 +158,7 @@ function dispose(root: THREE.Object3D) {
     for (const material of faces) materials.add(material);
   });
   for (const material of materials) {
-    if (material instanceof THREE.MeshStandardMaterial) for(const texture of [material.map,material.bumpMap,material.roughnessMap,material.normalMap])if(texture)textures.add(texture);
+    if (material instanceof THREE.MeshStandardMaterial) for(const texture of ownedDetailTextures(material))if(texture)textures.add(texture);
     material.dispose();
   }
   for(const texture of textures)texture.dispose();
@@ -454,5 +455,6 @@ export function createCatalogueScene(scene: THREE.Scene) {
     marker.visible = true;
   }
 
-  return { sync, clear, candidate, aim, contextAt, updatePreviewLights, previewSwitchDistance };
+  function setDetailEnabled(enabled:boolean){for(const root of mounts)applyMaterialDetailBudget(root,enabled);}
+  return { sync, clear, candidate, aim, contextAt, updatePreviewLights, previewSwitchDistance, setDetailEnabled };
 }
