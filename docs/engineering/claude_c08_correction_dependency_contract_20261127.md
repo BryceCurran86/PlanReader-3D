@@ -33,7 +33,21 @@ Never:
 3. Where the cache lives (session or stored) and its size bound.
 4. Which downstream results must be marked stale; the geometry side can supply changed room ids (`same_as_automatic`, `room_id`, `user_mark_ids`).
 
-C08 stays open until M02 states these.
+## MAX's answers (#4764 7201721302), adopted into the contract
+
+- Packet identity: a canonical digest of source revision, page, frame, options and schema plus the ordered active operations (order by `correction_id`; the tracer's result does not depend on mark order).
+- Undo removes the operation and invalidates the affected pass; pieces recorded once serve every later packet.
+- Upstream extraction cache keyed by original SHA, page, frame, options and code, bounded in bytes and entries; a source change invalidates the whole document.
+- An edit invalidates the affected topology and every dependent room, finish, quantity and customer receipt; no stale commercial output.
+- The API is agreed with MAX before any cross-file edit; it is not built.
+
+## Geometry-local invalidation tests (`tests/test_correction_invalidation_scope_v1.py`)
+
+Confirmed on synthetic pages: the pieces offered to the marks do not depend on them; pieces recorded once give the same rooms as a fresh run for every later packet, including undo; marks that are not barriers leave rooms unchanged; a mark changes only the room it touches (compared by geometry); mark order does not matter.
+
+**Open defect (two strict xfail tests):** a room's `record_id` hashes its corner list as shapely returns it, so closing a gap in one room changes an untouched room's id, and reordering the input lines changes ids (40 of 40 shuffles on a one-room page). Consequences: per-room invalidation by id is not possible, and the review block reports `same_as_automatic: false` for unchanged rooms. Until fixed, dependents must key on canonical geometry or treat every receipt as stale. Proposed, not built (needs review): start each room's corner list at its smallest corner in `pb_next_wall_ring_preview` (ids change once; geometry unchanged), or only compare canonical geometry in the review block.
+
+C08 stays open until the API is agreed and the id defect is decided.
 
 ## One measurement (one residential floor plan page: one tracer pass, 18 rooms)
 
