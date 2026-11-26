@@ -131,6 +131,28 @@ def render_guided_plan_review(st, *, workspace, page, native_trace, doc_path,
                                   value=float(previous.get("dimension_mm") or 0),
                                   step=1.0, key=prefix + "_dim_" + issue)
         dimension = entered or None
+    witness = None
+    if issue == "scale" and decision == "correction_recorded" and dimension is not None:
+        try:
+            marks = normalise_editor_shapes(pending[1])
+        except ValueError:
+            marks = []
+        witnesses = {m["id"]: m for m in marks if m["category"] == "dimension_witness"}
+        choices = [None, *witnesses]
+        initial = previous.get("correction_id")
+        chosen = st.selectbox(
+            "Which drawn dimension line does this value describe?",
+            choices, index=choices.index(initial) if initial in choices else 0,
+            format_func=lambda k: "Not bound — information only" if k is None
+            else f"Dimension witness {list(witnesses).index(k)+1}: {k}",
+            key=prefix + "_scale_witness",
+        )
+        witness = witnesses.get(chosen)
+        if witness is not None:
+            st.caption("The dimension applies to these exact two selected points only. "
+                       "Moving or deleting them requires clearing or reconfirming the answer.")
+    clear_answer = st.checkbox("Remove this saved answer", value=False,
+                               key=prefix + "_clear_" + issue) if previous else False
     include_answer = st.checkbox("Save this question's answer with my corrections",
                                  value=False, key=prefix + "_include_" + issue)
     if st.button("Save user review draft", type="primary", key=prefix + "_save"):
@@ -138,8 +160,14 @@ def render_guided_plan_review(st, *, workspace, page, native_trace, doc_path,
             # Validate all the current shapes before any database mutation.
             normalise_editor_shapes(pending[1])
             answers = dict(saved["answers"])
-            if include_answer:
-                answers[issue] = normalise_answer(issue, decision, note, dimension)
+            if clear_answer:
+                answers.pop(issue, None)
+            elif include_answer:
+                answers[issue] = normalise_answer(
+                    issue, decision, note, dimension,
+                    correction_id=witness["id"] if witness else None,
+                    witness_points=witness["points"] if witness else None,
+                )
             save_review(connect, scope, expected_revision=saved["revision"],
                         shapes=pending[1], answers=answers)
         except (ValueError, TypeError, sqlite3.Error) as exc:
@@ -177,6 +205,23 @@ def render_guided_plan_review(st, *, workspace, page, native_trace, doc_path,
                 + (", ".join(packet["affected_stage_candidates"]) or "none proposed")
                 + ". Geometry and quantities have not yet been regenerated."
             )
+            from pb_guided_review_source_questions import (
+                build_review_to_issuer_handoff, build_user_assisted_scale_issuer_request,
+            )
+            handoff = build_review_to_issuer_handoff(native_review_packet=packet)
+            st.caption(f"Source review routing: {len(handoff.actionable_directives)} "
+                       f"proposed directives; {len(handoff.unresolved_information_requests)} "
+                       "explicit information requests. These are not completed measurements.")
+            if handoff.status == "ABSTAINED":
+                st.warning("Source review routing blocked: " + ", ".join(handoff.reason_codes))
+            scale_request = build_user_assisted_scale_issuer_request(handoff=handoff)
+            if scale_request.status == "USER_ASSISTED_SCALE_INPUT_READY":
+                st.info(f"Selected dimension: {scale_request.figured_mm:g} mm across "
+                        f"{scale_request.span_pdf_pts:g} PDF points. "
+                        f"Proposed local scale: {scale_request.implied_mm_per_pt:g} mm/pt. "
+                        "Not applied to a viewport or measured quantities.")
+            elif "scale" in saved["answers"]:
+                st.caption("Scale remains unresolved: " + ", ".join(scale_request.reason_codes))
             import json
             st.download_button(
                 "Export private correction packet (JSON)",
