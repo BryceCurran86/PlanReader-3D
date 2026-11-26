@@ -3949,12 +3949,38 @@ class PhysicalOpeningAuthority:
     ) -> tuple[CandidateSemanticOpening, ...]:
         strong = cls._visible_structural_candidates(seed, records)
         generic = cls._visible_generic_correlated_candidates(seed, records)
-        strong_sets = [set(item.source_observation_ids) for item in strong]
-        retained = [
-            item
-            for item in generic
-            if not any(set(item.source_observation_ids) <= support for support in strong_sets)
-        ]
+        # A generic candidate is redundant only when ALL of its source
+        # observations are already in one strong candidate. Index strong
+        # supports by their actual source observation IDs: unlike the former
+        # generic-by-strong cross-product scan, only strong candidates that
+        # share the generic candidate's rarest member need testing. Preserve
+        # empty-support subset semantics and the original candidate ordering.
+        strong_supports = tuple(
+            frozenset(item.source_observation_ids) for item in strong
+        )
+        strong_by_observation: dict[str, list[frozenset[str]]] = {}
+        for support in strong_supports:
+            for observation_id in support:
+                strong_by_observation.setdefault(observation_id, []).append(support)
+
+        retained = []
+        for item in generic:
+            support = frozenset(item.source_observation_ids)
+            if not support:
+                # The empty set is a subset of any strong support, even an
+                # empty one; with no strong candidates it must be retained.
+                covered = bool(strong_supports)
+            else:
+                owners = min(
+                    (
+                        strong_by_observation.get(observation_id, ())
+                        for observation_id in support
+                    ),
+                    key=len,
+                )
+                covered = any(support <= owner for owner in owners)
+            if not covered:
+                retained.append(item)
         by_id = {item.candidate_id: item for item in (*strong, *retained)}
         return tuple(by_id[key] for key in sorted(by_id))
 
