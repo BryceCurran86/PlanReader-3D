@@ -19,9 +19,14 @@ Date: 2026-11-26. Order: owner work order #4764 7190405332 item 1; claim 7190772
 ## Verification
 
 - 10 tests (`tests/test_schedule_binding_text_reuse_v1.py`): same result with and without reuse; one read per block, every time outside; replaced or downgraded receipt and republished snapshot read again; block exit by error; nesting; two snapshots; accessor. 6 single-line mutants each fail one.
-- Tests touching the changed modules, with originals: 1,006 passed, 2 skipped.
+- Tests touching the changed modules, with originals: 1,006 passed, 2 skipped; after merging `main` 4cbf46356, 81 related files: 1,752 passed, 4 skipped.
 
-AB_PLACEHOLDER
+Full handoff before and after on `main` 4cbf46356 (one residential original, kept local), same host:
+
+- Binder publish time 24.2 s to 1.25 s over the same 540 calls; `resolve_text` calls 3,378,528 to 1,491,152; the text was read once.
+- All 5 output files identical, including the 30 customer rows and the abstentions.
+- Whole run 496.1 s to 487.8 s. Another agent's job ran during the after run, so the whole-run time is not clean.
+- The other originals are checked once, together with the other speed fixes, before the one consolidated pull request.
 
 ## Benchmark observations that must not influence the implementation
 
