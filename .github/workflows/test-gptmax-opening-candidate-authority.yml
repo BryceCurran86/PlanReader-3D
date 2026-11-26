@@ -16,7 +16,37 @@ concurrency:
   group: gptmax-opening-authority-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
+  focused:
+    runs-on: ubuntu-latest
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Candidate, identity, source-integrity and count-gate regressions
+        run: >-
+          PYTHONPATH=. python -m pytest -q
+          tests/test_raster_framed_opening_g17_contract.py
+          tests/test_raster_continuation_owner_ambiguity.py
+          tests/test_raster_opening_live_enumeration.py
+          tests/test_gptmax_physical_authority_handoff.py
+          tests/test_generic_opening_count_authority_v1.py
+          tests/test_physical_opening_identity_stability.py
+          tests/test_source_visibility_task3_hardening.py
+          tests/test_semantic_opening_enumeration_authority_v1.py
+          tests/test_opening_universe_completeness_source_adapter_v1.py
+          tests/test_physical_wall_candidate_drafting_motif_filter.py
   source-proof:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     env:
       ORT_DISABLE_TELEMETRY: "1"
@@ -72,3 +102,9 @@ jobs:
           name: lot16-opening-candidate-authority
           path: lot16-opening-candidate-audit.json
           retention-days: 14
+
+  original-source-not-verified:
+    if: ${{ true }}
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: source-proof

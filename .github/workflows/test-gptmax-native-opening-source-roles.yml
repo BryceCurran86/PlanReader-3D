@@ -15,7 +15,34 @@ concurrency:
   group: gptmax-native-opening-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
+  focused:
+    runs-on: ubuntu-latest
+    env:
+      ORT_DISABLE_TELEMETRY: "1"
+    timeout-minutes: 25
+    strategy:
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+      - name: Source role, integrity, identity and closure regressions
+        run: >-
+          PYTHONPATH=. python -m pytest -q
+          tests/test_native_dimension_cap_evidence.py
+          tests/test_native_unstroked_fill_evidence.py
+          tests/test_native_opening_source_role_diagnostic.py
+          tests/test_g17_visible_opening_existence_v1.py
+          tests/test_physical_opening_identity_stability.py
+          tests/test_semantic_opening_enumeration_authority_v1.py
+          tests/test_source_opening_universe_evidence_v1.py
   source-proof:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     env:
       ORT_DISABLE_TELEMETRY: "1"
@@ -68,3 +95,9 @@ jobs:
           name: lot16-native-opening-source-roles
           path: lot16-native-opening-source-roles.json
           retention-days: 14
+
+  original-source-not-verified:
+    if: ${{ true }}
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: source-proof

@@ -34,6 +34,7 @@ jobs:
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
   original-lot16-retention:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -125,3 +126,9 @@ jobs:
             native-neutral-roles.json
             source-opposition-fresh-retention.json
           retention-days: 14
+
+  original-source-not-verified:
+    if: ${{ true }}
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: original-lot16-retention

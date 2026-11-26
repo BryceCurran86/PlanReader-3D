@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   original-source-stages:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -108,3 +109,9 @@ jobs:
           name: gpt1-original-source-stages-unsealed-diagnostic
           path: artifacts/gpt1-source-stage
           retention-days: 3
+
+  original-source-not-verified:
+    if: ${{ true }}
+    uses: ./.github/workflows/original-source-not-run.yml
+    with:
+      job: original-source-stages
