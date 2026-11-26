@@ -168,7 +168,11 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
         const shell=mesh(bowl,x,0,0,body);shell.name="Ceramic bowl shell";
         const drain=cylinder(Math.min(.028,span*.065),.003,x,h*.19+.002,0,detail);
         drain.name="Bowl drain";
-        cylinder(Math.min(.017,span*.04),.004,x,h*.19+.004,0,white);
+        const wasteRadius=Math.min(.028,span*.065);
+        const collar=mesh(new THREE.TorusGeometry(wasteRadius*.82,Math.min(.002,wasteRadius*.12),8,24),x,h*.19+.004,0,white);
+        collar.rotation.x=-Math.PI/2;collar.name="Waste flange";
+        const plug=cylinder(Math.min(.017,span*.04),.004,x,h*.19+.004,0,white);
+        plug.name="Waste plug";
       }
       break;
     }
