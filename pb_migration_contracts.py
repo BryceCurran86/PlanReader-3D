@@ -167,19 +167,29 @@ def canonical_contract_json(value: Any) -> str:
     )
 
 
+_CANONICAL_ID_PREFIX = re.compile(r"[a-z0-9](?:[a-z0-9_]*[a-z0-9])?\\Z")
+
+
 def stable_contract_id(prefix: str, payload: Any, *, digest_chars: int = 20) -> str:
     """Create a deterministic content-derived ID for a migration artifact.
 
     ``prefix`` is semantic only (for example ``doc``, ``vp``, ``ev``, ``ent``
     or ``qty``); the digest is calculated solely from the canonical payload.
     """
-    clean_prefix = re.sub(r"[^a-z0-9_]+", "_", str(prefix or "").strip().lower()).strip("_")
+    # Most producer IDs already have a canonical ASCII prefix. Avoid regex
+    # substitution on that hot path; retain the original normalization for
+    # every other input, including Unicode and custom string subclasses.
+    if type(prefix) is str and prefix and prefix.isascii() and _CANONICAL_ID_PREFIX.fullmatch(prefix):
+        clean_prefix = prefix
+    else:
+        clean_prefix = re.sub(r"[^a-z0-9_]+", "_", str(prefix or "").strip().lower()).strip("_")
     if not clean_prefix:
         raise ValueError("prefix must contain at least one alphanumeric character")
-    if not 8 <= int(digest_chars) <= 64:
+    width = int(digest_chars)
+    if not 8 <= width <= 64:
         raise ValueError("digest_chars must be between 8 and 64")
     digest = hashlib.sha256(canonical_contract_json(payload).encode("utf-8")).hexdigest()
-    return f"{clean_prefix}_{digest[:int(digest_chars)]}"
+    return f"{clean_prefix}_{digest[:width]}"
 
 
 @dataclass(frozen=True)
