@@ -514,6 +514,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           radial,layersOpen,layers:construction.current.layers,liningBoard:construction.current.liningBoard,liningHidden:!!selectedDraftId&&inspectedWall===selectedDraftId,
         });
       if(!layout.radial&&!angleTools&&!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
+      if(!layout.radial&&interaction.current.toolFeedback)layout.note=interaction.current.toolFeedback;
       return layout;
     }
     function menuAction(choice: MenuAction) {
@@ -1453,8 +1454,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     function menuTarget(layout:ReturnType<typeof menuLayout>){
       if(!toolsOpen)return null;
       const rayHit=buildOverlay.menuHit(raycaster,layout);
-      if(!layout.radial&&menuStickFocus&&menuFocus>=0&&!layout.buttons[menuFocus]?.disabled&&layout.buttons[menuFocus])return {index:menuFocus,action:layout.buttons[menuFocus].action};
       if(rayHit?.action)return rayHit;
+      if(!layout.radial&&menuStickFocus&&menuFocus>=0&&!layout.buttons[menuFocus]?.disabled&&layout.buttons[menuFocus])return {index:menuFocus,action:layout.buttons[menuFocus].action};
       if(layout.radial){
         const right=inputSources.find(s=>s?.handedness==="right");
         const i=thumbstickSector(standardThumbstick(right));
@@ -1463,7 +1464,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       return rayHit;
     }
     function activateMenu(choice:MenuAction){
+      // Never leave a stale hit map live while changing a submenu.
       displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuFocus=-1;menuStickFocus=false;menuStickArmed=false;
+      lastMenuSignature="";lastMenuHover=-2;
+      buildOverlay.hideMenu();
       menuAction(choice);
       if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
     }
@@ -2027,7 +2031,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const layout=toolsOpen?cachedMenu:null;
         if(layout){
           const hitLayout=displayedMenuLayout??layout;
-          if(menuPose===null)buildOverlay.sizeMenu(hitLayout);
+          if(menuPose===null||!displayedMenuLayout)buildOverlay.sizeMenu(hitLayout);
           const pose=hitLayout.radial?"radial":"panel";
           // Keep one world-space anchor through submenu transitions. Never
           // attach the tool surface to a moving controller during selection.
@@ -2083,9 +2087,10 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           lastMenuDraw=now;
           if(signature!==lastMenuSignature||!displayedMenuLayout||(hover?.index??-1)!==lastMenuHover){
             buildOverlay.sizeMenu(layout);
-            buildOverlay.drawMenu(layout,hover?.index??-1);
-            lastMenuSignature=signature;displayedMenuLayout=layout;
-            lastMenuDraw=now;lastMenuHover=hover?.index??-1;
+            if(buildOverlay.drawMenu(layout,hover?.index??-1)){
+              buildOverlay.showMenu();lastMenuSignature=signature;displayedMenuLayout=layout;
+              lastMenuDraw=now;lastMenuHover=hover?.index??-1;
+            }else{displayedMenuLayout=null;buildOverlay.hideMenu();}
           }
         }
       } else {
