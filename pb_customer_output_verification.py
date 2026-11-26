@@ -232,6 +232,116 @@ def _verify_row_lineage(
             f"customer row {quantity_id!r} is missing measurement authority lineage"
         )
 
+    if sealed.family == "floor_finish_area":
+        # Original CrossViewFloorFinishProducer issues ONE typed canonical
+        # floor/material receipt. The actual source semantic key, not a
+        # mutable customer caption, owns the finish role:
+        # floor_finish_area:<canonical-floor-id>:<code>:<material-semantic>.
+        # A numerically unchanged customer tile area relabelled "vinyl"
+        # otherwise looks source-verified, while changing its construction
+        # material. Estimator overrides belong to a different signed path.
+        parts = sealed.semantic_key.split(":")
+        if (
+            len(parts) != 4
+            or parts[0] != "floor_finish_area"
+            or any(not part or part != part.strip() for part in parts)
+            or tuple(sealed.object_identity_refs) != (parts[1],)
+        ):
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} has unverified source floor finish identity"
+            )
+        producer_metadata = qprov.get("metadata")
+        if not isinstance(producer_metadata, Mapping):
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} lacks source floor finish material provenance"
+            )
+        for field, expected in (
+            ("canonical_floor_id", parts[1]),
+            ("finish_code", parts[2]),
+            ("semantic_finish", parts[3]),
+        ):
+            if type(producer_metadata.get(field)) is not str or (
+                producer_metadata[field] != expected
+            ):
+                raise CustomerOutputVerificationError(
+                    f"customer row {quantity_id!r} source finish {field} contradicts signed source"
+                )
+        if (
+            type(row.get("finish_system")) is not str
+            or row["finish_system"] != parts[3]
+        ):
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} finish_system differs from signed original finish material"
+            )
+        # The sealed source semantic key authenticates the FT code but does
+        # NOT sign a display-mode/version witness. A customer can rewrite both
+        # mutable metadata.element and its recomputable projection fingerprint.
+        # Therefore a generic caption cannot be accepted as a legacy positive:
+        # it is indistinguishable from a coded-to-generic downgrade. Require
+        # the exact signed FT code in both provenance and customer display.
+        producer_element = producer_metadata.get("element")
+        if (
+            type(producer_element) is not str
+            or producer_element != f"Floor finish area ({parts[2]})"
+            or type(row.get("element")) is not str
+            or row["element"] != producer_element
+        ):
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} element differs from signed original finish code"
+            )
+
+    if sealed.family == "ceiling_lining":
+        # Only the original RCP material issuer signs the four-part key:
+        # ceiling_lining:<canonical-ceiling>:<RCP-code>:<semantic-system>.
+        # Legacy ceiling_lining:<id> quantities have no proven RCP code;
+        # keep them on their existing source-closed customer path unchanged.
+        rcp_parts = sealed.semantic_key.split(":")
+        if len(rcp_parts) == 4 and rcp_parts[0] == "ceiling_lining":
+            if (
+                any(not part or part != part.strip() for part in rcp_parts)
+                or rcp_parts[1] not in sealed.object_identity_refs
+            ):
+                raise CustomerOutputVerificationError(
+                    f"customer row {quantity_id!r} has unverified RCP ceiling material identity"
+                )
+            original_meta = qprov.get("metadata")
+            if not isinstance(original_meta, Mapping):
+                raise CustomerOutputVerificationError(
+                    f"customer row {quantity_id!r} lacks original RCP material provenance"
+                )
+            for field, expected in (
+                ("canonical_ceiling_id", rcp_parts[1]),
+                ("finish_code", rcp_parts[2]),
+                ("semantic_finish", rcp_parts[3]),
+            ):
+                if (
+                    type(original_meta.get(field)) is not str
+                    or original_meta[field] != expected
+                ):
+                    raise CustomerOutputVerificationError(
+                        f"customer row {quantity_id!r} source RCP {field} differs from signed material"
+                    )
+            if (
+                type(row.get("finish_system")) is not str
+                or row["finish_system"] != rcp_parts[3]
+            ):
+                raise CustomerOutputVerificationError(
+                    f"customer row {quantity_id!r} ceiling finish_system differs from signed RCP material"
+                )
+            # A self-consistent mutable projection fingerprint cannot create
+            # a source-issued display-mode witness. The exact RCP code is
+            # already signed in semantic_key; require it in the actual row.
+            expected_element = f"Ceiling lining area ({rcp_parts[2]})"
+            if (
+                type(row.get("element")) is not str
+                or row["element"] != expected_element
+                or type(original_meta.get("element")) is not str
+                or original_meta["element"] != expected_element
+            ):
+                raise CustomerOutputVerificationError(
+                    f"customer row {quantity_id!r} element differs from signed original RCP code"
+                )
+
     # A signed source-closed quantity also authenticates its evidence status,
     # authority and confidence. A row that changes these claims while keeping
     # its quantity ID and value must not pass commercial lineage verification.
