@@ -1,8 +1,9 @@
-# Antigravity Consolidated Source Foundation (`A01`–`A10`) & 100-Area `AG` Recovery Ledger — 26 November 2026
+# Antigravity Consolidated Source Foundation (`A01`–`A10`) & 100-Area `AG` Recovery Ledger — 26–27 November 2026
 
-- **Base**: `origin/main` @ `4cbf4635675eb94099d5da26e33da3b646cd25d8` (includes merged `#4750`: Antigravity Runtime Slices `#4788`, `#4792`, `#4796`).
-- **Consolidated Branch**: `antigravity/consolidated-source-foundation-a01-a10-20261126`.
-- **Standing Rules Verified**: Zero job-specific production rules (`tools/audit_no_job_specific_shared_rules.py:audit_shared_source == ()` across all modified/added shared production `.py` files); zero overlap with MAX `#4806` and Claude `C01`–`C10`; `frozen120` unchanged/unpublished; frozen donor PRs untouched until successor acceptance.
+- **Live `main` Reconciliation**: Merged `origin/main` @ `e9516390d18d9a0f86a80821b993a71516234cfc` (zero conflicts; only `vr-editor/` changed since `4cbf463567`, so all Python source/test/parity proofs carry forward identically).
+- **Consolidated Branch / PR**: `antigravity/consolidated-source-foundation-a01-a10-20261126` (**PR `#4807`**).
+- **Standing Rules Verified**: Zero job-specific production rules (`tools/audit_no_job_specific_shared_rules.py:audit_shared_source == ()` across all 18 modified/added shared production `.py` files); zero merge conflicts with MAX `#4806`, Claude `#4810`, and live `origin/main` (`e9516390d1`); `frozen120` unchanged/unpublished; frozen donor PRs untouched until successor acceptance.
+- **Cross-Lane Donor Reconciled**: Claude's unpushed clip-group-scopes donor (`96e88fa2891e2d48232ba7c6884f78322e8dd09e`) is **reconciled directly into `#4807`** (`f8734647b` + `bce555071`: `pb_vector_geometry_v130.py:_build_clip_table_from_extended` closes clip scopes at non-clip `dtype == "group"` nodes + all 6 regression tests in `tests/test_p1_lossless_vector_primitive_provenance.py`, 28/28 PASS).
 
 ---
 
@@ -39,3 +40,34 @@
 | **39** | Render reuse | **Completed (A03)** | `pb_opening_local_g17_wall_shadow.py`, `pb_raster_unchanged_band_segments.py`, `pb_source_native_tiled_room_face_authority.py`, `pb_source_ocr_glyph_fastpath.py`. |
 | **46–50, 53, 56, 59, 60, 63** | Maryborough floor/ceiling `#4182`, RCP native `#4172`, floor finish rings `#4110`, FT3 `#4236`, material schedule `#4146`, floor finish dims `#4170`, polyurethane `#4213`, RCP bubbles, coldroom/aisle exclusions, finish multiplicity | **Equivalent on `main` + Staged in `#4755` / Recovered in `#4790` + A07** | Live on `main`: `pb_source_green_hatch_room_exclusion.py` (A07 cached), `pb_cross_view_ceiling_finish_authority.py`, `pb_source_material_semantic_authority.py`, `pb_cross_view_floor_finish_authority.py`; recovered in this PR from `#4790`: `pb_source_coincident_fixture_boundary_support_shadow.py`, `pb_source_multi_wall_open_room_face_shadow.py`, `pb_source_spatial_ceiling_label_association_shadow.py`; remaining `#4743`/`#4745`/`#4746`/`#4747` shadows verified 33/33 blobs in `#4755`. |
 | **99** | `AG` unpushed workspace code | **Audited & Accounted For** | Inspected all local worktrees & stashes under `C:\Users\bryce\.gemini\antigravity\scratch\`: **0 lost/unpushed production features**. All active Antigravity work is pushed/tracked (`#4750` merged, `#4755` staged, `#4790` consolidated here, `#4798` frozen for MAX guided integration, `#4799` reconciled in MAX `#4804`/`#4806`). One legacy stash (`stash@{0}` from Nov 7 `maryborough-office-ft3-source-customer-20261107`) and one legacy dirty worktree (`PR3D-ft2` from Nov 14) are superseded by merged `main`. |
+
+---
+
+## 3. Verification Receipts (`62/62` Checks + `65/65` Exact Customer Row Parity) & Corrected Timing Claims
+
+- **GitHub CI on `bce555071e`**: **60/60** code & full dual-Python (`3.13` & `3.14`) shard checks **PASS**, 2 skipped, 0 code/test failures.
+- **Local Private-PDF Workflows (`#7198411835`, `main` `4cbf463567` vs `#4807` `bce555071e`, immutable Lot 16 `sha256=10109b4b6e85e6e27af81f6399ce4b92abfdba80f87dc69dd5887bd6f3a65844`)**: **2/2 PASS**, 100% exact JSON parity (`before == after`):
+  1. `GPT MAX Original G17 Shadow Inclusive Source Cells::original-lot16-retention` — **PASS** (`diag_gptmax_source_authority_stages.py` `33.93s -> 31.52s`, `diag_gptmax_g17_original_inclusive_source_shadow.py` `4.08s -> 3.84s`, `21`/`15`/`9`/`2094`/`8` exact, `original_default=63`, `source_only_inclusive=64`, `before == after` exact).
+  2. `GPT MAX Producer-Owned G17 Wall Source Shadow::original-source-retention` — **PASS** (`diag_gptmax_producer_owned_g17_wall_shadow.py` `48.35s -> 43.70s` (`-9.6%`), `21`/`15`/`9`/`2094`/`8`, `snapshot_id=source_snapshot_7ad8bf09e3ebbec9797df89842574683`, `before == after` exact).
+- **Exclusive-Host Cold 4-Project Replay (`#7197901781`, timing caveat corrected in `#7198053909`)**:
+  - `au_qld_q5446_armstrong32_harlequin`: **`94.905s`**, peak WS `332.5` / priv `456.5 MB`, `4` verified rows + `5` abstention receipts, `canonical=6bad8f453de971e6` (**EXACT**).
+  - `au_qld_lot16_power`: **`537.279s`**, peak WS `1,559.0` / priv `1,606.4 MB`, `9` verified rows + `1` abstention receipt, `canonical=92d5e52d303349a9` (**EXACT**).
+  - `au_qld_3laurel`: **`374.673s`** (vs `408s` clean `main`, **`-33.3s` / `-8.2%`**), peak WS `3,627.1` / priv `3,687.0 MB`, `52` verified rows, `canonical=39db854955d5afd6` (**EXACT**).
+  - `au_qld_maryborough_service_station`: **`902.564s`** (vs `904s` clean `main`), peak WS `3,977.5` / priv `4,045.8 MB`, `SOURCE_ROLES_INCOMPLETE` (`native_source_input_coverage_verified=true`, unchanged vs `main`).
+  - **Total**: **`1,910.973s`**, **65/65 verified customer rows 100% bit-exact SHA-256 parity**.
+  - **Timing honesty note (`#7198053909`)**: No uncontended `%` delta is claimed for `Q5446` or `Lot 16` against Claude's `2,101s` `main` run (which had overlapping short jobs on those two originals); only the absolute `#4807` cold times, the clean `3Laurel` (`408s -> 374.673s`) and `Maryborough` (`904s -> 902.564s`) comparisons, and 65/65 bit-exact SHA-256 parity stand. No 20× or official benchmark score is claimed.
+
+---
+
+## 4. Explicit Remaining / Deferred `AG` Register Items (Post-Sequencing)
+
+All `A01`–`A10` code, live callers, and Claude's clip-group donor (`96e88fa2891e2d48232ba7c6884f78322e8dd09e`) are **closed inside `#4807`**. The only remaining items in the `AG` lane are explicitly tracked below (none block the `#4807 -> #4810 -> #4806` consolidated release sequence):
+
+| Item / Register Rank | Current State | Remaining Work (Post-Integration) |
+|---|---|---|
+| **Rank 9 / Claude Clip-Group Donor (`96e88fa289`)** | **Closed in `#4807`** (`f8734647b` + `bce555071`) | None — already reconciled into `pb_vector_geometry_v130.py` + 6 regression tests (`28/28` PASS). |
+| **Rank 19 (Door/Window Schedules)** | `pb_opening_schedule_v171.py` live on `main` (7 callers); 15 recovered `*_shadow.py` modules staged in MAX `#4755` (27/27 CI green, 33/33 donor blobs verified) | Post-merge live consumer wiring after `#4755` / consolidated releases land (zero job-specific rules). |
+| **Ranks 46–50, 53, 56, 59, 60, 63 (Maryborough floor/ceiling, RCP, finish rings/dims, FT3, material schedule, polyurethane, coldroom/aisle, multiplicity)** | Live authorities on `main` + A07 green-hatch cache + `#4790` shadows consolidated in `#4807`; remaining `#4743`/`#4745`/`#4746`/`#4747` shadows staged in MAX `#4755` | Post-merge live consumer wiring & Maryborough `SOURCE_ROLES_INCOMPLETE` (`role_producer_did_not_complete`) generic diagnosis after integrated release. |
+| **Guided-Review Residual Hardening (`#4798` @ `85f230d2d6`)** | **23/23 CI green**, frozen separately (`#4794` successor, `#4795` live compatibility 8/8 PASS) | Frozen awaiting MAX guided-review integration (not duplicated into `#4807`). |
+| **Runtime Slice 4 (`#4799` @ `33aabfa33b`)** | Reconciled by MAX in `#4804` / `#4806` | Donor kept frozen until `#4806` acceptance. |
+| **Next Performance Wave (`<= 306s` target)** | Integrated `#4807 + #4810 + #4806` baseline pending | Profile combined integrated `main` across all 4 originals (focusing on remaining exclusive CPU hotspots) only after MAX sequences `#4807 -> #4810 -> #4806`. |
