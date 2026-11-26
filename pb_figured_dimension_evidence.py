@@ -23,6 +23,8 @@ Important safety properties:
 """
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 import math
@@ -121,13 +123,17 @@ class ObservedGeometrySegment:
 
     @property
     def orientation(self) -> str:
-        if self.length <= 0:
+        dx = self.end[0] - self.start[0]
+        dy = self.end[1] - self.start[1]
+        if dx == 0.0 and dy == 0.0:
             return DimensionOrientation.UNKNOWN.value
         # Axis classification is relative to the segment itself; no project
         # units or scale assumptions are involved.
-        if abs(self.dx) >= abs(self.dy) * 4.0:
+        adx = abs(dx)
+        ady = abs(dy)
+        if adx >= ady * 4.0:
             return DimensionOrientation.HORIZONTAL.value
-        if abs(self.dy) >= abs(self.dx) * 4.0:
+        if ady >= adx * 4.0:
             return DimensionOrientation.VERTICAL.value
         return DimensionOrientation.UNKNOWN.value
 
@@ -677,6 +683,10 @@ def _candidate_has_complete_witness_system(
     candidate: ObservedGeometrySegment,
     same_scope: Sequence[ObservedGeometrySegment],
     calibration: DimensionLayoutCalibration,
+    *,
+    _scope_index: Optional[_VectorScopeIndex] = None,
+    _obs_view_id: str = "",
+    _excluded_paths: frozenset[int] = frozenset(),
 ) -> bool:
     """True only when both physical endpoints have distinct witness support.
 
@@ -685,17 +695,25 @@ def _candidate_has_complete_witness_system(
     those semantics. Coincident witness fragments are collapsed at exact source
     geometry tolerance, matching the final binder's endpoint logic.
     """
-    witness_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
-    for segment in same_scope:
-        if segment.segment_id == candidate.segment_id:
-            continue
-        intersection = _intersection_with_perpendicular(
+    if _scope_index is not None:
+        witness_hits = _scope_index.query_perpendicular_witness_hits(
             candidate,
-            segment,
-            calibration.witness_endpoint_distance_pt,
+            obs_view_id=_obs_view_id,
+            tolerance=calibration.witness_endpoint_distance_pt,
+            excluded_paths=_excluded_paths,
         )
-        if intersection is not None:
-            witness_hits.append((segment, intersection))
+    else:
+        witness_hits = []
+        for segment in same_scope:
+            if segment.segment_id == candidate.segment_id:
+                continue
+            intersection = _intersection_with_perpendicular(
+                candidate,
+                segment,
+                calibration.witness_endpoint_distance_pt,
+            )
+            if intersection is not None:
+                witness_hits.append((segment, intersection))
 
     coincidence_tolerance = 1e-3
     unique_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
@@ -783,6 +801,9 @@ def _unique_orientation_witness_winner(
     text_orientation_hint: Optional[str],
     same_scope: Sequence[ObservedGeometrySegment],
     calibration: DimensionLayoutCalibration,
+    _scope_index: Optional[_VectorScopeIndex] = None,
+    _obs_view_id: str = "",
+    _excluded_paths: frozenset[int] = frozenset(),
 ) -> Optional[ObservedGeometrySegment]:
     """Return one source-proven orientation+witness+span winner.
 
@@ -804,6 +825,9 @@ def _unique_orientation_witness_winner(
             candidate,
             same_scope,
             calibration,
+            _scope_index=_scope_index,
+            _obs_view_id=_obs_view_id,
+            _excluded_paths=_excluded_paths,
         )
     ]
     if len(witness_complete) == 1:
@@ -901,6 +925,302 @@ def _strict_style_dominator(
     return winners[0] if len(winners) == 1 else None
 
 
+# Pre-extracted closed 4-edge rectangle descriptor:
+# (px0, py0, px1, py1, max_edge_deviation, path_index)
+_FourEdgeRect = tuple[float, float, float, float, float, int]
+_HSegEntry = tuple[float, float, float, ObservedGeometrySegment]  # (y_mid, x_lo, x_hi, seg)
+_VSegEntry = tuple[float, float, float, ObservedGeometrySegment]  # (x_mid, y_lo, y_hi, seg)
+
+
+def _extract_four_edge_rect_candidates(
+    segments: Sequence[ObservedGeometrySegment],
+) -> tuple[tuple[_FourEdgeRect, ...], tuple[float, ...]]:
+    """Pre-extract every 4-edge axis-aligned rectangle path once, sorted by px0."""
+    by_path: dict[int, list[ObservedGeometrySegment]] = {}
+    for segment in segments:
+        if segment.source_path_index is None:
+            continue
+        by_path.setdefault(int(segment.source_path_index), []).append(segment)
+
+    horiz_val = DimensionOrientation.HORIZONTAL.value
+    vert_val = DimensionOrientation.VERTICAL.value
+    rects: list[_FourEdgeRect] = []
+    for path_index, path_segments in by_path.items():
+        if len(path_segments) != 4:
+            continue
+        horizontal: list[ObservedGeometrySegment] = []
+        vertical: list[ObservedGeometrySegment] = []
+        for segment in path_segments:
+            ori = segment.orientation
+            if ori == horiz_val:
+                horizontal.append(segment)
+            elif ori == vert_val:
+                vertical.append(segment)
+            else:
+                break
+        if len(horizontal) != 2 or len(vertical) != 2:
+            continue
+
+        s0 = path_segments[0]
+        px0 = px1 = float(s0.start[0])
+        py0 = py1 = float(s0.start[1])
+        for segment in path_segments:
+            for point in (segment.start, segment.end):
+                px = float(point[0])
+                py = float(point[1])
+                if px < px0:
+                    px0 = px
+                elif px > px1:
+                    px1 = px
+                if py < py0:
+                    py0 = py
+                elif py > py1:
+                    py1 = py
+
+        max_dev = 0.0
+        for segment in horizontal:
+            y0 = float(segment.start[1])
+            y1 = float(segment.end[1])
+            d0 = abs(y0 - py0)
+            d1 = abs(y0 - py1)
+            d = d0 if d0 < d1 else d1
+            if d > max_dev:
+                max_dev = d
+            d0 = abs(y1 - py0)
+            d1 = abs(y1 - py1)
+            d = d0 if d0 < d1 else d1
+            if d > max_dev:
+                max_dev = d
+        for segment in vertical:
+            x0 = float(segment.start[0])
+            x1 = float(segment.end[0])
+            d0 = abs(x0 - px0)
+            d1 = abs(x0 - px1)
+            d = d0 if d0 < d1 else d1
+            if d > max_dev:
+                max_dev = d
+            d0 = abs(x1 - px0)
+            d1 = abs(x1 - px1)
+            d = d0 if d0 < d1 else d1
+            if d > max_dev:
+                max_dev = d
+        rects.append((px0, py0, px1, py1, max_dev, path_index))
+
+    rects.sort(key=lambda item: item[0])
+    return tuple(rects), tuple(item[0] for item in rects)
+
+
+def _tight_text_enclosure_path_indices_from_rects(
+    observation_bbox: Sequence[float],
+    rect_candidates: tuple[_FourEdgeRect, ...],
+    rect_px0s: tuple[float, ...],
+    calibration: DimensionLayoutCalibration,
+) -> frozenset[int]:
+    if not rect_candidates or len(observation_bbox) < 4:
+        return frozenset()
+    try:
+        ox0, oy0, ox1, oy1 = (float(observation_bbox[i]) for i in range(4))
+    except (TypeError, ValueError):
+        return frozenset()
+    if not (
+        math.isfinite(ox0)
+        and math.isfinite(oy0)
+        and math.isfinite(ox1)
+        and math.isfinite(oy1)
+    ):
+        return frozenset()
+
+    edge_tolerance = max(
+        1e-3,
+        float(calibration.median_word_height_pt) * 0.20,
+    )
+    lo = bisect_left(rect_px0s, ox0 - edge_tolerance)
+    hi = bisect_right(rect_px0s, ox0 + edge_tolerance)
+    if lo >= hi:
+        return frozenset()
+    excluded: set[int] = set()
+    for idx in range(lo, hi):
+        px0, py0, px1, py1, max_dev, path_index = rect_candidates[idx]
+        if max_dev > edge_tolerance:
+            continue
+        if (
+            abs(px0 - ox0) <= edge_tolerance
+            and abs(py0 - oy0) <= edge_tolerance
+            and abs(px1 - ox1) <= edge_tolerance
+            and abs(py1 - oy1) <= edge_tolerance
+        ):
+            excluded.add(path_index)
+    return frozenset(excluded)
+
+
+class _VectorScopeIndex:
+    """Exact-parity sorted spatial index over axis-aligned PDF-point segments."""
+
+    __slots__ = ("rect_candidates", "rect_px0s", "pages")
+
+    def __init__(self, segments: Sequence[ObservedGeometrySegment]) -> None:
+        self.rect_candidates, self.rect_px0s = _extract_four_edge_rect_candidates(segments)
+        pdf_space = CoordinateSpace.PDF_POINTS.value
+        horiz_val = DimensionOrientation.HORIZONTAL.value
+        vert_val = DimensionOrientation.VERTICAL.value
+        per_page_h: dict[int, list[_HSegEntry]] = {}
+        per_page_v: dict[int, list[_VSegEntry]] = {}
+        for seg in segments:
+            if seg.coordinate_space != pdf_space:
+                continue
+            ori = seg.orientation
+            if ori == horiz_val:
+                sx0, sy0 = seg.start
+                sx1, sy1 = seg.end
+                x_lo, x_hi = (sx0, sx1) if sx0 <= sx1 else (sx1, sx0)
+                per_page_h.setdefault(seg.source_page, []).append(
+                    ((sy0 + sy1) / 2.0, x_lo, x_hi, seg)
+                )
+            elif ori == vert_val:
+                sx0, sy0 = seg.start
+                sx1, sy1 = seg.end
+                y_lo, y_hi = (sy0, sy1) if sy0 <= sy1 else (sy1, sy0)
+                per_page_v.setdefault(seg.source_page, []).append(
+                    ((sx0 + sx1) / 2.0, y_lo, y_hi, seg)
+                )
+
+        pages: dict[
+            int,
+            tuple[
+                tuple[_HSegEntry, ...],
+                tuple[float, ...],
+                tuple[_VSegEntry, ...],
+                tuple[float, ...],
+            ],
+        ] = {}
+        for page_num in set(per_page_h) | set(per_page_v):
+            h_list = per_page_h.get(page_num, [])
+            h_list.sort(key=lambda item: item[0])
+            v_list = per_page_v.get(page_num, [])
+            v_list.sort(key=lambda item: item[0])
+            pages[page_num] = (
+                tuple(h_list),
+                tuple(item[0] for item in h_list),
+                tuple(v_list),
+                tuple(item[0] for item in v_list),
+            )
+        self.pages = pages
+
+    def query_nearby_candidates(
+        self,
+        *,
+        page_num: int,
+        obs_view_id: str,
+        center: tuple[float, float],
+        distance: float,
+        excluded_paths: frozenset[int],
+    ) -> list[ObservedGeometrySegment]:
+        bucket = self.pages.get(page_num)
+        if bucket is None:
+            return []
+        horiz, horiz_ys, vert, vert_xs = bucket
+        cx, cy = center
+        candidates: list[ObservedGeometrySegment] = []
+
+        lo_h = bisect_left(horiz_ys, cy - distance)
+        hi_h = bisect_right(horiz_ys, cy + distance)
+        for idx in range(lo_h, hi_h):
+            _y_mid, x_lo, x_hi, seg = horiz[idx]
+            if x_lo - distance <= cx <= x_hi + distance:
+                if obs_view_id and seg.view_id and seg.view_id != obs_view_id:
+                    continue
+                if excluded_paths and seg.source_path_index is not None and int(seg.source_path_index) in excluded_paths:
+                    continue
+                candidates.append(seg)
+
+        lo_v = bisect_left(vert_xs, cx - distance)
+        hi_v = bisect_right(vert_xs, cx + distance)
+        for idx in range(lo_v, hi_v):
+            _x_mid, y_lo, y_hi, seg = vert[idx]
+            if y_lo - distance <= cy <= y_hi + distance:
+                if obs_view_id and seg.view_id and seg.view_id != obs_view_id:
+                    continue
+                if excluded_paths and seg.source_path_index is not None and int(seg.source_path_index) in excluded_paths:
+                    continue
+                candidates.append(seg)
+        return candidates
+
+    def query_perpendicular_witness_hits(
+        self,
+        dimension_line: ObservedGeometrySegment,
+        *,
+        obs_view_id: str,
+        tolerance: float,
+        excluded_paths: frozenset[int],
+    ) -> list[tuple[ObservedGeometrySegment, tuple[float, float]]]:
+        bucket = self.pages.get(dimension_line.source_page)
+        if bucket is None:
+            return []
+        horiz, horiz_ys, vert, vert_xs = bucket
+        dim_id = dimension_line.segment_id
+        ori = dimension_line.orientation
+        hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
+        if ori == DimensionOrientation.HORIZONTAL.value:
+            y = (dimension_line.start[1] + dimension_line.end[1]) / 2.0
+            sx0, sx1 = dimension_line.start[0], dimension_line.end[0]
+            dx0, dx1 = (sx0, sx1) if sx0 <= sx1 else (sx1, sx0)
+            lo_v = bisect_left(vert_xs, dx0 - tolerance)
+            hi_v = bisect_right(vert_xs, dx1 + tolerance)
+            for idx in range(lo_v, hi_v):
+                x_mid, wy0, wy1, seg = vert[idx]
+                if wy0 - tolerance <= y <= wy1 + tolerance:
+                    if seg.segment_id == dim_id:
+                        continue
+                    if obs_view_id and seg.view_id and seg.view_id != obs_view_id:
+                        continue
+                    if excluded_paths and seg.source_path_index is not None and int(seg.source_path_index) in excluded_paths:
+                        continue
+                    hits.append((seg, (x_mid, y)))
+        elif ori == DimensionOrientation.VERTICAL.value:
+            x = (dimension_line.start[0] + dimension_line.end[0]) / 2.0
+            sy0, sy1 = dimension_line.start[1], dimension_line.end[1]
+            dy0, dy1 = (sy0, sy1) if sy0 <= sy1 else (sy1, sy0)
+            lo_h = bisect_left(horiz_ys, dy0 - tolerance)
+            hi_h = bisect_right(horiz_ys, dy1 + tolerance)
+            for idx in range(lo_h, hi_h):
+                y_mid, wx0, wx1, seg = horiz[idx]
+                if wx0 - tolerance <= x <= wx1 + tolerance:
+                    if seg.segment_id == dim_id:
+                        continue
+                    if obs_view_id and seg.view_id and seg.view_id != obs_view_id:
+                        continue
+                    if excluded_paths and seg.source_path_index is not None and int(seg.source_path_index) in excluded_paths:
+                        continue
+                    hits.append((seg, (x, y_mid)))
+        return hits
+
+
+# Bounded LRU cache for immutable tuple[ObservedGeometrySegment, ...]; stores the
+# tuple reference alongside the index so `id(segments)` can never collide with a
+# freed object, and verifies exact `is` identity on every lookup.
+_TUPLE_SCOPE_INDEX_CACHE: OrderedDict[
+    int, tuple[tuple[ObservedGeometrySegment, ...], _VectorScopeIndex]
+] = OrderedDict()
+_TUPLE_SCOPE_INDEX_CACHE_MAX = 4
+
+
+def _scope_index_for_segments(
+    segments: Sequence[ObservedGeometrySegment],
+) -> _VectorScopeIndex:
+    if isinstance(segments, tuple):
+        key = id(segments)
+        entry = _TUPLE_SCOPE_INDEX_CACHE.get(key)
+        if entry is not None and entry[0] is segments:
+            _TUPLE_SCOPE_INDEX_CACHE.move_to_end(key)
+            return entry[1]
+        index = _VectorScopeIndex(segments)
+        _TUPLE_SCOPE_INDEX_CACHE[key] = (segments, index)
+        if len(_TUPLE_SCOPE_INDEX_CACHE) > _TUPLE_SCOPE_INDEX_CACHE_MAX:
+            _TUPLE_SCOPE_INDEX_CACHE.popitem(last=False)
+        return index
+    return _VectorScopeIndex(segments)
+
+
 def _tight_text_enclosure_path_indices(
     observation_bbox: Sequence[float],
     segments: Sequence[ObservedGeometrySegment],
@@ -922,82 +1242,13 @@ def _tight_text_enclosure_path_indices(
 
     Larger boxes, incomplete paths and distinct source paths remain untouched.
     """
-    if len(observation_bbox) < 4:
-        return frozenset()
-    try:
-        ox0, oy0, ox1, oy1 = (float(observation_bbox[i]) for i in range(4))
-    except (TypeError, ValueError):
-        return frozenset()
-    if not all(math.isfinite(v) for v in (ox0, oy0, ox1, oy1)):
-        return frozenset()
-
-    by_path: dict[int, list[ObservedGeometrySegment]] = {}
-    for segment in segments:
-        if segment.source_path_index is None:
-            continue
-        by_path.setdefault(int(segment.source_path_index), []).append(segment)
-
-    edge_tolerance = max(
-        1e-3,
-        float(calibration.median_word_height_pt) * 0.20,
+    rect_candidates, rect_px0s = _extract_four_edge_rect_candidates(segments)
+    return _tight_text_enclosure_path_indices_from_rects(
+        observation_bbox,
+        rect_candidates,
+        rect_px0s,
+        calibration,
     )
-    excluded: set[int] = set()
-    for path_index, path_segments in by_path.items():
-        if len(path_segments) != 4:
-            continue
-        horizontal = [
-            segment
-            for segment in path_segments
-            if segment.orientation == DimensionOrientation.HORIZONTAL.value
-        ]
-        vertical = [
-            segment
-            for segment in path_segments
-            if segment.orientation == DimensionOrientation.VERTICAL.value
-        ]
-        if len(horizontal) != 2 or len(vertical) != 2:
-            continue
-
-        xs = [
-            float(point[0])
-            for segment in path_segments
-            for point in (segment.start, segment.end)
-        ]
-        ys = [
-            float(point[1])
-            for segment in path_segments
-            for point in (segment.start, segment.end)
-        ]
-        px0, px1 = min(xs), max(xs)
-        py0, py1 = min(ys), max(ys)
-
-        if max(
-            abs(px0 - ox0),
-            abs(py0 - oy0),
-            abs(px1 - ox1),
-            abs(py1 - oy1),
-        ) > edge_tolerance:
-            continue
-
-        # Require a real closed rectangle, not merely four nearby segments.
-        if not all(
-            min(abs(segment.start[1] - py0), abs(segment.start[1] - py1))
-            <= edge_tolerance
-            and min(abs(segment.end[1] - py0), abs(segment.end[1] - py1))
-            <= edge_tolerance
-            for segment in horizontal
-        ):
-            continue
-        if not all(
-            min(abs(segment.start[0] - px0), abs(segment.start[0] - px1))
-            <= edge_tolerance
-            and min(abs(segment.end[0] - px0), abs(segment.end[0] - px1))
-            <= edge_tolerance
-            for segment in vertical
-        ):
-            continue
-        excluded.add(path_index)
-    return frozenset(excluded)
 
 
 def _without_dimension_text_enclosure_paths(
@@ -1011,12 +1262,18 @@ def _without_dimension_text_enclosure_paths(
     filtered tuple is used only for dimension-line/witness association so the
     text frame for one nearby dimension cannot become geometry for another.
     """
+    if not text_bboxes or not segments:
+        return tuple(segments)
+    rect_candidates, rect_px0s = _extract_four_edge_rect_candidates(segments)
+    if not rect_candidates:
+        return tuple(segments)
     excluded: set[int] = set()
     for bbox in text_bboxes:
         excluded.update(
-            _tight_text_enclosure_path_indices(
+            _tight_text_enclosure_path_indices_from_rects(
                 bbox,
-                segments,
+                rect_candidates,
+                rect_px0s,
                 calibration,
             )
         )
@@ -1038,32 +1295,26 @@ def bind_observation_to_vector_geometry(
     calibration: DimensionLayoutCalibration,
     *,
     text_orientation_hint: Optional[str] = None,
+    _scope_index: Optional[_VectorScopeIndex] = None,
 ) -> DimensionAnchorBinding:
     """Bind one figured dimension to a unique nearby dimension/witness-line system."""
     if observation.bbox is None:
         return DimensionAnchorBinding(observation.dimension_id, BindingStatus.UNSUPPORTED.value, notes=["observation has no PDF-space bbox"])
     center = _bbox_center(observation.bbox)
-    excluded_text_frame_paths = _tight_text_enclosure_path_indices(
+    scope_index = _scope_index if _scope_index is not None else _scope_index_for_segments(segments)
+    excluded_text_frame_paths = _tight_text_enclosure_path_indices_from_rects(
         observation.bbox,
-        segments,
+        scope_index.rect_candidates,
+        scope_index.rect_px0s,
         calibration,
     )
-    same_scope = [
-        s for s in segments
-        if s.source_page == observation.source_page
-        and s.coordinate_space == CoordinateSpace.PDF_POINTS.value
-        and (not observation.view_id or not s.view_id or s.view_id == observation.view_id)
-        and s.orientation != DimensionOrientation.UNKNOWN.value
-        and (
-            s.source_path_index is None
-            or int(s.source_path_index) not in excluded_text_frame_paths
-        )
-    ]
-    candidates = [
-        s for s in same_scope
-        if _axis_distance(center, s) <= calibration.line_search_distance_pt
-        and _projection_contains(center, s, calibration.line_search_distance_pt)
-    ]
+    candidates = scope_index.query_nearby_candidates(
+        page_num=observation.source_page,
+        obs_view_id=observation.view_id,
+        center=center,
+        distance=calibration.line_search_distance_pt,
+        excluded_paths=excluded_text_frame_paths,
+    )
     if not candidates:
         return DimensionAnchorBinding(observation.dimension_id, BindingStatus.UNSUPPORTED.value, notes=["no nearby axis-aligned vector dimension line"])
 
@@ -1130,8 +1381,11 @@ def bind_observation_to_vector_geometry(
                     tied,
                     observation_bbox=observation.bbox,
                     text_orientation_hint=text_orientation_hint,
-                    same_scope=same_scope,
+                    same_scope=(),
                     calibration=calibration,
+                    _scope_index=scope_index,
+                    _obs_view_id=observation.view_id,
+                    _excluded_paths=excluded_text_frame_paths,
                 )
                 style_winner = _strict_style_dominator(tied)
                 # Preserve historical strict graphic-state authority.
@@ -1150,13 +1404,12 @@ def bind_observation_to_vector_geometry(
                     )
                 best = winner
 
-    witness_hits: list[tuple[ObservedGeometrySegment, tuple[float, float]]] = []
-    for segment in same_scope:
-        if segment.segment_id == best.segment_id:
-            continue
-        intersection = _intersection_with_perpendicular(best, segment, calibration.witness_endpoint_distance_pt)
-        if intersection is not None:
-            witness_hits.append((segment, intersection))
+    witness_hits = scope_index.query_perpendicular_witness_hits(
+        best,
+        obs_view_id=observation.view_id,
+        tolerance=calibration.witness_endpoint_distance_pt,
+        excluded_paths=excluded_text_frame_paths,
+    )
 
     # Collapse only truly coincident witness fragments. The broad
     # witness_endpoint_distance_pt is a SEARCH tolerance and must not also be
@@ -1315,6 +1568,7 @@ def _extract_witness_promoted_yearlike_observations(
     sheet: str = "",
     view_id: str = "",
     view_type: str = DrawingViewType.UNKNOWN.value,
+    _scope_index: Optional[_VectorScopeIndex] = None,
 ) -> tuple[list[DimensionObservation], list[DimensionAnchorBinding]]:
     """Promote year-shaped bare numbers only after source geometry proves dimension semantics.
 
@@ -1389,10 +1643,13 @@ def _extract_witness_promoted_yearlike_observations(
             conflict_state=ConstraintStatus.FULLY_CONSTRAINED.value,
             extraction_method="native_text_witness_promoted",
         )
+        if _scope_index is None:
+            _scope_index = _scope_index_for_segments(segments)
         binding = bind_observation_to_vector_geometry(
             provisional,
             segments,
             calibration,
+            _scope_index=_scope_index,
         )
         if (
             binding.status != BindingStatus.WITNESS_BOUND.value
@@ -1655,6 +1912,7 @@ def extract_dimension_evidence_bundle(
         ):
             orientation_hints[observation.dimension_id] = hint
 
+    scope_index = _scope_index_for_segments(binding_segments) if native else None
     bindings: list[DimensionAnchorBinding] = []
     bound_native: list[DimensionObservation] = []
     for observation in native:
@@ -1663,6 +1921,7 @@ def extract_dimension_evidence_bundle(
             binding_segments,
             layout,
             text_orientation_hint=orientation_hints.get(observation.dimension_id),
+            _scope_index=scope_index,
         )
         bindings.append(binding)
         bound_native.append(apply_anchor_binding(observation, binding))
@@ -1675,6 +1934,7 @@ def extract_dimension_evidence_bundle(
         sheet=sheet,
         view_id=view_id,
         view_type=view_type,
+        _scope_index=scope_index,
     )
     bound_native.extend(promoted_yearlike)
     bindings.extend(promoted_bindings)
