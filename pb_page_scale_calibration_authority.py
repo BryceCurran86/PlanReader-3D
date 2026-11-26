@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 import hashlib
 import math
+import numbers
 from typing import Dict, List, Optional
 
 from pb_geometry_takeoff_model import AuthorityStatus, ScaleCalibration
@@ -71,6 +72,12 @@ def scale_calibration_fingerprint(calibration: ScaleCalibration) -> str:
 # Sources whose disagreement is serious enough to require manual estimator resolution
 # rather than just being flagged for review.
 _AUTHORITATIVE_SOURCES = {ScaleSourceType.TITLE_BLOCK.value, ScaleSourceType.SCALE_BAR.value, ScaleSourceType.MANUAL.value}
+# The only sources whose VALID calibration may carry FIRM measurement authority.
+_FIRM_CAPABLE_SOURCES = {ScaleSourceType.SCALE_BAR.value, ScaleSourceType.MANUAL.value}
+
+
+def _is_finite_real(value) -> bool:
+    return isinstance(value, numbers.Real) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def px_per_m_from_ratio(ratio: float) -> float:
@@ -78,9 +85,12 @@ def px_per_m_from_ratio(ratio: float) -> float:
 
     Matches the established PlanReader convention (~28.35 px/m at 1:100).
     """
-    if not math.isfinite(ratio) or ratio <= 0.0:
+    if isinstance(ratio, bool) or not math.isfinite(ratio) or ratio <= 0.0:
         raise ValueError(f"Scale ratio must be finite and strictly positive, got {ratio}")
-    return POINTS_PER_METRE_AT_1_1 / ratio
+    px_per_m = POINTS_PER_METRE_AT_1_1 / ratio
+    if not math.isfinite(px_per_m):
+        raise ValueError(f"Scale ratio {ratio!r} gives a non-finite px/m")
+    return px_per_m
 
 
 @dataclass
@@ -109,27 +119,47 @@ def unknown_calibration(page_no: int, sheet_label: str = "") -> ScaleCalibration
     )
 
 
+def _ratio_rejected(r: ScaleSourceReading) -> bool:
+    return r.ratio is None or not math.isfinite(r.ratio) or r.ratio <= 0.0
+
+
+def _degenerate_reading(r: ScaleSourceReading) -> bool:
+    # A bool/overflowing ratio or a non-finite confidence would give an inf px/m,
+    # an order-dependent max() or an unfingerprintable record.
+    try:
+        px_per_m_from_ratio(r.ratio)
+    except ValueError:
+        return True
+    return not _is_finite_real(r.confidence)
+
+
 def _valid_readings(readings: List[ScaleSourceReading]) -> List[ScaleSourceReading]:
-    return [r for r in readings if r.ratio is not None and math.isfinite(r.ratio) and r.ratio > 0.0]
+    return [r for r in readings if not _ratio_rejected(r) and not _degenerate_reading(r)]
 
 
 def _invalid_reading_issues(readings: List[ScaleSourceReading]) -> List[str]:
     issues = []
     for r in readings:
-        if r.ratio is None or not math.isfinite(r.ratio) or r.ratio <= 0.0:
+        if _ratio_rejected(r):
             issues.append(f"Rejected non-finite/non-positive scale reading from {r.source_type}: {r.ratio!r} ({r.scale_text!r})")
+        elif _degenerate_reading(r):
+            issues.append(
+                f"Rejected degenerate scale reading from {r.source_type}: "
+                f"ratio={r.ratio!r}, confidence={r.confidence!r} ({r.scale_text!r})"
+            )
     return issues
 
 
 def _best_single_reading_status(reading: ScaleSourceReading) -> str:
     if reading.source_type == ScaleSourceType.INFERRED.value:
         return ScaleCalibrationStatus.PROVISIONAL.value
-    if reading.source_type == ScaleSourceType.UNKNOWN.value:
-        return ScaleCalibrationStatus.UNKNOWN.value
-    # TITLE_BLOCK, SCALE_BAR, and MANUAL single readings are all internally "valid"
-    # (nothing to conflict with); measurement_authority_for_page_scale() is what
-    # still caps TITLE_BLOCK-only calibrations to a provisional measurement.
-    return ScaleCalibrationStatus.VALID.value
+    if reading.source_type in _AUTHORITATIVE_SOURCES:
+        # TITLE_BLOCK, SCALE_BAR, and MANUAL single readings are all internally "valid"
+        # (nothing to conflict with); measurement_authority_for_page_scale() is what
+        # still caps TITLE_BLOCK-only calibrations to a provisional measurement.
+        return ScaleCalibrationStatus.VALID.value
+    # UNKNOWN and any unrecognised source (default, AI, misspelt) fail closed.
+    return ScaleCalibrationStatus.UNKNOWN.value
 
 
 def resolve_page_scale_calibration(
@@ -147,6 +177,10 @@ def resolve_page_scale_calibration(
     """
     issues = _invalid_reading_issues(readings)
     valid = _valid_readings(readings)
+    if not _is_finite_real(max_delta_ratio) or max_delta_ratio < 0.0:
+        # A NaN/inf tolerance would silently disable the conflict check below.
+        issues.append(f"Rejected non-finite/negative scale agreement tolerance: {max_delta_ratio!r}")
+        valid = []
 
     if not readings:
         calib = unknown_calibration(page_no=page_no, sheet_label=sheet_label)
@@ -191,7 +225,12 @@ def resolve_page_scale_calibration(
     ratios = [r.ratio for r in valid]
     lo, hi = min(ratios), max(ratios)
     delta_ratio = (hi - lo) / lo if lo > 0 else float("inf")
+    top_confidence = max(r.confidence for r in valid)
+    tied = [r for r in valid if r.confidence == top_confidence]
+    tied_sources = {r.source_type for r in tied}
+    listed = valid
 
+    conflict_issue = None
     if delta_ratio > max_delta_ratio:
         sources_in_conflict = {r.source_type for r in valid}
         conflict_issue = (
@@ -199,6 +238,20 @@ def resolve_page_scale_calibration(
             f"{max_delta_ratio * 100:.1f}%): "
             + ", ".join(f"{r.source_type}=1:{r.ratio:g}" for r in valid)
         )
+    elif len(tied_sources) > 1 or (
+        tied_sources & _FIRM_CAPABLE_SOURCES and len({(r.ratio, r.scale_text) for r in tied}) > 1
+    ):
+        # Equal top confidence across different sources, or across different
+        # FIRM-capable readings: max() would pick whichever came first. Abstain.
+        # (Same-source INFERRED/TITLE_BLOCK ties can never be FIRM and are kept.)
+        sources_in_conflict = tied_sources
+        listed = sorted(valid, key=lambda r: (str(r.source_type), r.ratio, str(r.scale_text)))
+        conflict_issue = (
+            "Equal-confidence scale readings disagree; selection would depend on input order: "
+            + ", ".join(f"{r.source_type}=1:{r.ratio:g}" for r in listed if r.confidence == top_confidence)
+        )
+
+    if conflict_issue is not None:
         status = (
             ScaleCalibrationStatus.MANUAL_REQUIRED.value
             if sources_in_conflict & _AUTHORITATIVE_SOURCES
@@ -212,8 +265,8 @@ def resolve_page_scale_calibration(
             is_verified=False,
             confidence=0.0,
             sheet_label=sheet_label,
-            scale_text=" vs ".join(r.scale_text for r in valid),
-            source_type=max(valid, key=lambda r: r.confidence).source_type,
+            scale_text=" vs ".join(r.scale_text for r in listed),
+            source_type=next(iter(tied_sources)) if len(tied_sources) == 1 else ScaleSourceType.UNKNOWN.value,
             status=status,
             issues=issues + [conflict_issue],
             revision_id=revision_id,
@@ -273,15 +326,17 @@ def approve_page_scale_calibration(
     """
     if not math.isfinite(approved_ratio) or approved_ratio <= 0.0:
         raise ValueError(f"Approved scale ratio must be finite and strictly positive, got {approved_ratio}")
-    if not approved_by:
+    if not isinstance(approved_by, str) or not approved_by.strip():
         raise ValueError("approved_by is required to approve a scale calibration")
+    # Also rejects a bool ratio or one whose px/m overflows.
+    px_per_m = px_per_m_from_ratio(approved_ratio)
 
     scale_text = f"1:{approved_ratio:g}"
     return replace(
         calibration,
         ratio_str=scale_text,
         scale_text=scale_text,
-        px_per_m=px_per_m_from_ratio(approved_ratio),
+        px_per_m=px_per_m,
         method="MANUAL",
         source_type=ScaleSourceType.MANUAL.value,
         status=ScaleCalibrationStatus.USER_APPROVED.value,
@@ -300,14 +355,19 @@ def measurement_authority_for_page_scale(calibration: ScaleCalibration) -> str:
     defaulting to something permissive.
     """
     if calibration.status == ScaleCalibrationStatus.USER_APPROVED.value:
-        return AuthorityStatus.FIRM.value
+        approved_by = calibration.approved_by
+        if isinstance(approved_by, str) and approved_by.strip():
+            return AuthorityStatus.FIRM.value
+        return AuthorityStatus.BLOCKED.value
 
     if calibration.status == ScaleCalibrationStatus.VALID.value:
         if calibration.source_type == ScaleSourceType.TITLE_BLOCK.value:
             # A title-block-only reading is internally consistent but never
             # corroborated — never firm on its own, matching prior PlanReader policy.
             return AuthorityStatus.PROVISIONAL.value
-        return AuthorityStatus.FIRM.value
+        if calibration.source_type in _FIRM_CAPABLE_SOURCES:
+            return AuthorityStatus.FIRM.value
+        return AuthorityStatus.BLOCKED.value
 
     if calibration.status == ScaleCalibrationStatus.PROVISIONAL.value:
         return AuthorityStatus.PROVISIONAL.value
