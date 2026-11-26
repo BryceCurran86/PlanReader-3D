@@ -389,3 +389,43 @@ def test_the_editors_own_packet_builder_is_accepted_when_present(tmp_path):
     packet = native.build_native_review_packet(scope=scope, pdf_path=path, image_bytes=png, saved=saved)
     summary, _png = canonical.source_native_trace_preview(path, 0, review_packet=packet)
     assert summary["user_assisted_review"]["user_assisted_room_count"] == 1
+
+
+@pytest.mark.parametrize("category,kind,points", [
+    ("boundary", "line", ((200, 110), (200, 240))),
+    ("dimension_witness", "line", ((110, 120), (290, 120))),
+    ("exclusion", "polygon", ((110, 110), (140, 110), (140, 140), (110, 140))),
+    ("reject_candidate", "line", ((10, 10), (20, 20))),
+])
+def test_nonbarrier_correction_runs_one_tracer_and_matches_full_replay(tmp_path, monkeypatch, category, kind, points):
+    path = _pdf(tmp_path / "review.pdf", [
+        _bar(100, 100, 300, 106), _bar(100, 106, 106, 250),
+        _bar(294, 106, 300, 250), _bar(106, 244, 294, 250),
+    ])
+    packet = _preview_packet(path, _correction("edit", category, points, kind))
+    original = canonical.build_layered_wall_doorway_room_rings
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get("barrier_view"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(canonical, "build_layered_wall_doorway_room_rings", counted)
+    summary, png = canonical.source_native_trace_preview(path, 0, review_packet=packet)
+    assert len(calls) == 1
+    assert summary["user_assisted_review"]["status"] == "applied"
+    assert summary["user_assisted_review"]["automatic_room_count"] == summary["user_assisted_review"]["user_assisted_room_count"]
+
+    original_plan = canonical.plan_review
+
+    def force_replay(*args, **kwargs):
+        plan = original_plan(*args, **kwargs)
+        # A nonexistent strip key forces the old second trace, but removes nothing.
+        from dataclasses import replace
+        return replace(plan, removed_strips=frozenset({(-1, 0, 0, 0, 0)}))
+
+    monkeypatch.setattr(canonical, "plan_review", force_replay)
+    calls.clear()
+    replay, replay_png = canonical.source_native_trace_preview(path, 0, review_packet=packet)
+    assert len(calls) == 2
+    assert (summary, png) == (replay, replay_png)
