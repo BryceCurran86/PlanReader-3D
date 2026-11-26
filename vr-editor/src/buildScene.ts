@@ -19,7 +19,7 @@ import {makeLiningVisual} from "./constructionLiningVisual.ts";
 import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameVisual.ts";
 import {nominalTrimMesh} from "./constructionTrimVisual.ts";
 import type {WallCornerJoins} from "./wallCornerJoin.ts";
-import {createPhysicalToolTray} from "./physicalToolTray.ts";
+import {MENU_ATLAS_SIZE,menuAtlasScale} from "./menuAtlas.ts";
 import {openingFrameVisual,nominalDoorSlab} from "./openingFinishVisual.ts";
 import {physicalUV} from "./materialDetail.ts";
 import type {MaterialDetailLibrary} from "./materialDetail.ts";
@@ -125,11 +125,12 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
       new THREE.Float32BufferAttribute(vertices, 3));
     if(wallFace)geometry.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
     geometry.computeVertexNormals();
-    if(wallFace&&details)physicalUV(geometry,.4,.4,[(wall.end[0]-wall.start[0])/length,(wall.end[1]-wall.start[1])/length]);
+    const plaster=wallFace&&details?details.get("plaster"):null;
+    if(plaster){const repeat=plaster.normalMap?1:.4;physicalUV(geometry,repeat,repeat,[(wall.end[0]-wall.start[0])/length,(wall.end[1]-wall.start[1])/length]);}
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
       color:wallFace?0xffffff:color,vertexColors:wallFace, side: THREE.DoubleSide, transparent: opacity < 1, opacity, depthWrite: opacity === 1, roughness: 0.82,
     }));
-    if(wallFace&&details){const material=mesh.material as THREE.MeshStandardMaterial;material.bumpMap=details.get("plaster").bumpMap;material.bumpScale=.0012;material.roughness=.86;mesh.receiveShadow=true;mesh.castShadow=true;}
+    if(plaster){const material=mesh.material as THREE.MeshStandardMaterial;material.bumpMap=plaster.normalMap?null:plaster.bumpMap;material.normalMap=plaster.normalMap??null;material.normalScale.set(.18,.18);material.roughnessMap=plaster.roughnessMap??null;material.bumpScale=.0012;material.roughness=.86;mesh.receiveShadow=true;mesh.castShadow=true;}
     mesh.userData.catalogueWallFace = wallFace;
     if (doorId) mesh.userData.catalogueDoorLeaf = doorId;
     group.add(mesh);
@@ -149,16 +150,18 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
     if(opening.openingKind==="window"){
       const glass:number[]=[];panel(points,glass);addMesh(glass,0xb5d0d9,.42);
       const pane=group.children[group.children.length-1];pane.userData.catalogueWindow=true;
+      if(pane instanceof THREE.Mesh&&pane.material instanceof THREE.MeshStandardMaterial){pane.material.color.setHex(0xdbe5e7);pane.material.opacity=.23;pane.material.roughness=.12;pane.material.metalness=.28;pane.material.envMapIntensity=1.25;pane.material.depthWrite=false;pane.castShadow=false;}
     }
     if (opening.openingKind === "door") {
       const leaf: number[] = [];
       panel(points, leaf);
-      addMesh(leaf, 0xb68b60, 1, false, opening.openingId);
+      addMesh(leaf, 0xe4e1d8, 1, false, opening.openingId);
       const door=group.children[group.children.length-1];
       const slab=nominalDoorSlab(wall,opening);
       if(slab&&door instanceof THREE.Mesh){
         slab.updateMatrix();door.geometry.dispose();door.geometry=slab.geometry.applyMatrix4(slab.matrix);
         (Array.isArray(slab.material)?slab.material:[slab.material]).forEach(m=>m.dispose());door.userData.nominalDoorSlab=true;
+        if(door.material instanceof THREE.MeshStandardMaterial){door.material.roughness=.52;door.castShadow=true;door.receiveShadow=true;}
       }
       door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
       door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
@@ -183,7 +186,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
   if(texture&&exteriorFaces.length){
     const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(exteriorFaces,3)).setAttribute("uv",new THREE.Float32BufferAttribute(exteriorUV,2));
     g.computeVertexNormals();
-    const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:texture.texture,color:profile.outerColor,roughness:.9,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+    const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:texture.texture,color:profile.outerColor,roughness:.83,bumpMap:texture.texture,bumpScale:.0015,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
     mesh.userData.exteriorTexture=true;group.add(mesh);
   }
   // Centre-plane witness retains the existing catalogue anchor convention.
@@ -573,8 +576,9 @@ export function aimBuild(state: BuildState, levelId: string | null, sizes: Build
 
 export function createBuildOverlay(scene: THREE.Scene) {
   const canvas = document.createElement("canvas");
-  canvas.width = 980;
-  canvas.height = 228;
+  // A CanvasTexture must retain its allocation across different menu layouts.
+  canvas.width = MENU_ATLAS_SIZE;
+  canvas.height = MENU_ATLAS_SIZE;
   const context = canvas.getContext("2d");
   const texture = new THREE.CanvasTexture(canvas);
   // UI is near the viewer and frequently edited; avoid regenerating mipmaps.
@@ -587,10 +591,6 @@ export function createBuildOverlay(scene: THREE.Scene) {
   menu.renderOrder = 23;
   menu.visible = false;
   scene.add(menu);
-  const tray=createPhysicalToolTray(menu);
-  function highlightMenu(layout:MenuLayout,index:number){
-    if(!layout.radial)tray.highlight(index);
-  }
   const mark = new THREE.Mesh(new THREE.RingGeometry(0.037, 0.057, 24),
     new THREE.MeshBasicMaterial({ color: 0x71f7dc, side: THREE.DoubleSide }));
   mark.rotation.x = -Math.PI / 2;
@@ -653,7 +653,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
   const head = new THREE.Vector3();
   const facing = new THREE.Vector3();
   const right = new THREE.Vector3();
-  let drawn = "",trayKey="";
+  let drawn = "";
   function positionMenu(camera: THREE.Camera, pinned = false, force = false) {
     camera.getWorldPosition(head);
     camera.getWorldDirection(facing);
@@ -715,22 +715,19 @@ export function createBuildOverlay(scene: THREE.Scene) {
     return { action: layout.buttons[index]?.action ?? null, index };
   }
   function drawMenu(layout: MenuLayout, hover: number) {
-    highlightMenu(layout,hover);
-    const key = JSON.stringify([layout, layout.radial?hover:-1]);
-    if (!context || drawn === key) return;
-    drawn = key;
-    const nextTrayKey=JSON.stringify([layout.width,layout.height,layout.radial,layout.buttons]);
-    if(nextTrayKey!==trayKey){tray.update(layout);trayKey=nextTrayKey;}
-    highlightMenu(layout,hover);
-    if (canvas.width !== layout.width || canvas.height !== layout.height) {
-      canvas.width = layout.width;
-      canvas.height = layout.height;
-    }
+    const key = JSON.stringify([layout, hover]);
+    const scale=menuAtlasScale(layout.width,layout.height);
+    if(!context||!scale)return false;
+    if(drawn===key)return true;
+    context.setTransform(1,0,0,1,0,0);
     context.clearRect(0,0,canvas.width,canvas.height);
+    context.setTransform(scale[0],0,0,scale[1],0,0);
+    context.textAlign="left";context.textBaseline="alphabetic";context.globalAlpha=1;
+    context.globalCompositeOperation="source-over";
     context.fillStyle = "#13242c";
-    if(layout.radial){context.beginPath();context.arc(canvas.width/2,canvas.height/2,canvas.width/2-2,0,Math.PI*2);context.fill();}
+    if(layout.radial){context.beginPath();context.arc(layout.width/2,layout.height/2,layout.width/2-2,0,Math.PI*2);context.fill();}
     // Transparent gaps expose the building between individual physical keys.
-    else {context.fillStyle="rgba(18,30,36,.92)";context.fillRect(10,10,canvas.width-20,54);context.fillRect(10,canvas.height-52,canvas.width-20,44);}
+    else {context.fillStyle="#18232c";context.fillRect(0,0,layout.width,layout.height);}
     context.font = "bold 33px sans-serif";
     context.fillStyle = "#f0fbfc";
     if(layout.radial){/* title is rendered in the centre below */}
@@ -770,11 +767,14 @@ export function createBuildOverlay(scene: THREE.Scene) {
       context.fillStyle=hover===8?"#102421":"#fff";context.font="bold 27px sans-serif";context.fillText("Close",cx,cy-12,140);
       context.font="18px sans-serif";context.fillText("Grip / trigger",cx,cy+22,150);
       context.textAlign="left";context.textBaseline="alphabetic";
-      texture.needsUpdate=true;return;
+      texture.needsUpdate=true;drawn=key;return true;
     }
     for (const [index, button] of layout.buttons.entries()) {
-      const highlight = button.active;
-      // The key itself is a batched 3D mesh; this atlas contains text only.
+      const highlight = !button.disabled&&(index===hover||button.active);
+      context.fillStyle=button.disabled?"#303943":highlight?"#346e68":"#354651";
+      context.fillRect(button.x,button.y,button.w,button.h);
+      if(highlight){context.strokeStyle="#b6e2d8";context.lineWidth=3;context.strokeRect(button.x+2,button.y+2,button.w-4,button.h-4);}
+      if(button.swatch!==undefined){context.fillStyle="#"+button.swatch.toString(16).padStart(6,"0");context.fillRect(button.x+10,button.y+(button.h-30)/2,29,30);}
       const middle = button.y + button.h / 2;
       // Colour samples are physical swatches, separate from the text atlas.
       context.fillStyle = button.disabled ? "#a1aeb4" : "#fff";
@@ -788,7 +788,7 @@ export function createBuildOverlay(scene: THREE.Scene) {
     context.font = "27px sans-serif";
     if(layout.radial){context.textAlign="center";context.fillText(layout.note,layout.width/2,layout.height-33,240);context.textAlign="left";}
     else context.fillText(layout.note, 20, layout.height - 23, layout.width - 40);
-    texture.needsUpdate = true;
+    texture.needsUpdate = true;drawn=key;return true;
   }
   function showAim(aim: Aim | null, origin: PlanPoint | null) {
     const marker = aim?.marker ?? origin;
@@ -831,7 +831,8 @@ export function createBuildOverlay(scene: THREE.Scene) {
       outline.material.color.setHex(aim.valid === false ? 0xffab78 : 0x71f7dc);
     }
   }
-  return { positionMenu, positionContextMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, highlightMenu, showAim, showWallGhost,
+  return { positionMenu, positionContextMenu, positionHandMenu, sizeMenu, menuHit, drawMenu, showAim, showWallGhost,
+    showMenu: () => { menu.visible = true; },
     hideMenu: () => { menu.visible = false; },
-    dispose: () => { tray.dispose();texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
+    dispose: () => { texture.dispose(); dimensionTexture.dispose(); dimensionMaterial.dispose(); } };
 }

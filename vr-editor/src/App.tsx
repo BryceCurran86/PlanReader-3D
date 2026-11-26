@@ -433,15 +433,16 @@ export function App() {
 
   function onItemAction(action: ItemAction) {
     if(action.kind==="apply-finish"){
-      if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect")return;
+      if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect"){setToolMessage("Finish or cancel the active edit before changing a finish.");return;}
       const item=getCatalogueItem(action.itemId);
-      if(!item)return;
+      if(!item){setToolMessage("This finish is no longer in the catalogue.");return;}
       const key=scopeKey(manifest);
       const id=newPlacementId("item");
       const apply=(draft:ItemDraft)=>action.replaceId?replaceItemFinish(draft,key,action.replaceId!,action.itemId):placeItem(draft,key,id,action.itemId,action.hit,0);
       const next=apply(catalogue.draft);
       const walls=[...activeBatchSketches,...buildState.walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])];
       const targetId=action.replaceId??id;
+      if(action.replaceId&&catalogue.draft.items.find(p=>p.id===action.replaceId)?.itemId===item.id){setToolMessage("Already applied: "+item.label);return;}
       if(next===catalogue.draft||!currentItemPlacements(next.items,manifest,walls,isDemo,buildState.ceilings).some(i=>i.id===targetId)){
         setToolMessage("Finish unchanged or not compatible with this design object.");return;
       }

@@ -3,3 +3,5 @@ dist/
 .vite/
 .env
 .env.local
+
+public/architectural-assets/

@@ -14,6 +14,12 @@ test("tap aerator and basin waste are visible mesh details",()=>{
  for(const shape of ["gooseneck","basin"]){
  const {group}=createCatalogueFixture({...fixture,shape,widthM:.1,heightM:.3,depthM:.2,count:1},"worktop");
  assert.ok(group.children.length>=4);
+ if(shape==="basin"){
+  for(const name of ["Ceramic bowl shell","Bowl drain","Waste flange","Waste plug"])assert.ok(group.children.some(o=>o.name===name),name);
+  const flange=group.children.find(o=>o.name==="Waste flange");
+  assert.equal(flange.geometry.type,"TorusGeometry");
+  assert.ok(Math.abs(flange.rotation.x+Math.PI/2)<1e-9);
+ }
  }
 });
 test("trim normalises skewed basis and rejects invalid dimensions",()=>{
