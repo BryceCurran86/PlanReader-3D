@@ -265,10 +265,13 @@ def _source_ocr_label(page: fitz.Page, polygon, bbox, room_label: str, ocr):
         pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72),
                               clip=clip, alpha=False)
         try:
-            mode = "RGB" if pix.n == 3 else ("L" if pix.n == 1 else "RGBA")
-            image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
-            if mode != "RGB":
-                image = image.convert("RGB")
+            if hasattr(pix, "samples") and hasattr(pix, "n") and hasattr(pix, "width") and hasattr(pix, "height"):
+                mode = "RGB" if pix.n == 3 else ("L" if pix.n == 1 else "RGBA")
+                image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+                if mode != "RGB":
+                    image = image.convert("RGB")
+            else:
+                image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
         finally:
             del pix
         matches = []
