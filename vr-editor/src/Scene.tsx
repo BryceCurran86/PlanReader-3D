@@ -34,7 +34,7 @@ import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
 import { getCatalogueItem } from "./itemCatalogue";
 import type {CatalogueGroup} from "./itemCatalogue";
-import {contextGroups,contextChoices} from "./contextFinishes";
+import {contextGroups,contextChoices,initialFinishGroup} from "./contextFinishes";
 import type {FinishContext} from "./contextFinishes";
 import {createOutdoorEnvironment} from "./outdoorEnvironment";
 import type { ControlMode, HistoryAction } from "./editorControls";
@@ -428,7 +428,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const right=inputSources.findIndex(source=>source?.handedness==="right"&&source.targetRayMode==="tracked-pointer");
         if(contextual&&right>=0&&interaction.current.mode==="inspect"&&!resize.current.projection&&!resize.current.enabled){
           aimController(controllers[right]);finishContext=itemView.contextAt(raycaster);
-          if(finishContext){const groups=contextGroups(finishContext);if(groups.length===1&&finishContext.hit.target!=="opening")finishGroup=groups[0];}
+          if(finishContext)finishGroup=initialFinishGroup(finishContext);
           else{closeTools();reportTool("Aim at a wall, floor, door or fitting, then squeeze right grip.");return;}
         }
         displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
@@ -2430,6 +2430,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(draftDimension){scene.remove(draftDimension);draftDimension.material.map?.dispose();draftDimension.material.dispose();}
       clearDimensions();scene.remove(dimensionGroup);
       itemView.clear();
+      editHandles.dispose();scene.remove(editHandles.group);
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.Line) {
           o.geometry.dispose();
