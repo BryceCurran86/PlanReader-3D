@@ -17,7 +17,7 @@ One cProfile of one residential original on the combined branch with C01 and C02
 | C05 junctions and connectivity | built | wall lineage copied with the module's structure copier (parity with `copy.deepcopy`, including which tuples stay shared, over 3,000 structures; synthetic 0.84 s to 0.16 s per 40k copies); intersection sweep walks by position instead of slicing (20k segments: loop 0.48 s to 0.09 s). #4802's indexes not duplicated |
 | C06 host matching | built | membership checked before pair classification (parity over 400 generated equivalences; 200k pairs 0.135 s to 0.019 s); opening-width matching reads the jambs once per opening (parity over 4,000 lines) |
 | C07 room-ring assembly | built | plain-float shortcut for the room-edge check (parity over 40,000 shapes; 1.15 to 0.27 microseconds per check) |
-| C08 recalculation after corrections | blocked | needs the correction contract (MAX M02) |
+| C08 recalculation after corrections | blocked | geometry dependency contract written; waits on MAX M02 |
 | C09 historical geometry donors | audited | register table below; #4166 recovered (owner approved 26 Nov) |
 | C10 geometry test speed, exclusive replay | done | the combined before/after check below; CI sharding is MAX M06/M07 |
 
@@ -26,6 +26,15 @@ Not done, found by the profile: the opening label step re-reads page words for e
 Tests: the 168 test files that import a changed module: 3,589 passed, 5 skipped (17 of them need an original at its repository path and passed where it is present).
 The 123 other test files of the register areas: 3,319 passed, 7 skipped; 2 fail the same way on `main` (the Banksia exterior-loop census and the pinned window candidate set of one residential original, both reported earlier).
 With #4166 and its counted check: the 287 test files touching the opening or source-visibility code: 5,558 passed (10 that need an original rerun where it is present), 92 skipped, 3 xfailed.
+
+## Current-main disposition (27 Nov, #4764 7200170458)
+
+- `main` e9516390d changed only `vr-editor/` since this branch forked (4cbf46356): no Python change; this branch merges cleanly with it, with AntiGravity #4807 (0fd81c8294) and with #4806 (08a6b7ef8c).
+- Combined tree #4807, then this branch, then #4806 (local, not pushed): the 399 test files touching changed code: 7,650 passed, 97 skipped, 3 xfailed, none failed (24 of them need an original at its repository path and passed where it is present). #4807's head has the same Python as the one tested.
+- Semantics against `main`: the speed changes keep results (parity tests and identical outputs on four originals). One behaviour change: #4166, a cached raster opening proof no longer stays corroborated when its source changes; no output changed on the four originals.
+- Donors kept on origin: `claude/page-scale-tie-order-20261017` (5196a42f19, for MAX scale) and `claude/vector-clip-group-scopes-20261017` (96e88fa289, reconciled into #4807).
+- The stale pinned counts in two original workflows are left as they are.
+- C08: `claude_c08_correction_dependency_contract_20261127.md`.
 
 ## Combined before/after check
 
