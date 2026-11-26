@@ -18,7 +18,7 @@ One cProfile of one residential original on the combined branch with C01 and C02
 | C06 host matching | built | membership checked before pair classification (parity over 400 generated equivalences; 200k pairs 0.135 s to 0.019 s); opening-width matching reads the jambs once per opening (parity over 4,000 lines) |
 | C07 room-ring assembly | built | plain-float shortcut for the room-edge check (parity over 40,000 shapes; 1.15 to 0.27 microseconds per check) |
 | C08 recalculation after corrections | blocked | needs the correction contract (MAX M02) |
-| C09 historical geometry donors | audited | register table below; #4166 is a live gap |
+| C09 historical geometry donors | audited | register table below; #4166 recovered (owner approved 26 Nov) |
 | C10 geometry test speed, exclusive replay | open | the one combined before/after check; CI sharding is MAX M06/M07 |
 
 Not done, found by the profile: the opening label step re-reads page words for every opening (about 2% of the profiled run; the C01 reuse pattern would apply).
@@ -45,7 +45,7 @@ The 123 other test files of the register areas: 3,319 passed, 7 skipped; 2 fail 
 | 23 | Sliding door hosts | `pb_source_sliding_door_footprint_continuity` (app, extractor, preview) | current; tests pass; C02 speeds it |
 | 24 | G17 W2 ownership #4215 | donor not on main | closed unmerged; 16 new definitions absent; 3 donor test files cannot import |
 | 25 | Disconnected frame veto #4186 | alternate path still in `_shared_host_frame` | closed unmerged; 6 of 29 donor tests fail on main; needs original replay |
-| 27 | Opening source invalidation #4166 | `pb_physical_opening_authority` (all) | **gap on main**: 9 of 10 donor tests fail; a cached opening proof stays corroborated after a supporting receipt is removed or changed |
+| 27 | Opening source invalidation #4166 | `pb_physical_opening_authority` (all) | recovered in this release: on `main` a cached raster opening proof stays corroborated after a supporting receipt is removed or changed (9 of its 10 tests fail there; all 10 pass here) |
 | 28 | Door frame height | `pb_door_height_owner_gate_shadow` (all); #4211 merged | current; tests pass; default-off |
 | 30 | Door ancestry #4153 | `pb_gpt2_original_source_geometry_bridge` (benchmark) | definitions on main; 22 of 369 donor tests differ (main offers a material candidate where the donor expected abstention): refer to MAX |
 | 35 | Schedule census | `pb_schedule_opening_instance_binding_authority` | C01, in this release |
