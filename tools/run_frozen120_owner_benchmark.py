@@ -245,7 +245,7 @@ def run_benchmark(
     project_workers: int = 1,
     app_identity: str | None = None,
 ) -> int:
-    """Run independent projects in bounded batches, or re-score existing evidence."""
+    """Run independent projects in a bounded worker pool, or re-score existing evidence."""
     if type(project_workers) is not int or project_workers not in (1, 2):
         raise ValueError("project_workers must be 1 or 2")
     if saved_run_dir is not None and project_workers != 1:
@@ -285,46 +285,49 @@ def run_benchmark(
                                 mp_context=multiprocessing.get_context("spawn"))
             if project_workers > 1 else nullcontext(None))
     with pool as executor:
-        for offset in range(0, len(PROJECTS), project_workers):
-            batch = PROJECTS[offset:offset + project_workers]
-            if check_execution is not None:
-                check_execution()
-            jobs = []
-            if executor is not None:
-                for project in batch:
-                    role_dir = output_dir / "production" / project
-                    jobs.append(executor.submit(
-                        _produce_project, project, source_dir, role_dir, timeout_min,
-                    ))
-            for index, project in enumerate(batch):
-                role_dir = output_dir / "production" / project
-                outcome, status = (
-                    jobs[index].result() if executor is not None
-                    else _produce_project(project, source_dir, role_dir, timeout_min)
-                )
+        # Submit all independent projects to the bounded pool so a free
+        # worker can start the next one without waiting for its batch partner.
+        # Only the parent publishes, in the unchanged frozen project order.
+        jobs = {}
+        if executor is not None:
+            for project in PROJECTS:
                 if check_execution is not None:
                     check_execution()
-                try:
-                    if (
-                        status.get("native_source_input_coverage_verified") is True
-                        and status.get("source_role_coverage_verified") is True
-                        and status.get("customer_bijection_verified") is True
-                    ):
-                        _publish_project_evidence(
-                            role_dir, sealed_dir / f"{project}.json",
-                            customer_dir / f"{project}.customer_rows.json",
-                        )
-                except (OSError, TypeError, ValueError, RuntimeError) as exc:
-                    outcome.update(status="ROLE_REPLAY_FAILED", failure_type=type(exc).__name__)
-                outcomes.append(outcome)
-                print(json.dumps(outcome, sort_keys=True), flush=True)
-                status_path = output_dir / "attempt_status.json"
-                staged = status_path.with_suffix(".tmp")
-                staged.write_text(
-                    json.dumps({"projects": outcomes, "elapsed_seconds": round(perf_counter() - total_started, 3)},
-                               indent=2, sort_keys=True) + "\n", encoding="utf-8",
+                jobs[project] = executor.submit(
+                    _produce_project, project, source_dir,
+                    output_dir / "production" / project, timeout_min,
                 )
-                staged.replace(status_path)
+        for project in PROJECTS:
+            if check_execution is not None:
+                check_execution()
+            role_dir = output_dir / "production" / project
+            outcome, status = (
+                jobs[project].result() if executor is not None
+                else _produce_project(project, source_dir, role_dir, timeout_min)
+            )
+            if check_execution is not None:
+                check_execution()
+            try:
+                if (
+                    status.get("native_source_input_coverage_verified") is True
+                    and status.get("source_role_coverage_verified") is True
+                    and status.get("customer_bijection_verified") is True
+                ):
+                    _publish_project_evidence(
+                        role_dir, sealed_dir / f"{project}.json",
+                        customer_dir / f"{project}.customer_rows.json",
+                    )
+            except (OSError, TypeError, ValueError, RuntimeError) as exc:
+                outcome.update(status="ROLE_REPLAY_FAILED", failure_type=type(exc).__name__)
+            outcomes.append(outcome)
+            print(json.dumps(outcome, sort_keys=True), flush=True)
+            status_path = output_dir / "attempt_status.json"
+            staged = status_path.with_suffix(".tmp")
+            staged.write_text(
+                json.dumps({"projects": outcomes, "elapsed_seconds": round(perf_counter() - total_started, 3)},
+                           indent=2, sort_keys=True) + "\n", encoding="utf-8",
+            )
+            staged.replace(status_path)
 
     if check_execution is not None:
         check_execution()

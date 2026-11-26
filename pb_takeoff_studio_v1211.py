@@ -12,6 +12,8 @@ import math
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence
 
+from pb_surface_substrates import SUBSTRATE_PRESETS as SUBSTRATE_PRESETS
+
 try:
     from planreader_takeoff_studio import takeoff_studio_editor
 except Exception:  # pragma: no cover - component failure degrades cleanly
@@ -19,24 +21,6 @@ except Exception:  # pragma: no cover - component failure degrades cleanly
 
 SOURCE_PREFIX = "PB Takeoff Studio v1.2.11"
 SETTING_PREFIX = "takeoff_studio_v1211_page_"
-
-SUBSTRATE_PRESETS: List[Dict[str, str]] = [
-    {"code": "EC1", "name": "Lineaboard Cladding", "color": "#A9BFD9"},
-    {"code": "EC2", "name": "Textureboard Cladding", "color": "#A5B9DB"},
-    {"code": "EC3", "name": "Easylap Cladding", "color": "#B7C4D5"},
-    {"code": "RBL", "name": "Rendered Block", "color": "#B9C0C4"},
-    {"code": "SOF", "name": "Soffits / Eaves", "color": "#D9C788"},
-    {"code": "EC5", "name": "Timber Look Cladding", "color": "#A77C52"},
-    {"code": "SCR", "name": "Aluminium Screens", "color": "#BEA8B5"},
-    {"code": "BA1", "name": "Glass Balustrade", "color": "#B9C7C8"},
-    {"code": "SHD", "name": "Sunhoods", "color": "#919B8D"},
-    {"code": "BC", "name": "Cappings & Gutters", "color": "#9AA7AA"},
-    {"code": "RS", "name": "Roof Sheet", "color": "#C45F74"},
-    {"code": "DP", "name": "Downpipes", "color": "#84A77E"},
-    {"code": "GD", "name": "Garage Doors", "color": "#7E8792"},
-    {"code": "OTHER", "name": "Other / To Confirm", "color": "#80A6C9"},
-]
-
 
 def _num(value: Any, default: float = 0.0) -> float:
     try:
