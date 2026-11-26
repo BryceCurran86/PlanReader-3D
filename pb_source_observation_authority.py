@@ -9,6 +9,7 @@ equal-privilege Python code.
 """
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections import OrderedDict
 from collections.abc import Iterator, MutableMapping
 import dataclasses
@@ -585,20 +586,49 @@ def _observation_ids_with_derived(
 ) -> tuple[str, ...]:
     """Sorted union. Parent ids are already sorted. Equal ids stay once."""
 
+    if not derived_ids:
+        return parent_ids
+    count = len(parent_ids)
+    if count == 0:
+        return tuple(sorted(set(derived_ids)))
+    # When adding a small batch of derived IDs to a large sorted parent tuple,
+    # avoid allocating a full-size set(parent_ids) and scanning all elements in
+    # Python; use C bisect_left + slice copies instead (100% identical output).
+    if count > 64 and len(derived_ids) * 8 < count:
+        unique_derived = sorted(set(derived_ids))
+        extra_positions: list[tuple[int, str]] = []
+        lo = 0
+        for observation_id in unique_derived:
+            pos = bisect_left(parent_ids, observation_id, lo)
+            lo = pos
+            if pos < count and parent_ids[pos] == observation_id:
+                continue
+            extra_positions.append((pos, observation_id))
+        if not extra_positions:
+            return parent_ids
+        merged: list[str] = []
+        index = 0
+        for pos, observation_id in extra_positions:
+            if pos > index:
+                merged.extend(parent_ids[index:pos])
+            merged.append(observation_id)
+            index = pos
+        if index < count:
+            merged.extend(parent_ids[index:])
+        return tuple(merged)
+
     known = set(parent_ids)
     extra = sorted({observation_id for observation_id in derived_ids if observation_id not in known})
     if not extra:
         return parent_ids
-    if not parent_ids:
-        return tuple(extra)
-    merged: list[str] = []
+    merged = []
     index = 0
-    count = len(parent_ids)
     for observation_id in extra:
-        while index < count and parent_ids[index] < observation_id:
-            merged.append(parent_ids[index])
-            index += 1
+        pos = bisect_left(parent_ids, observation_id, index)
+        if pos > index:
+            merged.extend(parent_ids[index:pos])
         merged.append(observation_id)
+        index = pos
     if index < count:
         merged.extend(parent_ids[index:])
     return tuple(merged)
@@ -803,7 +833,9 @@ class SourceObservationProducer:
         source_bytes = self._store.source_bytes_by_revision.get(str(revision_id))
         if source_bytes is None:
             return None
-        if hashlib.sha256(source_bytes).hexdigest() != str(source_sha256):
+        if not self._store.source_bytes_match_revision(
+            str(revision_id), source_bytes, str(source_sha256)
+        ):
             return None
         try:
             pdf = fitz.open(stream=source_bytes, filetype="pdf")
@@ -1051,13 +1083,13 @@ class SourceObservationProducer:
             scale = dpi_value / 72.0
             # Source SHA, revision, snapshot, unique native page parent and
             # decoded-page coverage are rechecked above for every call. Only
-            # immutable PNG bytes are cached, never authorization receipts.
+            # immutable full-page PNG bytes are cached, never authorization receipts.
             image_cache_ok = (
-                images_only and not pdf.is_dirty
+                clip_rect is None and not pdf.is_dirty
                 and fitz.Page.get_pixmap is _NATIVE_RENDER_METHODS[0]
                 and fitz.Page.get_displaylist is _NATIVE_RENDER_METHODS[1]
             )
-            image_cache_key = (source_sha256, page_number, dpi_value)
+            image_cache_key = (source_sha256, page_number, dpi_value, bool(images_only))
             cached_image = (
                 self._native_image_only_png_cache.get(image_cache_key)
                 if image_cache_ok else None
