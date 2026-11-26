@@ -14,21 +14,132 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import re
 from typing import Sequence
 
-SHADOW_SCHEMA_VERSION = "1.0.0"
+SHADOW_SCHEMA_VERSION = "1.1.0"
+SOURCE_PRIMITIVE_CAP = 20_000
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
-_SCALE_TOKEN_RE = re.compile(r"\b1\s*:\s*(?:10|20|25|50|75|100|150|200|250|500)\b")
+# Longest-first alternatives with strict numeric boundaries so 1:100 never matches 1:10
+# and 1:1000 / 21:100 never match at all.
+_SCALE_TOKEN_RE = re.compile(
+    r"(?<![\d:])1\s*:\s*(?:500|250|200|150|100|75|50|25|20|10)(?!\d)"
+)
 
-_ROLE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("rcp", ("REFLECTED CEILING", "CEILING PLAN", "RCP")),
-    ("schedule", ("SCHEDULE", "WINDOW SCHEDULE", "DOOR SCHEDULE", "FINISHES")),
-    ("section", ("SECTION", "CROSS SECTION", "LONGITUDINAL SECTION")),
-    ("elevation", ("ELEVATION", "NORTH ELEVATION", "SOUTH ELEVATION", "EAST ELEVATION", "WEST ELEVATION")),
-    ("floor_plan", ("FLOOR PLAN", "GROUND FLOOR", "FIRST FLOOR", "UPPER FLOOR", "LOWER FLOOR", "PLAN")),
-    ("site_or_cover", ("SITE PLAN", "COVER SHEET", "LOCALITY", "DRAWING LIST", "INDEX")),
-    ("detail", ("DETAIL", "TYPICAL", "SETOUT", "SET OUT")),
+# Specific architectural sheet roles MUST precede generic roles; bare "PLAN" is never
+# sufficient to classify a sheet as floor_plan (prevents SITE PLAN / ROOF PLAN misrouting).
+_PRIMARY_ROLE_PATTERNS: tuple[tuple[str, tuple[re.Pattern[str], ...]], ...] = (
+    (
+        "site_or_cover",
+        tuple(
+            re.compile(rf"\b{p}\b")
+            for p in (
+                r"SITE\s+PLAN",
+                r"SITE\s+LAYOUT",
+                r"COVER\s+SHEET",
+                r"LOCALITY\s+PLAN",
+                r"DRAWING\s+LIST",
+                r"SHEET\s+INDEX",
+            )
+        ),
+    ),
+    (
+        "roof_plan",
+        tuple(
+            re.compile(rf"\b{p}\b")
+            for p in (r"ROOF\s+PLAN", r"ROOF\s+FRAMING\s+PLAN", r"ROOFING\s+PLAN")
+        ),
+    ),
+    (
+        "rcp",
+        tuple(
+            re.compile(rf"\b{p}\b")
+            for p in (
+                r"REFLECTED\s+CEILING\s+PLAN",
+                r"REFLECTED\s+CEILING",
+                r"CEILING\s+PLAN",
+                r"RCP",
+            )
+        ),
+    ),
+    (
+        "schedule",
+        tuple(
+            re.compile(rf"\b{p}\b")
+            for p in (
+                r"WINDOW\s+SCHEDULE",
+                r"DOOR\s+SCHEDULE",
+                r"FINISHES\s+SCHEDULE",
+                r"ROOM\s+SCHEDULE",
+                r"SCHEDULE",
+            )
+        ),
+    ),
+    (
+        "section",
+        tuple(
+            re.compile(rf"\b{p}\b")
+            for p in (
+                r"CROSS\s+SECTION",
+                r"LONGITUDINAL\s+SECTION",
+                r"BUILDING\s+SECTION",
+                r"SECTION",
+            )
+        ),
+    ),
+    (
+        "elevation",
+        tuple(
+            re.compile(rf"\b{p}\b")
+            for p in (
+                r"NORTH\s+ELEVATION",
+                r"SOUTH\s+ELEVATION",
+                r"EAST\s+ELEVATION",
+                r"WEST\s+ELEVATION",
+                r"FRONT\s+ELEVATION",
+                r"REAR\s+ELEVATION",
+                r"SIDE\s+ELEVATION",
+                r"ELEVATION",
+            )
+        ),
+    ),
+    (
+        "floor_plan",
+        tuple(
+            re.compile(rf"\b{p}\b")
+            for p in (
+                r"GROUND\s+FLOOR\s+PLAN",
+                r"FIRST\s+FLOOR\s+PLAN",
+                r"SECOND\s+FLOOR\s+PLAN",
+                r"UPPER\s+FLOOR\s+PLAN",
+                r"LOWER\s+FLOOR\s+PLAN",
+                r"BASEMENT\s+FLOOR\s+PLAN",
+                r"FLOOR\s+PLAN",
+                r"GROUND\s+FLOOR",
+                r"FIRST\s+FLOOR",
+                r"UPPER\s+FLOOR",
+                r"LOWER\s+FLOOR",
+            )
+        ),
+    ),
+)
+
+_FALLBACK_ROLE_PATTERNS: tuple[tuple[str, tuple[re.Pattern[str], ...]], ...] = (
+    (
+        "detail",
+        tuple(
+            re.compile(rf"\b{p}\b")
+            for p in (
+                r"CONSTRUCTION\s+DETAIL",
+                r"TYPICAL\s+DETAIL",
+                r"SETOUT",
+                r"SET\s+OUT",
+                r"DETAIL",
+            )
+        ),
+    ),
 )
 
 
@@ -39,6 +150,7 @@ class SheetRoleAssessment:
     page_index: int
     page_width_pts: float
     page_height_pts: float
+    page_rotation_deg: int
     total_native_words: int
     border_native_words: int
     body_native_words: int
@@ -46,6 +158,7 @@ class SheetRoleAssessment:
     raster_image_count: int
     outlined_text_suspected: bool
     detected_role: str
+    matched_roles: tuple[str, ...]
     role_evidence_tokens: tuple[str, ...]
     native_scale_tokens: tuple[str, ...]
 
@@ -76,12 +189,23 @@ class OutlinedDrawingAdmissionReport:
             raise ValueError("OutlinedDrawingAdmissionReport must remain shadow_only=True")
 
 
-def _classify_role_from_text(upper_text: str) -> tuple[str, tuple[str, ...]]:
-    for role, phrases in _ROLE_PATTERNS:
-        hits = tuple(sorted({p for p in phrases if p in upper_text}))
-        if hits:
-            return role, hits
-    return "unknown", ()
+def _classify_role_from_text(upper_text: str) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    matched_primary: list[str] = []
+    hits: list[str] = []
+    for role, patterns in _PRIMARY_ROLE_PATTERNS:
+        role_hits = sorted({m.group(0) for pat in patterns for m in pat.finditer(upper_text)})
+        if role_hits:
+            matched_primary.append(role)
+            hits.extend(role_hits)
+    if len(matched_primary) == 1:
+        return matched_primary[0], (matched_primary[0],), tuple(sorted(set(hits)))
+    if len(matched_primary) > 1:
+        return "mixed_role", tuple(matched_primary), tuple(sorted(set(hits)))
+    for role, patterns in _FALLBACK_ROLE_PATTERNS:
+        role_hits = sorted({m.group(0) for pat in patterns for m in pat.finditer(upper_text)})
+        if role_hits:
+            return role, (role,), tuple(role_hits)
+    return "unknown", (), ()
 
 
 def _abstain_admission(
@@ -108,6 +232,13 @@ def _abstain_admission(
     )
 
 
+def _valid_fraction(val: object) -> bool:
+    if type(val) is bool or not isinstance(val, (int, float)):
+        return False
+    f = float(val)
+    return math.isfinite(f) and 0.0 < f < 1.0
+
+
 def evaluate_outlined_drawing_admission_shadow(
     pdf_bytes: bytes,
     *,
@@ -118,14 +249,35 @@ def evaluate_outlined_drawing_admission_shadow(
     max_body_words_for_outlined: int = 20,
     min_vector_drawings_for_outlined: int = 500,
     max_pages: int = 60,
+    max_drawings_per_page: int = SOURCE_PRIMITIVE_CAP,
 ) -> OutlinedDrawingAdmissionReport:
     """Evaluate a PDF drawing set for generic vector-outlined text admission."""
     if not isinstance(pdf_bytes, (bytes, bytearray)) or len(pdf_bytes) == 0:
         return _abstain_admission(source_sha256="", reasons=("empty_or_invalid_pdf_bytes",))
 
+    if (
+        type(finish_specification_present) is not bool
+        or not _valid_fraction(right_border_fraction)
+        or not _valid_fraction(bottom_border_fraction)
+        or type(max_body_words_for_outlined) is not int
+        or max_body_words_for_outlined < 0
+        or type(min_vector_drawings_for_outlined) is not int
+        or min_vector_drawings_for_outlined < 1
+        or type(max_pages) is not int
+        or max_pages < 1
+        or type(max_drawings_per_page) is not int
+        or max_drawings_per_page < 1
+        or max_drawings_per_page > SOURCE_PRIMITIVE_CAP
+    ):
+        return _abstain_admission(source_sha256="", reasons=("invalid_admission_parameters",))
+
     actual_sha = hashlib.sha256(bytes(pdf_bytes)).hexdigest()
     if expected_source_sha256 is not None:
-        clean_expected = str(expected_source_sha256).strip().lower()
+        if type(expected_source_sha256) is not str:
+            return _abstain_admission(source_sha256=actual_sha, reasons=("invalid_expected_source_sha256",))
+        clean_expected = expected_source_sha256.strip()
+        if not _SHA256_HEX_RE.fullmatch(clean_expected):
+            return _abstain_admission(source_sha256=actual_sha, reasons=("invalid_expected_source_sha256",))
         if actual_sha != clean_expected:
             return _abstain_admission(source_sha256=actual_sha, reasons=("source_sha256_mismatch",))
 
@@ -151,18 +303,39 @@ def evaluate_outlined_drawing_admission_shadow(
             page = doc[idx]
             pw = float(page.rect.width)
             ph = float(page.rect.height)
-            words = page.get_text("words") or ()
+            rot = int(getattr(page, "rotation", 0) or 0) % 360
+            if not (math.isfinite(pw) and math.isfinite(ph) and pw > 0.0 and ph > 0.0):
+                return _abstain_admission(
+                    source_sha256=actual_sha,
+                    page_count=page_count,
+                    reasons=("invalid_page_dimensions",),
+                )
             drawings = page.get_drawings() or ()
+            if len(drawings) > max_drawings_per_page:
+                return _abstain_admission(
+                    source_sha256=actual_sha,
+                    page_count=page_count,
+                    reasons=("source_primitive_cap_exceeded",),
+                )
+            words = page.get_text("words") or ()
             images = page.get_images() or ()
 
+            # Inspect title-block border strips in displayed (post-rotation) coordinates.
+            # On rotated sheets, title blocks may sit along right/bottom OR left/top strips;
+            # keep primary right/bottom margins plus narrow opposite-edge strip when rotated.
             body_words = 0
             border_tokens: list[str] = []
             for w in words:
-                wx2, wy2 = float(w[2]), float(w[3])
-                if wx2 < pw * right_border_fraction and wy2 < ph * bottom_border_fraction:
-                    body_words += 1
-                else:
+                wx0, wy0, wx2, wy2 = float(w[0]), float(w[1]), float(w[2]), float(w[3])
+                in_primary_border = wx2 >= pw * right_border_fraction or wy2 >= ph * bottom_border_fraction
+                in_rotated_border = rot != 0 and (
+                    wx0 <= pw * (1.0 - right_border_fraction)
+                    or wy0 <= ph * (1.0 - bottom_border_fraction)
+                )
+                if in_primary_border or in_rotated_border:
                     border_tokens.append(str(w[4]))
+                else:
+                    body_words += 1
 
             total_words = len(words)
             border_words = total_words - body_words
@@ -172,7 +345,7 @@ def evaluate_outlined_drawing_admission_shadow(
                 and len(images) == 0
             )
             border_upper = " ".join(border_tokens).upper()
-            role, role_hits = _classify_role_from_text(border_upper)
+            role, matched_roles, role_hits = _classify_role_from_text(border_upper)
             scale_tokens = tuple(sorted({m.group(0).replace(" ", "") for m in _SCALE_TOKEN_RE.finditer(border_upper)}))
             role_counter[role] = role_counter.get(role, 0) + 1
 
@@ -181,6 +354,7 @@ def evaluate_outlined_drawing_admission_shadow(
                     page_index=idx,
                     page_width_pts=round(pw, 2),
                     page_height_pts=round(ph, 2),
+                    page_rotation_deg=rot,
                     total_native_words=total_words,
                     border_native_words=border_words,
                     body_native_words=body_words,
@@ -188,6 +362,7 @@ def evaluate_outlined_drawing_admission_shadow(
                     raster_image_count=len(images),
                     outlined_text_suspected=suspected,
                     detected_role=role,
+                    matched_roles=matched_roles,
                     role_evidence_tokens=role_hits,
                     native_scale_tokens=scale_tokens,
                 )
