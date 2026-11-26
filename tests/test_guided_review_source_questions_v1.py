@@ -140,7 +140,7 @@ def test_preserves_dimension_mm_separates_needs_info_and_requires_explicit_selec
     )
     scale_qid = next(q.question_id for q in q_bundle.questions if q.issue == "scale")
 
-    # Generic page-level answer WITHOUT explicit selected_question_id does NOT link suggestion receipt!
+    # Generic page-level answer WITHOUT explicit selected_question_id or geometry stays a non-executable proposal!
     generic_packet = _make_native_packet(
         viewport_id=None,
         answers={"scale": {"decision": "correction_recorded", "note": "checked"}},
@@ -149,9 +149,15 @@ def test_preserves_dimension_mm_separates_needs_info_and_requires_explicit_selec
         native_review_packet=generic_packet,
         question_bundle=q_bundle,
     )
-    assert generic_handoff.status == "USER_ASSISTED_HANDOFF_READY"
-    assert generic_handoff.actionable_directives[0].selected_suggestion_receipt_sha256 is None
-    assert generic_handoff.actionable_directives[0].selected_question_id is None
+    assert generic_handoff.status == "USER_PROPOSALS_ONLY"
+    assert generic_handoff.actionable_directives == ()
+    assert generic_handoff.actionable_affected_issuers == ()
+    assert len(generic_handoff.unbound_proposals) == 1
+    assert generic_handoff.unbound_proposals[0].action_kind == "USER_PROPOSAL_UNBOUND"
+    assert generic_handoff.unbound_proposals[0].selected_suggestion_receipt_sha256 is None
+    assert generic_handoff.unbound_proposals[0].selected_question_id is None
+    assert generic_handoff.unbound_proposals[0].viewport_id is None
+    assert build_user_assisted_scale_issuer_request(handoff=generic_handoff).status == "ABSTAINED"
 
     # Explicit selection + typed dimension_mm + separate NEEDS_INFORMATION blocker
     packet = _make_native_packet(
@@ -281,32 +287,89 @@ def test_deletion_invalidation_plan_and_negative_hardening_gates() -> None:
     assert r_pid.status == "ABSTAINED"
     assert "invalid_review_packet_scope_or_revision" in r_pid.reason_codes
 
-    # Automatic-first helper surfaces unresolved questions from shadow reports without inventing finishes
-    class _FakeScaleReport:
-        status = "CORROBORATED_SAME_PAGE_FIGURED_SCALE_SHADOW"
-        source_sha256 = _SRC_SHA
-        page_number = 2
-        viewport_id = _VP
-        receipt_sha256 = _REC_SHA_1
-        mm_per_pt_x = 35.278
-        horizontal_witness_ids = ("h1",)
-        vertical_witness_ids = ("v1",)
+    # Explicit needs_information veto: even when a typed dimension_witness mark exists,
+    # decision='needs_information' MUST block actionability and refuse scale execution.
+    vetoed_pkt = _make_native_packet(
+        viewport_id=None,
+        corrections=[
+            {
+                "correction_id": "dim_draft_1",
+                "category": "dimension_witness",
+                "kind": "line",
+                "native_points_pdf_pts": [[100.0, 100.0], [200.0, 100.0]],
+                "dimension_mm": 2000.0,
+                "dimension_unit": "mm",
+            }
+        ],
+        answers={"scale": {"decision": "needs_information", "note": "Need builder to verify span"}},
+    )
+    vetoed_handoff = build_review_to_issuer_handoff(native_review_packet=vetoed_pkt)
+    assert vetoed_handoff.status == "NEEDS_INFORMATION_ONLY"
+    assert vetoed_handoff.actionable_directives == ()
+    assert vetoed_handoff.actionable_affected_issuers == ()
+    assert vetoed_handoff.viewport_id is None
+    assert len(vetoed_handoff.unresolved_information_requests) == 1
+    assert vetoed_handoff.unresolved_information_requests[0].action_kind == "NEEDS_INFORMATION_BLOCKER"
+    assert vetoed_handoff.unresolved_information_requests[0].typed_corrections[0].dimension_mm == 2000.0
+    assert build_user_assisted_scale_issuer_request(handoff=vetoed_handoff).status == "ABSTAINED"
 
-    class _FakeOutlinedReport:
-        finish_authority_status = "ABSTAINED"
+    # Multiple dimension witness ambiguity MUST abstain fail-closed
+    multi_wit_pkt = _make_native_packet(
+        viewport_id=None,
+        corrections=[
+            {"correction_id": "dw1", "category": "dimension_witness", "kind": "line", "native_points_pdf_pts": [[0.0, 0.0], [100.0, 0.0]], "dimension_mm": 2000.0},
+            {"correction_id": "dw2", "category": "dimension_witness", "kind": "line", "native_points_pdf_pts": [[0.0, 50.0], [100.0, 50.0]], "dimension_mm": 3000.0},
+        ],
+        answers={"scale": {"decision": "correction_recorded", "note": "Two conflicting spans"}},
+    )
+    multi_req = build_user_assisted_scale_issuer_request(
+        handoff=build_review_to_issuer_handoff(native_review_packet=multi_wit_pkt)
+    )
+    assert multi_req.status == "ABSTAINED"
+    assert "ambiguous_multiple_dimension_witness_corrections" in multi_req.reason_codes
+
+    # REAL end-to-end source report test (no fabricated stub): draw a real PyMuPDF sheet
+    # with a figured dimension + witness lines, extract via pb_figured_dimension_evidence,
+    # and feed directly into derive_unresolved_guided_questions_from_source_reports (no viewport invented).
+    import fitz
+    from pb_figured_dimension_evidence import extract_dimension_evidence_bundle
+
+    doc = fitz.open()
+    page = doc.new_page(width=600.0, height=400.0)
+    for p0, p1 in [
+        ((100.0, 120.0), (300.0, 120.0)),
+        ((100.0, 90.0), (100.0, 150.0)),
+        ((300.0, 90.0), (300.0, 150.0)),
+    ]:
+        shape = page.new_shape()
+        shape.draw_line(fitz.Point(*p0), fitz.Point(*p1))
+        shape.finish(color=(0, 0, 0), width=0.5, closePath=False)
+        shape.commit()
+    page.insert_text((190.0, 114.0), "3000", fontsize=10)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+    real_sha = hashlib.sha256(pdf_bytes).hexdigest()
+
+    doc2 = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        dim_bundle = extract_dimension_evidence_bundle(doc2[0], page_num=1, view_type="floor_plan")
+    finally:
+        doc2.close()
 
     auto_bundle = derive_unresolved_guided_questions_from_source_reports(
-        source_sha256=_SRC_SHA,
+        source_sha256=real_sha,
         page_id=10,
-        pdf_page=2,
-        viewport_id=_VP,
-        same_page_scale_report=_FakeScaleReport(),
-        outlined_admission_report=_FakeOutlinedReport(),
-        finishes_verified=True,  # overridden to False when outlined report abstained finishes
+        pdf_page=1,
+        viewport_id=None,  # No viewport invented!
+        dimension_evidence_bundle=dim_bundle,
         exclusions_verified=True,
     )
+    assert auto_bundle.viewport_id is None
     by_i = {q.issue: q for q in auto_bundle.questions}
     assert by_i["scale"].status == "SOURCE_SUGGESTION_REQUIRES_CONFIRMATION"
+    assert by_i["scale"].suggestion is not None
+    assert by_i["scale"].suggestion.viewport_id is None
+    assert by_i["scale"].suggestion.evidence_kind == "figured_dimension_witness_bundle"
     assert by_i["finishes"].status == "SOURCE_EVIDENCE_MISSING_ASK_USER"
     with pytest.raises(ValueError):
         replace(h1, digest_authenticates_user_evidence=True)

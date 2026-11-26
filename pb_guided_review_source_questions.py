@@ -333,15 +333,18 @@ class GuidedSourceQuestionBundle:
 class ReviewToIssuerDirective:
     """Typed user-assisted review directive targeting existing generic issuers.
 
-    Explicitly separates `ACTIONABLE_USER_CORRECTION` from `NEEDS_INFORMATION_BLOCKER`,
-    preserves typed `dimension_mm`/units and native coordinates, and only binds
-    `selected_question_id` / `selected_suggestion_receipt_sha256` when explicitly
-    selected by the user and scope-matched.
+    Explicitly separates:
+    - `ACTIONABLE_USER_CORRECTION`: geometry-bound or explicitly suggestion-bound correction
+      NOT vetoed by `needs_information`.
+    - `USER_PROPOSAL_UNBOUND`: unbound free-text `correction_recorded` note (proposal only,
+      never executable by an issuer).
+    - `NEEDS_INFORMATION_BLOCKER`: explicit `needs_information` veto (blocks actionability
+      even when draft marks exist on that issue).
     """
 
     directive_id: str
     issue: str
-    action_kind: str  # "ACTIONABLE_USER_CORRECTION" | "NEEDS_INFORMATION_BLOCKER"
+    action_kind: str  # "ACTIONABLE_USER_CORRECTION" | "USER_PROPOSAL_UNBOUND" | "NEEDS_INFORMATION_BLOCKER"
     target_issuers: tuple[str, ...]
     decision: str
     user_note: str
@@ -357,7 +360,11 @@ class ReviewToIssuerDirective:
     frozen_benchmark_allowed: bool = False
 
     def __post_init__(self) -> None:
-        if self.action_kind not in ("ACTIONABLE_USER_CORRECTION", "NEEDS_INFORMATION_BLOCKER"):
+        if self.action_kind not in (
+            "ACTIONABLE_USER_CORRECTION",
+            "USER_PROPOSAL_UNBOUND",
+            "NEEDS_INFORMATION_BLOCKER",
+        ):
             raise ValueError(f"Invalid directive action_kind: {self.action_kind!r}")
         if self.authority != "user_assisted_review_pending_issuer":
             raise ValueError("ReviewToIssuerDirective authority must remain user_assisted_review_pending_issuer")
@@ -377,7 +384,7 @@ class ReviewToIssuerHandoffReceipt:
     authenticate user-supplied geometry or grant automatic/commercial authority.
     """
 
-    status: str  # "USER_ASSISTED_HANDOFF_READY" | "NEEDS_INFORMATION_ONLY" | "NO_SOURCE_ISSUER_UPDATES" | "ABSTAINED"
+    status: str  # "USER_ASSISTED_HANDOFF_READY" | "USER_PROPOSALS_ONLY" | "NEEDS_INFORMATION_ONLY" | "NO_SOURCE_ISSUER_UPDATES" | "ABSTAINED"
     source_sha256: str
     page_id: int
     pdf_page: int
@@ -392,6 +399,8 @@ class ReviewToIssuerHandoffReceipt:
     affected_issuers: tuple[str, ...]
     handoff_sha256: str
     reason_codes: tuple[str, ...]
+    unbound_proposals: tuple[ReviewToIssuerDirective, ...] = ()
+    proposed_affected_issuers: tuple[str, ...] = ()
     digest_authenticates_user_evidence: bool = False
     automatic_source_verified: bool = False
     commercial_projection_allowed: bool = False
@@ -677,32 +686,39 @@ def derive_unresolved_guided_questions_from_source_reports(
     viewport_id: str | None = None,
     same_page_scale_report: Any | None = None,
     outlined_admission_report: Any | None = None,
+    dimension_evidence_bundle: Any | None = None,
     height_verified: bool = False,
     finishes_verified: bool = False,
     exclusions_verified: bool = False,
 ) -> GuidedSourceQuestionBundle:
     """Automatic-first question builder fed by real source shadow reports.
 
-    Only surfaces user questions for domains not already automatically verified,
-    preserving exact source candidate provenance and never inventing missing specs.
+    Supports exact `#4790` producer results (`SamePageFiguredScaleReport`,
+    `NativeTiledRoomFaceSamePageScaleShadowResult`, `OutlinedDrawingAdmissionReport`,
+    `OutlinedDrawingSetIngestionShadowBundle`) and live `DimensionEvidenceBundle`
+    from `pb_figured_dimension_evidence`. Never invents a `viewport_id` or missing
+    finish specifications.
     """
     suggestions: list[SourceSuggestionProvenance] = []
     scale_verified = False
 
     if same_page_scale_report is not None:
-        rep_status = getattr(same_page_scale_report, "status", None)
-        rep_sha = getattr(same_page_scale_report, "source_sha256", None)
-        rep_page = getattr(same_page_scale_report, "page_number", None)
-        rep_vp = getattr(same_page_scale_report, "viewport_id", None)
-        rep_receipt = getattr(same_page_scale_report, "receipt_sha256", None)
-        rep_mx = getattr(same_page_scale_report, "mm_per_pt_x", None)
-        rep_hids = tuple(getattr(same_page_scale_report, "horizontal_witness_ids", ()) or ())
-        rep_vids = tuple(getattr(same_page_scale_report, "vertical_witness_ids", ()) or ())
+        # Unwrap NativeTiledRoomFaceSamePageScaleShadowResult if caller passed wrapper
+        inner_scale = getattr(same_page_scale_report, "scale_report", same_page_scale_report)
+        rep_status = getattr(inner_scale, "status", None)
+        rep_sha = getattr(inner_scale, "source_sha256", None)
+        rep_page = getattr(inner_scale, "page_number", None)
+        rep_vp = getattr(inner_scale, "viewport_id", None)
+        rep_receipt = getattr(inner_scale, "receipt_sha256", None)
+        rep_mx = getattr(inner_scale, "mm_per_pt_x", None)
+        rep_hids = tuple(getattr(inner_scale, "horizontal_witness_ids", ()) or ())
+        rep_vids = tuple(getattr(inner_scale, "vertical_witness_ids", ()) or ())
         if (
             rep_status == "CORROBORATED_SAME_PAGE_FIGURED_SCALE_SHADOW"
             and rep_sha == source_sha256
             and rep_page == pdf_page
             and _is_valid_sha256(rep_receipt)
+            and _finite_positive_float(rep_mx) is not None
             and (rep_hids or rep_vids)
             and (viewport_id is not None and rep_vp == viewport_id)
         ):
@@ -721,10 +737,49 @@ def derive_unresolved_guided_questions_from_source_reports(
                     ),
                 )
             )
+    elif dimension_evidence_bundle is not None:
+        bindings = tuple(getattr(dimension_evidence_bundle, "bindings", ()) or ())
+        obs_by_id = {
+            getattr(o, "dimension_id", ""): o
+            for o in (getattr(dimension_evidence_bundle, "observations", ()) or ())
+        }
+        witness_bound = [
+            b for b in bindings
+            if getattr(b, "status", None) == "witness_bound"
+            and getattr(b, "endpoints", None) is not None
+            and getattr(b, "observation_id", "") in obs_by_id
+            and getattr(obs_by_id[getattr(b, "observation_id", "")], "source_page", None) == pdf_page
+        ]
+        if witness_bound:
+            obs_ids = tuple(sorted({str(getattr(b, "observation_id")) for b in witness_bound}))
+            cand_receipt = _canonical_json_sha256(
+                {
+                    "sha": source_sha256,
+                    "page": pdf_page,
+                    "vp": viewport_id,
+                    "witness_bound_obs": list(obs_ids),
+                }
+            )
+            suggestions.append(
+                SourceSuggestionProvenance(
+                    issue="scale",
+                    source_sha256=source_sha256,
+                    pdf_page=pdf_page,
+                    viewport_id=viewport_id,
+                    evidence_kind="figured_dimension_witness_bundle",
+                    source_observation_ids=obs_ids,
+                    candidate_receipt_sha256=cand_receipt,
+                    suggested_summary=(
+                        f"{len(obs_ids)} witness-bound figured dimension(s) detected on page {pdf_page} "
+                        f"pending user confirmation."
+                    ),
+                )
+            )
 
     fin_verified = finishes_verified
     if outlined_admission_report is not None:
-        fin_status = getattr(outlined_admission_report, "finish_authority_status", None)
+        inner_adm = getattr(outlined_admission_report, "admission_report", outlined_admission_report)
+        fin_status = getattr(inner_adm, "finish_authority_status", None)
         if fin_status == "ABSTAINED":
             fin_verified = False
 
@@ -1020,8 +1075,10 @@ def build_review_to_issuer_handoff(
             corrections_by_issue["exclusions"].append(parsed_corr)
 
     actionable: list[ReviewToIssuerDirective] = []
+    proposals: list[ReviewToIssuerDirective] = []
     unresolved_info: list[ReviewToIssuerDirective] = []
     actionable_issuers: set[str] = set()
+    proposed_issuers: set[str] = set()
     blocked_issuers: set[str] = set()
     reasons: set[str] = set()
 
@@ -1177,12 +1234,17 @@ def build_review_to_issuer_handoff(
             continue
 
         issuers = EXISTING_ISSUER_TARGETS[issue]
-        if typed_corrs or decision == "correction_recorded":
+        # Explicit needs_information ALWAYS vetoes actionability even when draft marks exist.
+        if decision == "needs_information":
+            effective_decision = "needs_information"
+            action_kind = "NEEDS_INFORMATION_BLOCKER"
+        elif typed_corrs or (selected_qid is not None and selected_receipt is not None):
             effective_decision = decision or "correction_recorded"
             action_kind = "ACTIONABLE_USER_CORRECTION"
         else:
-            effective_decision = "needs_information"
-            action_kind = "NEEDS_INFORMATION_BLOCKER"
+            # Unbound free-text correction_recorded notes remain non-executable proposals.
+            effective_decision = "correction_recorded"
+            action_kind = "USER_PROPOSAL_UNBOUND"
 
         did = "issuer_dir_" + _canonical_json_sha256(
             {
@@ -1217,15 +1279,21 @@ def build_review_to_issuer_handoff(
             actionable.append(directive)
             actionable_issuers.update(issuers)
             reasons.add(f"actionable_{issue}_{effective_decision}")
+        elif action_kind == "USER_PROPOSAL_UNBOUND":
+            proposals.append(directive)
+            proposed_issuers.update(issuers)
+            reasons.add(f"unbound_proposal_{issue}")
         else:
             unresolved_info.append(directive)
             blocked_issuers.update(issuers)
             reasons.add(f"needs_information_{issue}")
 
-    all_directives = tuple(actionable + unresolved_info)
-    all_issuers = tuple(sorted(actionable_issuers | blocked_issuers))
+    all_directives = tuple(actionable + proposals + unresolved_info)
+    all_issuers = tuple(sorted(actionable_issuers | proposed_issuers | blocked_issuers))
     if actionable:
         status = "USER_ASSISTED_HANDOFF_READY"
+    elif proposals:
+        status = "USER_PROPOSALS_ONLY"
     elif unresolved_info:
         status = "NEEDS_INFORMATION_ONLY"
     else:
@@ -1237,6 +1305,7 @@ def build_review_to_issuer_handoff(
             "packet_sha": str(packet_sha),
             "status": status,
             "actionable": [d.directive_id for d in actionable],
+            "proposals": [d.directive_id for d in proposals],
             "needs_info": [d.directive_id for d in unresolved_info],
             "issuers": list(all_issuers),
         }
@@ -1257,6 +1326,8 @@ def build_review_to_issuer_handoff(
         affected_issuers=all_issuers,
         handoff_sha256=handoff_sha,
         reason_codes=tuple(sorted(reasons)),
+        unbound_proposals=tuple(proposals),
+        proposed_affected_issuers=tuple(sorted(proposed_issuers)),
     )
 
 
