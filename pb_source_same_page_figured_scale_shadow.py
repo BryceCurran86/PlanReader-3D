@@ -15,20 +15,40 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import re
 from typing import Any, Sequence
 
-SHADOW_SCHEMA_VERSION = "1.0.0"
+SHADOW_SCHEMA_VERSION = "1.1.0"
 DEFAULT_MAX_REL_SCALE_TOLERANCE = 0.01
+MAX_ALLOWED_REL_SCALE_TOLERANCE = 0.01
 SOURCE_PRIMITIVE_CAP = 20_000
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _is_valid_sha256(value: object) -> bool:
+    return type(value) is str and bool(_SHA256_HEX_RE.fullmatch(value))
+
+
+def _finite_positive_number(value: object) -> float | None:
+    if type(value) is bool or value is None:
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(num) or num <= 0.0:
+        return None
+    return num
 
 
 @dataclass(frozen=True)
 class OrthogonalFiguredSpanWitness:
-    """One source-owned figured-dimension span witness on a specific PDF page."""
+    """One source-owned figured-dimension span witness bound to a specific page & viewport."""
 
     witness_id: str
     source_sha256: str
     page_number: int
+    viewport_id: str
     axis: str  # "x" (horizontal) or "y" (vertical)
     figured_mm: float
     span_pdf_pts: float
@@ -38,11 +58,12 @@ class OrthogonalFiguredSpanWitness:
 
 @dataclass(frozen=True)
 class SamePageFiguredScaleReport:
-    """Immutable same-page isotropic scale corroboration receipt (shadow-only)."""
+    """Immutable same-page viewport-bound isotropic scale corroboration receipt (shadow-only)."""
 
     status: str  # "CORROBORATED_SAME_PAGE_FIGURED_SCALE_SHADOW" | "ABSTAINED"
     source_sha256: str
     page_number: int
+    viewport_id: str
     mm_per_pt_x: float | None
     mm_per_pt_y: float | None
     isotropy_error: float | None
@@ -153,6 +174,7 @@ def _abstain_scale(
     *,
     source_sha256: str,
     page_number: int,
+    viewport_id: str,
     reasons: tuple[str, ...],
     target_room_bbox_pdf_pts: tuple[float, float, float, float] | None = None,
     page_rect_match: bool = False,
@@ -162,6 +184,7 @@ def _abstain_scale(
             {
                 "sha": source_sha256,
                 "page": page_number,
+                "viewport_id": viewport_id,
                 "reasons": list(reasons),
             },
             sort_keys=True,
@@ -171,6 +194,7 @@ def _abstain_scale(
         status="ABSTAINED",
         source_sha256=source_sha256,
         page_number=page_number,
+        viewport_id=viewport_id,
         mm_per_pt_x=None,
         mm_per_pt_y=None,
         isotropy_error=None,
@@ -189,29 +213,43 @@ def corroborate_same_page_figured_scale_shadow(
     *,
     source_sha256: str,
     page_number: int,
+    target_viewport_id: str,
     page_rect_pts: tuple[float, float, float, float],
     witnesses: Sequence[OrthogonalFiguredSpanWitness],
+    target_viewport_bbox_pdf_pts: tuple[float, float, float, float] | None = None,
     target_room_bbox_pdf_pts: tuple[float, float, float, float] | None = None,
     reference_mm_per_pt_x: float | None = None,
     reference_mm_per_pt_y: float | None = None,
     reference_page_rect_pts: tuple[float, float, float, float] | None = None,
     max_rel_tolerance: float = DEFAULT_MAX_REL_SCALE_TOLERANCE,
 ) -> SamePageFiguredScaleReport:
-    """Corroborate isotropic same-page mm/pt scale from orthogonal figured spans."""
-    clean_sha = str(source_sha256 or "").strip()
+    """Corroborate isotropic same-page viewport-bound mm/pt scale from orthogonal figured spans."""
+    clean_sha = source_sha256.strip() if type(source_sha256) is str else ""
+    clean_vp = target_viewport_id.strip() if type(target_viewport_id) is str else ""
+    safe_page = page_number if type(page_number) is int else 0
     page_box = _finite_bbox(page_rect_pts)
-    if (
-        len(clean_sha) < 16
-        or type(page_number) is not int
-        or page_number < 1
-        or page_box is None
-        or not math.isfinite(float(max_rel_tolerance))
-        or float(max_rel_tolerance) <= 0.0
-    ):
+    tol = _finite_positive_number(max_rel_tolerance)
+
+    if not _is_valid_sha256(clean_sha) or type(page_number) is not int or page_number < 1 or page_box is None or tol is None:
         return _abstain_scale(
             source_sha256=clean_sha,
-            page_number=page_number if isinstance(page_number, int) else 0,
+            page_number=safe_page,
+            viewport_id=clean_vp,
             reasons=("invalid_scale_input_or_provenance",),
+        )
+    if tol > MAX_ALLOWED_REL_SCALE_TOLERANCE:
+        return _abstain_scale(
+            source_sha256=clean_sha,
+            page_number=page_number,
+            viewport_id=clean_vp,
+            reasons=("scale_tolerance_exceeds_ceiling",),
+        )
+    if not clean_vp:
+        return _abstain_scale(
+            source_sha256=clean_sha,
+            page_number=page_number,
+            viewport_id="",
+            reasons=("missing_target_viewport_provenance",),
         )
 
     page_rect_match = True
@@ -221,8 +259,21 @@ def corroborate_same_page_figured_scale_shadow(
             return _abstain_scale(
                 source_sha256=clean_sha,
                 page_number=page_number,
+                viewport_id=clean_vp,
                 reasons=("page_rect_mismatch_against_reference",),
                 page_rect_match=False,
+            )
+
+    clean_vp_box: tuple[float, float, float, float] | None = None
+    if target_viewport_bbox_pdf_pts is not None:
+        clean_vp_box = _finite_bbox(target_viewport_bbox_pdf_pts)
+        if clean_vp_box is None or not _inside_rect(clean_vp_box, page_box):
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("target_viewport_bbox_outside_page_rect",),
+                page_rect_match=page_rect_match,
             )
 
     clean_room_box: tuple[float, float, float, float] | None = None
@@ -232,41 +283,132 @@ def corroborate_same_page_figured_scale_shadow(
             return _abstain_scale(
                 source_sha256=clean_sha,
                 page_number=page_number,
+                viewport_id=clean_vp,
                 reasons=("target_room_bbox_outside_page_rect",),
+                target_room_bbox_pdf_pts=clean_room_box,
+                page_rect_match=page_rect_match,
+            )
+        if clean_vp_box is not None and not _inside_rect(clean_room_box, clean_vp_box):
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("target_room_bbox_outside_target_viewport_bbox",),
                 target_room_bbox_pdf_pts=clean_room_box,
                 page_rect_match=page_rect_match,
             )
 
     hx: list[tuple[float, OrthogonalFiguredSpanWitness]] = []
     vy: list[tuple[float, OrthogonalFiguredSpanWitness]] = []
+    seen_witness_ids: set[str] = set()
     for w in witnesses:
+        if not isinstance(w, OrthogonalFiguredSpanWitness):
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("invalid_witness_type",),
+                target_room_bbox_pdf_pts=clean_room_box,
+                page_rect_match=page_rect_match,
+            )
+        clean_wid = w.witness_id.strip() if type(w.witness_id) is str else ""
+        if not clean_wid:
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("invalid_witness_identity",),
+                target_room_bbox_pdf_pts=clean_room_box,
+                page_rect_match=page_rect_match,
+            )
+        if clean_wid in seen_witness_ids:
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("duplicate_witness_id_conflict",),
+                target_room_bbox_pdf_pts=clean_room_box,
+                page_rect_match=page_rect_match,
+            )
+        seen_witness_ids.add(clean_wid)
+
+        if not _is_valid_sha256(w.source_sha256):
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("invalid_witness_sha256",),
+                target_room_bbox_pdf_pts=clean_room_box,
+                page_rect_match=page_rect_match,
+            )
         if w.source_sha256 != clean_sha:
             return _abstain_scale(
                 source_sha256=clean_sha,
                 page_number=page_number,
+                viewport_id=clean_vp,
                 reasons=("cross_revision_witness_sha_mismatch",),
+                target_room_bbox_pdf_pts=clean_room_box,
+                page_rect_match=page_rect_match,
+            )
+        if type(w.page_number) is not int or w.page_number < 1:
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("invalid_witness_page_number",),
                 target_room_bbox_pdf_pts=clean_room_box,
                 page_rect_match=page_rect_match,
             )
         if w.page_number != page_number:
             # Never silently transfer witnesses from another page.
             continue
+
+        w_vp = w.viewport_id.strip() if type(w.viewport_id) is str else ""
+        if not w_vp:
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("missing_witness_viewport_provenance",),
+                target_room_bbox_pdf_pts=clean_room_box,
+                page_rect_match=page_rect_match,
+            )
+        if w_vp != clean_vp:
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("mixed_viewport_witness_scope_conflict",),
+                target_room_bbox_pdf_pts=clean_room_box,
+                page_rect_match=page_rect_match,
+            )
+
         wbox = _finite_bbox(w.bbox_pdf_pts)
+        fig_mm = _finite_positive_number(w.figured_mm)
+        span_pts = _finite_positive_number(w.span_pdf_pts)
         if (
             wbox is None
             or not _inside_rect(wbox, page_box)
-            or not math.isfinite(float(w.figured_mm))
-            or not math.isfinite(float(w.span_pdf_pts))
-            or float(w.figured_mm) <= 0.0
-            or float(w.span_pdf_pts) <= 0.0
+            or fig_mm is None
+            or span_pts is None
+            or not isinstance(w.source_path_ids, tuple)
             or not w.source_path_ids
             or any(type(pid) is not int or pid < 0 for pid in w.source_path_ids)
         ):
             continue
-        ratio = float(w.figured_mm) / float(w.span_pdf_pts)
+        if clean_vp_box is not None and not _inside_rect(wbox, clean_vp_box):
+            return _abstain_scale(
+                source_sha256=clean_sha,
+                page_number=page_number,
+                viewport_id=clean_vp,
+                reasons=("witness_outside_target_viewport_bbox",),
+                target_room_bbox_pdf_pts=clean_room_box,
+                page_rect_match=page_rect_match,
+            )
+        ratio = fig_mm / span_pts
         if not math.isfinite(ratio) or ratio <= 0.0:
             continue
-        axis = str(w.axis or "").strip().lower()
+        axis = w.axis.strip().lower() if type(w.axis) is str else ""
         if axis == "x":
             hx.append((ratio, w))
         elif axis == "y":
@@ -276,6 +418,7 @@ def corroborate_same_page_figured_scale_shadow(
         return _abstain_scale(
             source_sha256=clean_sha,
             page_number=page_number,
+            viewport_id=clean_vp,
             reasons=("missing_same_page_orthogonal_figured_witnesses",),
             target_room_bbox_pdf_pts=clean_room_box,
             page_rect_match=page_rect_match,
@@ -290,51 +433,53 @@ def corroborate_same_page_figured_scale_shadow(
     mx, spread_x = _axis_summary(hx)
     my, spread_y = _axis_summary(vy)
     max_spread = max(spread_x, spread_y)
-    if max_spread > max_rel_tolerance:
+    if max_spread > tol:
         return _abstain_scale(
             source_sha256=clean_sha,
             page_number=page_number,
+            viewport_id=clean_vp,
             reasons=("same_page_scale_axis_conflict",),
             target_room_bbox_pdf_pts=clean_room_box,
             page_rect_match=page_rect_match,
         )
 
     isotropy_err = abs(mx / my - 1.0)
-    if isotropy_err > max_rel_tolerance:
+    if isotropy_err > tol:
         return _abstain_scale(
             source_sha256=clean_sha,
             page_number=page_number,
+            viewport_id=clean_vp,
             reasons=("same_page_scale_anisotropy_conflict",),
             target_room_bbox_pdf_pts=clean_room_box,
             page_rect_match=page_rect_match,
         )
 
     if reference_mm_per_pt_x is not None or reference_mm_per_pt_y is not None:
+        ref_x = _finite_positive_number(reference_mm_per_pt_x)
+        ref_y = _finite_positive_number(reference_mm_per_pt_y)
         if (
-            reference_mm_per_pt_x is None
-            or reference_mm_per_pt_y is None
-            or not math.isfinite(float(reference_mm_per_pt_x))
-            or not math.isfinite(float(reference_mm_per_pt_y))
-            or float(reference_mm_per_pt_x) <= 0.0
-            or float(reference_mm_per_pt_y) <= 0.0
-            or abs(mx / float(reference_mm_per_pt_x) - 1.0) > max_rel_tolerance
-            or abs(my / float(reference_mm_per_pt_y) - 1.0) > max_rel_tolerance
+            ref_x is None
+            or ref_y is None
+            or abs(mx / ref_x - 1.0) > tol
+            or abs(my / ref_y - 1.0) > tol
         ):
             return _abstain_scale(
                 source_sha256=clean_sha,
                 page_number=page_number,
+                viewport_id=clean_vp,
                 reasons=("reference_calibration_mismatch",),
                 target_room_bbox_pdf_pts=clean_room_box,
                 page_rect_match=page_rect_match,
             )
 
-    h_ids = tuple(sorted(w.witness_id for _, w in hx))
-    v_ids = tuple(sorted(w.witness_id for _, w in vy))
+    h_ids = tuple(sorted(w.witness_id.strip() for _, w in hx))
+    v_ids = tuple(sorted(w.witness_id.strip() for _, w in vy))
     all_pids = tuple(sorted({pid for _, w in (*hx, *vy) for pid in w.source_path_ids}))
 
     payload = {
         "source_sha256": clean_sha,
         "page_number": page_number,
+        "viewport_id": clean_vp,
         "mm_per_pt_x": round(mx, 6),
         "mm_per_pt_y": round(my, 6),
         "h_ids": list(h_ids),
@@ -347,6 +492,7 @@ def corroborate_same_page_figured_scale_shadow(
         status="CORROBORATED_SAME_PAGE_FIGURED_SCALE_SHADOW",
         source_sha256=clean_sha,
         page_number=page_number,
+        viewport_id=clean_vp,
         mm_per_pt_x=round(mx, 6),
         mm_per_pt_y=round(my, 6),
         isotropy_error=round(isotropy_err, 6),
@@ -441,7 +587,7 @@ def extract_open_plan_multi_wall_boundary_candidates_shadow(
     min_segment_length_pts: float = 18.0,
 ) -> OpenPlanBoundaryExtractionReport:
     """Extract generic orthogonal structural wall candidates around an open-plan seed."""
-    clean_sha = str(source_sha256 or "").strip()
+    clean_sha = source_sha256.strip() if type(source_sha256) is str else ""
     sx, sy = float(seed_point_pdf_pts[0]), float(seed_point_pdf_pts[1])
     rad = float(search_radius_pts)
     search_box = (sx - rad, sy - rad, sx + rad, sy + rad)
@@ -453,7 +599,7 @@ def extract_open_plan_multi_wall_boundary_candidates_shadow(
         return OpenPlanBoundaryExtractionReport(
             status="ABSTAINED",
             source_sha256=clean_sha,
-            page_number=page_number if isinstance(page_number, int) else 0,
+            page_number=page_number if type(page_number) is int else 0,
             seed_point_pdf_pts=(sx, sy),
             search_bbox_pdf_pts=search_box,
             horizontal_candidates=(),
@@ -464,7 +610,7 @@ def extract_open_plan_multi_wall_boundary_candidates_shadow(
         )
 
     if (
-        len(clean_sha) < 16
+        not _is_valid_sha256(clean_sha)
         or type(page_number) is not int
         or page_number < 1
         or not (math.isfinite(sx) and math.isfinite(sy) and math.isfinite(rad) and rad > 0.0)
