@@ -132,6 +132,17 @@ def build_native_review_packet(*, scope: ReviewScope, pdf_path, image_bytes,
              "authority": "user_selected_geometry"}
             for shape in shapes
         ]
+        scale = answers.get("scale", {})
+        selected_id = scale.get("correction_id")
+        if selected_id is not None:
+            selected = [shape for shape in shapes if shape["id"] == selected_id
+                        and shape["category"] == "dimension_witness"]
+            if len(selected) != 1 or selected[0]["points"] != scale["witness_points"]:
+                raise ValueError("Scale witness changed; reconfirm its endpoints")
+            for correction in corrections:
+                if correction["correction_id"] == selected_id:
+                    correction["dimension_mm"] = scale["dimension_mm"]
+                    correction["dimension_unit"] = "mm"
         packet = {
             "schema_version": 1,
             "scope": asdict(scope),
