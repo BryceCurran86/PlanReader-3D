@@ -590,6 +590,26 @@ def _occurrences_on_page(
     )
 
 
+class _PublicationPageOccurrences:
+    """Reuse the unchanged page-local reconciliation within one publication.
+
+    The scope results belong to one already-published material authority.
+    Do not share this lookup between revisions, publications or producers.
+    Definition, geometry and physical-floor ownership are still checked for
+    every candidate by the caller.
+    """
+
+    def __init__(self, results: Sequence[SourceMaterialOccurrenceScopeResult]):
+        self._results = tuple(results)
+        self._pages: dict[str, tuple[SourceMaterialOccurrenceRecord, ...]] = {}
+
+    def for_page(self, page_id: str) -> tuple[SourceMaterialOccurrenceRecord, ...]:
+        key = _clean(page_id)
+        if key not in self._pages:
+            self._pages[key] = _occurrences_on_page(self._results, page_id=key)
+        return self._pages[key]
+
+
 @dataclass(frozen=True)
 class CrossViewFloorFinishRecord:
     physical_room_id: str
@@ -1154,6 +1174,7 @@ class CrossViewFloorFinishProducer:
         )
         material_authority = material_producer.publish(revision_id)
         occurrence_results = material_producer.published_occurrence_results()
+        page_occurrences = _PublicationPageOccurrences(occurrence_results)
 
         records: list[CrossViewFloorFinishRecord] = []
         unresolved: set[str] = set(unresolved_disputed_area_floors)
@@ -1329,9 +1350,8 @@ class CrossViewFloorFinishProducer:
                     SourceMaterialDefinitionRecord,
                 ]
             ] = []
-            for occurrence in _occurrences_on_page(
-                occurrence_results,
-                page_id=area_record.source_dimension_page_id,
+            for occurrence in page_occurrences.for_page(
+                area_record.source_dimension_page_id,
             ):
                 if occurrence.semantic_finish not in _FLOOR_FINISH_SEMANTICS:
                     continue
