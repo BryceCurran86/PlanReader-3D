@@ -37,10 +37,12 @@ quantity is issued. Imported by no live path.
 """
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass
+from collections import Counter, OrderedDict
+from dataclasses import dataclass, replace
 import hashlib
 import math
+from pathlib import Path
+import pickle
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from shapely.geometry import Point, Polygon, box
@@ -284,6 +286,108 @@ class LayeredRoomRingResult:
     ambiguous_swing_count: int
     sliver_region_count: int = 0
     schema_version: str = LAYERED_ROOM_RING_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class _LayeredPieces:
+    """Everything room formation needs from one tracer pass, taken just before the correction hook."""
+
+    source_sha256: str
+    page_index: int
+    strips: tuple
+    other_fills: tuple
+    closures: tuple
+    closure_rects: tuple
+    unresolved: tuple
+    domain: Any
+    gap_count: int
+    unsupported: int
+    unplaced_swings: int
+    ambiguous_swings: int
+
+
+@dataclass(frozen=True)
+class _LayeredPass:
+    """One tracer pass: its pieces, or the result reached before the hook; and the rooms the pieces give as offered."""
+
+    pieces: Optional[_LayeredPieces]
+    final: Optional[LayeredRoomRingResult] = None
+    rooms: Optional[LayeredRoomRingResult] = None
+
+
+# The modules whose code decides the pieces; their files are part of every cache key.
+_PIECE_CODE_MODULES = (
+    "pb_next_wall_ring_preview", "pb_layered_wall_doorway_room_ring_shadow", "pb_new_source_dark_ink_scope",
+    "pb_wall_layer_evidence_shadow", "pb_migration_contracts", "pb_source_native_cavity_slider_jamb_shadow",
+    "pb_source_internal_swing_room_barrier",
+)
+
+
+def _code_revision() -> str:
+    digest = hashlib.sha256()
+    for name in _PIECE_CODE_MODULES:
+        module = Path(__file__).with_name(f"{name}.py")
+        digest.update(name.encode() + b"\0" + (module.read_bytes() if module.is_file() else b""))
+    return digest.hexdigest()
+
+
+def _piece_key(drawings: Any, options: Mapping[str, Any]) -> Optional[str]:
+    """A digest of every input to the pieces, or None when an input cannot be fingerprinted."""
+    try:
+        payload = pickle.dumps((drawings, sorted(options.items())), protocol=pickle.HIGHEST_PROTOCOL)
+    except Exception:  # noqa: BLE001 - such inputs are traced without the cache
+        return None
+    header = repr((_PRIMITIVE_CAP, _code_revision())).encode()
+    return hashlib.sha256(header + b"\0" + payload).hexdigest()
+
+
+class LayeredPieceCache:
+    """Session store of tracer pieces, so that a correction re-forms rooms without reading the walls again.
+
+    Pass the same object to ``build_layered_wall_doorway_room_rings`` for every trace of one session. The key covers the
+    drawings, baseline drawings, words, chords, source hash, page, viewports, every option, the primitive cap and the
+    tracer's code, so any change is traced again. Rooms are reused only when the correction hook returns the pieces as it
+    was offered them. At most ``max_entries`` traces and ``max_bytes`` of pickled pieces are kept, least recently used
+    dropped first.
+    """
+
+    def __init__(self, *, max_entries: int = 4, max_bytes: int = 128 * 1024 * 1024) -> None:
+        if any(type(value) is not int or value < 1 for value in (max_entries, max_bytes)):
+            raise ValueError("layered_piece_cache_bounds_must_be_positive_ints")
+        self.max_entries, self.max_bytes = max_entries, max_bytes
+        self._entries: OrderedDict[str, tuple[str, tuple[_LayeredPass, ...], int]] = OrderedDict()
+        self.stored_bytes = 0
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def clear(self) -> None:
+        self._entries.clear()
+        self.stored_bytes = 0
+
+    def drop_source(self, source_sha256: str) -> None:
+        """Forget every trace of one source file (for a replaced or removed document)."""
+        for key in [key for key, entry in self._entries.items() if entry[0] == source_sha256]:
+            self.stored_bytes -= self._entries.pop(key)[2]
+
+    def _get(self, key: str) -> Optional[tuple[_LayeredPass, ...]]:
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        self._entries.move_to_end(key)
+        return entry[1]
+
+    def _put(self, key: str, source_sha256: str, passes: tuple[_LayeredPass, ...]) -> None:
+        try:
+            size = len(pickle.dumps(passes, protocol=pickle.HIGHEST_PROTOCOL))
+        except Exception:  # noqa: BLE001 - what cannot be measured is not kept
+            return
+        if size > self.max_bytes:
+            return
+        self._entries[key] = (source_sha256, passes, size)
+        self.stored_bytes += size
+        while len(self._entries) > self.max_entries or self.stored_bytes > self.max_bytes:
+            self.stored_bytes -= self._entries.popitem(last=False)[1][2]
 
 
 def _wall_rows(drawings: Sequence[Mapping[str, Any] | None]) -> Iterable[tuple[int, Mapping[str, Any]]]:
@@ -2373,7 +2477,7 @@ def _apply_source_owned_doorway_chords(
     return remaining
 
 
-def build_layered_wall_doorway_room_rings(
+def _layered_passes(
     drawings: Sequence[Mapping[str, Any]],
     *,
     source_sha256: str,
@@ -2388,21 +2492,8 @@ def build_layered_wall_doorway_room_rings(
     source_pair_baseline_drawings: Sequence[Mapping[str, Any] | None] | None = None,
     viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
     source_owned_doorway_chords: Sequence[Mapping[str, Any]] = (),
-    barrier_view: Callable[[LayeredBarrierView], LayeredBarrierView] | None = None,
-) -> LayeredRoomRingResult:
-    """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
-
-    ``sliding_leaf_frame_closure`` (default False, its own control) additionally closes an interruption
-    that carries a frame box at each end and exactly two overlapping sliding leaves between them.
-    ``stroke_pair_wall_faces`` (default False) adds unlabelled parallel-stroke face candidates.
-    Those candidates are not an authenticated wall layer and never a quantity.
-    ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
-    its native endpoints already meet major structural strips. The stroke is not extended.
-    ``source_owned_doorway_chords`` (default none) are topology-only doorway chords the layered builder proved from the same source
-    rows. Each one in view closes its door interval across its wall band, unless this builder already closed that doorway.
-    ``barrier_view`` (default None: nothing changes) is called with the barrier pieces just before rooms are formed (once per
-    tile) and returns the pieces to use. Room edges on its extra barriers are owned by their labels.
-    """
+) -> list[_LayeredPass]:
+    """The pieces of ``build_layered_wall_doorway_room_rings``, one pass per viewport tile when the page is over the cap."""
     chords = tuple(_validated_doorway_chord(item) for item in source_owned_doorway_chords)
     if type(sliding_leaf_frame_closure) is not bool:
         raise ValueError("sliding_leaf_frame_closure must be an explicit boolean")
@@ -2427,8 +2518,8 @@ def build_layered_wall_doorway_room_rings(
         if _entry_primitive_count(indexed) > _PRIMITIVE_CAP:
             viewports = _as_viewports(viewport_pdf_pts) or []
             if len(viewports) > 1:
-                return _merge_ring_results([
-                    build_layered_wall_doorway_room_rings(
+                return [
+                    item for box in viewports for item in _layered_passes(
                         drawings,
                         source_sha256=source_sha256,
                         page_index=page_index,
@@ -2442,19 +2533,17 @@ def build_layered_wall_doorway_room_rings(
                         source_pair_baseline_drawings=source_pair_baseline_drawings,
                         viewport_pdf_pts=box,
                         source_owned_doorway_chords=source_owned_doorway_chords,
-                        barrier_view=barrier_view,
                     )
-                    for box in viewports
-                ])
-            return LayeredRoomRingResult(
+                ]
+            return [_LayeredPass(None, LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
-            )
+            ))]
     else:
         indexed = _clip_drawings(drawings, viewport_pdf_pts)
         if _entry_primitive_count(indexed) > _PRIMITIVE_CAP:
-            return LayeredRoomRingResult(
+            return [_LayeredPass(None, LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED, (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
-            )
+            ))]
     strict_indexed = None
     if source_pair_baseline_drawings is not None:
         if not stroke_pair_wall_faces:
@@ -2465,10 +2554,10 @@ def build_layered_wall_doorway_room_rings(
             source_pair_baseline_drawings, viewport_pdf_pts,
         )
         if _entry_primitive_count(strict_indexed) > _PRIMITIVE_CAP:
-            return LayeredRoomRingResult(
+            return [_LayeredPass(None, LayeredRoomRingResult(
                 EvidenceResolutionStatus.ABSTAINED,
                 (REASON_PRIMITIVE_CAP,), (), (), 0, 0, 0, 0, 0, 0,
-            )
+            ))]
     strips, other_fills = _collect_strips(indexed)
     if stroke_pair_wall_faces:
         # The November 12 original PR #4300 did not exist in the donor
@@ -2505,7 +2594,8 @@ def build_layered_wall_doorway_room_rings(
             strips = strips + _collect_wall_end_closing_strips(indexed, strips)
     unsupported = len(other_fills)
     if not strips:
-        return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0)
+        return [_LayeredPass(None, LayeredRoomRingResult(
+            EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0, unsupported, 0, 0))]
     polygons = [s.polygon for s in strips] + [polygon for _index, polygon in other_fills]
     union = _closed_union(polygons)
     domain = union.envelope.buffer(1.0, join_style=2)
@@ -2766,21 +2856,35 @@ def build_layered_wall_doorway_room_rings(
             source_sha256=source_sha256, page_index=page_index,
         )
 
-    extra_rects: tuple = ()
-    if barrier_view is not None:
-        view = barrier_view(LayeredBarrierView(
-            tuple(strips), tuple(other_fills), tuple(closures), tuple(closure_rects), tuple(unresolved),
-        ))
-        strips, other_fills = list(view.strips), list(view.other_fills)
-        closures, closure_rects = list(view.closures), list(view.closure_rects)
-        unresolved = list(view.unresolved_gaps)
-        extra_rects = tuple(view.extra_rects)
-        polygons = [s.polygon for s in strips] + [polygon for _index, polygon in other_fills]
-        if extra_rects:
-            domain = unary_union([domain, *(rect for _label, rect in extra_rects)]).envelope.buffer(1.0, join_style=2)
-        if not strips:
-            return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0,
-                                         len(other_fills), 0, 0)
+    return [_LayeredPass(_LayeredPieces(
+        source_sha256, page_index, tuple(strips), tuple(other_fills), tuple(closures), tuple(closure_rects),
+        tuple(unresolved), domain, len(gaps), unsupported, unplaced, ambiguous,
+    ))]
+
+
+def _form_layered_rooms(
+    pieces: _LayeredPieces,
+    barrier_view: Callable[[LayeredBarrierView], LayeredBarrierView] | None,
+    stored: Optional[LayeredRoomRingResult] = None,
+) -> tuple[LayeredRoomRingResult, bool]:
+    """Rooms of one pass after the correction hook, and whether the hook left the pieces as it was offered them."""
+    source_sha256, page_index = pieces.source_sha256, pieces.page_index
+    offered = LayeredBarrierView(pieces.strips, pieces.other_fills, pieces.closures, pieces.closure_rects, pieces.unresolved)
+    view = offered if barrier_view is None else barrier_view(offered)
+    unchanged = view == offered
+    if unchanged and stored is not None:
+        return stored, True
+    strips, other_fills = list(view.strips), list(view.other_fills)
+    closures, closure_rects = list(view.closures), list(view.closure_rects)
+    unresolved = list(view.unresolved_gaps)
+    extra_rects = tuple(view.extra_rects)
+    polygons = [s.polygon for s in strips] + [polygon for _index, polygon in other_fills]
+    domain = pieces.domain
+    if extra_rects:
+        domain = unary_union([domain, *(rect for _label, rect in extra_rects)]).envelope.buffer(1.0, join_style=2)
+    if not strips:
+        return LayeredRoomRingResult(EvidenceResolutionStatus.ABSTAINED, (REASON_NO_WALL_INK,), (), (), 0, 0, 0,
+                                     len(other_fills), 0, 0), unchanged
     barrier = _closed_union([*polygons, *(rect for _cid, rect in closure_rects), *(rect for _label, rect in extra_rects)])
     free = domain.difference(barrier)
     rings: list[LayeredRoomRingRecord] = []
@@ -2870,10 +2974,83 @@ def build_layered_wall_doorway_room_rings(
         status=EvidenceResolutionStatus.CANDIDATE if candidate else EvidenceResolutionStatus.ABSTAINED,
         reason_codes=(REASON_RING_CLOSED,) if candidate else (REASON_OPEN_EXTERIOR,),
         rings=tuple(rings), closures=tuple(closures), wall_strip_count=len(strips),
-        wall_gap_count=len(gaps), unresolved_gap_count=len([g for g in unresolved if g.collinear]),
-        non_strip_wall_fill_count=unsupported, unplaced_swing_count=unplaced, ambiguous_swing_count=ambiguous,
-        sliver_region_count=sliver_count,
+        wall_gap_count=pieces.gap_count, unresolved_gap_count=len([g for g in unresolved if g.collinear]),
+        non_strip_wall_fill_count=pieces.unsupported, unplaced_swing_count=pieces.unplaced_swings,
+        ambiguous_swing_count=pieces.ambiguous_swings, sliver_region_count=sliver_count,
+    ), unchanged
+
+
+def _rooms_from_passes(
+    passes: Sequence[_LayeredPass], barrier_view: Callable[[LayeredBarrierView], LayeredBarrierView] | None,
+) -> tuple[LayeredRoomRingResult, tuple[_LayeredPass, ...]]:
+    """Form every pass's rooms in order (calling the hook once per pass) and merge tiles; keep rooms of unchanged pieces."""
+    results: list[LayeredRoomRingResult] = []
+    kept: list[_LayeredPass] = []
+    for item in passes:
+        if item.final is not None:
+            result = item.final
+        else:
+            result, unchanged = _form_layered_rooms(item.pieces, barrier_view, item.rooms)
+            if unchanged and item.rooms is None:
+                item = replace(item, rooms=result)
+        results.append(result)
+        kept.append(item)
+    return (results[0] if len(results) == 1 else _merge_ring_results(results)), tuple(kept)
+
+
+def build_layered_wall_doorway_room_rings(
+    drawings: Sequence[Mapping[str, Any]],
+    *,
+    source_sha256: str,
+    page_index: int,
+    sliding_leaf_frame_closure: bool = False,
+    panel_lift_label_closure: bool = False,
+    source_native_cs_jamb_closure: bool = False,
+    source_native_internal_swing_closure: bool = False,
+    source_words: Sequence[Mapping[str, Any]] = (),
+    stroke_pair_wall_faces: bool = False,
+    wall_end_stroke_closures: bool = False,
+    source_pair_baseline_drawings: Sequence[Mapping[str, Any] | None] | None = None,
+    viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
+    source_owned_doorway_chords: Sequence[Mapping[str, Any]] = (),
+    barrier_view: Callable[[LayeredBarrierView], LayeredBarrierView] | None = None,
+    piece_cache: Optional[LayeredPieceCache] = None,
+) -> LayeredRoomRingResult:
+    """Rings enclosed by wall ink plus source-attested doorway closures. Never mutates ``drawings``.
+
+    ``sliding_leaf_frame_closure`` (default False, its own control) additionally closes an interruption
+    that carries a frame box at each end and exactly two overlapping sliding leaves between them.
+    ``stroke_pair_wall_faces`` (default False) adds unlabelled parallel-stroke face candidates.
+    Those candidates are not an authenticated wall layer and never a quantity.
+    ``wall_end_stroke_closures`` (default False) adds a single black stroke only when both of
+    its native endpoints already meet major structural strips. The stroke is not extended.
+    ``source_owned_doorway_chords`` (default none) are topology-only doorway chords the layered builder proved from the same source
+    rows. Each one in view closes its door interval across its wall band, unless this builder already closed that doorway.
+    ``barrier_view`` (default None: nothing changes) is called with the barrier pieces just before rooms are formed (once per
+    tile) and returns the pieces to use. Room edges on its extra barriers are owned by their labels.
+    ``piece_cache`` (default None: nothing changes) keeps the pieces under a key of every input, so a later call with the
+    same inputs only calls ``barrier_view`` and forms rooms (see ``LayeredPieceCache``).
+    """
+    options = dict(
+        source_sha256=source_sha256, page_index=page_index, sliding_leaf_frame_closure=sliding_leaf_frame_closure,
+        panel_lift_label_closure=panel_lift_label_closure, source_native_cs_jamb_closure=source_native_cs_jamb_closure,
+        source_native_internal_swing_closure=source_native_internal_swing_closure, source_words=source_words,
+        stroke_pair_wall_faces=stroke_pair_wall_faces, wall_end_stroke_closures=wall_end_stroke_closures,
+        source_pair_baseline_drawings=source_pair_baseline_drawings, viewport_pdf_pts=viewport_pdf_pts,
+        source_owned_doorway_chords=source_owned_doorway_chords,
     )
+    if piece_cache is None:
+        return _rooms_from_passes(_layered_passes(drawings, **options), barrier_view)[0]
+    if not isinstance(piece_cache, LayeredPieceCache):
+        raise ValueError("piece_cache must be a LayeredPieceCache")
+    key = _piece_key(drawings, options)
+    stored = None if key is None else piece_cache._get(key)
+    if stored is not None:
+        return _rooms_from_passes(stored, barrier_view)[0]
+    result, passes = _rooms_from_passes(_layered_passes(drawings, **options), barrier_view)
+    if key is not None:
+        piece_cache._put(key, source_sha256, passes)
+    return result
 
 
 def build_from_pdf_bytes(
@@ -2896,6 +3073,7 @@ def build_from_pdf_bytes(
 
 
 __all__ = [
+    "LayeredPieceCache",
     "KIND_STROKE",
     "KIND_SLIDING_LEAF",
     "KIND_CAVITY_SLIDER",
