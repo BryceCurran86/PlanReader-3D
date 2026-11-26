@@ -130,10 +130,36 @@ def _plain(value: Any) -> Any:
     return str(value)
 
 
+def _direct_json_eligible(value: Any) -> bool:
+    """Only exact finite JSON primitives, string-key dicts and lists/tuples.
+
+    Nonstandard mappings, keys, enums, dataclasses and subclasses retain the
+    original normalizer. This does not cache values or change the JSON encoder.
+    Like the existing contract serializer, callers must not mutate a payload
+    during serialization.
+    """
+    value_type = type(value)
+    if value is None or value_type is str or value_type is int or value_type is bool:
+        return True
+    if value_type is float:
+        return math.isfinite(value)
+    if value_type is dict:
+        for key, item in value.items():
+            if type(key) is not str or not _direct_json_eligible(item):
+                return False
+        return True
+    if value_type is list or value_type is tuple:
+        for item in value:
+            if not _direct_json_eligible(item):
+                return False
+        return True
+    return False
+
+
 def canonical_contract_json(value: Any) -> str:
     """Return a stable canonical JSON representation for hashing/artifacts."""
     return json.dumps(
-        _plain(value),
+        value if _direct_json_eligible(value) else _plain(value),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
