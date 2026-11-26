@@ -51,7 +51,9 @@ Limits:
 - ids still name source paths by their position in the drawing list, so reordering the same lines changes ids (corner lists do not change); one source file always lists them in one order.
 - `pb_layered_wall_doorway_room_ring_shadow` has the same corner-order pattern. It feeds the benchmark handoff, so it is not changed here: its receipts would change.
 
-## Built in the tracer (MAX #4764 7202503639), not wired into the preview
+## Built in the tracer (MAX #4764 7202503639) and wired into the preview (7203705398)
+
+`source_native_trace_preview(..., piece_cache=None)` passes a caller-held `LayeredPieceCache` to both room traces; the output is the same with or without it. Chord receipts go to the tracer as copies, so the applied notes written into the summary block do not change its key. The app (`pb_planreader_3d_app.py`) does not call the preview with review packets yet and passes no cache: the review callback needs to hold one per session. Stored values are in-process objects; nothing is ever unpickled (pickle is used only to fingerprint inputs and measure size).
 
 `build_layered_wall_doorway_room_rings(..., piece_cache=None)` with `LayeredPieceCache(max_entries=4, max_bytes=128 MiB)`, `.drop_source(sha256)`, `.clear()`. `None` gives the same results as before.
 
@@ -63,9 +65,9 @@ Tests (`tests/test_layered_piece_cache_v1.py`, synthetic): results equal a run w
 
 Check on tracer inputs captured from six real pages: results identical to the previous tracer with no cache, filling and hit runs, and with a user wall and a reject mark. Pickled pieces were at most 0.2 MB per page. A hit took under 1.5 s where the trace took up to 27 s (timed while another job ran). All six pages were single-pass; tiling is covered by the synthetic test only.
 
-Not covered: the preview still repeats its steps before the tracer (page read, wall-ink scoping, outer wall, door review, space key) on every correction. Using the cache needs the preview to hold one per session and pass it to both tracer calls: to be agreed with MAX before that file changes.
+Not covered: the preview still repeats its steps before the tracer (page read, wall-ink scoping, outer wall, door review, space key) on every correction.
 
-C08 stays open until the preview uses the cache.
+C08 stays open until the review callback passes a session cache.
 
 ## One measurement (one residential floor plan page: one tracer pass, 18 rooms)
 
