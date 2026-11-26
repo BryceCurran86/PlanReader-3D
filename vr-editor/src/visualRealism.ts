@@ -65,11 +65,17 @@ export function mayRenderWallFace(
 }
 
 export function realismBudget(quality:RenderQuality,xr:boolean){
- return {detail:quality!=="performance",landscape:quality!=="performance",shadows:quality!=="performance"&&(!xr||quality==="high"),shadowRefreshMs:xr?1000:100,environmentIntensity:quality==="performance"?.45:quality==="high"?.85:.65};
+ return {detail:quality!=="performance",landscape:quality!=="performance",shadows:quality!=="performance",shadowRefreshMs:xr?1000:100,environmentIntensity:quality==="performance"?.45:quality==="high"?.85:.65};
 }
 
 /** Runtime cap below the user's selected quality; never raise above it. */
 export function adaptiveRenderQuality(requested:RenderQuality,cap:number):RenderQuality{
  const levels:RenderQuality[]=["performance","balanced","high"];
  return levels[Math.min(levels.indexOf(requested),Math.max(0,Math.min(2,Math.floor(cap))))]??requested;
+}
+
+/** Bounded shadow frustum around actual editable house. */
+export function architecturalShadowExtent(width:number,depth:number):number{
+ if(!Number.isFinite(width)||!Number.isFinite(depth)||width<=0||depth<=0)return 12;
+ return Math.min(150,Math.max(6,Math.hypot(width,depth)*.68+2));
 }

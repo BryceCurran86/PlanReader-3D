@@ -6,7 +6,7 @@ import type { EditorObject, SceneManifest } from "./types";
 import { studyColor } from "./finishStudy";
 import { safeDrafts } from "./reviewDraft";
 import type { DraftHistory, WallDraft } from "./reviewDraft";
-import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget,adaptiveRenderQuality } from "./visualRealism";
+import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget,adaptiveRenderQuality,architecturalShadowExtent } from "./visualRealism";
 import {createMaterialDetailLibrary,physicalUV} from "./materialDetail";
 import {createPresentationGarden} from "./presentationGarden";
 import {RoomEnvironment} from "three/addons/environments/RoomEnvironment.js";
@@ -1851,6 +1851,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const lightEye=new THREE.Vector3();
     let lastQuality: RenderQuality | null = null;
     let shadowKey:readonly unknown[]=[];let lastShadowRefresh=-Infinity;
+    let shadowHouseBounds:typeof gardenBounds=null;
     let materialBudgetKey:readonly unknown[]=[];
     let lastPresenting=false;
     let lastDetail: SurfaceDetail | null = null;
@@ -2175,6 +2176,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z);
       const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
       garden.update(gardenBounds,outdoor&&budget.landscape);
+      if(gardenBounds&&shadowHouseBounds!==gardenBounds){shadowHouseBounds=gardenBounds;lightCenter.set((gardenBounds.minX+gardenBounds.maxX)/2,1.2,(gardenBounds.minZ+gardenBounds.maxZ)/2);const extent=architecturalShadowExtent(gardenBounds.maxX-gardenBounds.minX,gardenBounds.maxZ-gardenBounds.minZ);const sc=sunlight.shadow.camera;sc.left=sc.bottom=-extent;sc.right=sc.top=extent;sc.near=.5;sc.far=80;sc.updateProjectionMatrix();sunlight.target.position.copy(lightCenter);scene.add(sunlight.target);sunlight.position.set(...VISUAL_PRESETS[activeMood].sunPosition).add(lightCenter);shadowKey=[];}
       const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items,renderer.xr.isPresenting];
       if(!nextMaterialKey.every((v,i)=>v===materialBudgetKey[i])){
         materialBudgetKey=nextMaterialKey;

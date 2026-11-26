@@ -4,7 +4,7 @@ type Bounds={minX:number;maxX:number;minZ:number;maxZ:number};
  * Bound to a small local starter footprint, not an imported customer's site. */
 export function createPresentationGarden(scene:THREE.Scene){
  const group=new THREE.Group();group.name="IllustrativeGarden";scene.add(group);
- const geom=new THREE.BoxGeometry(1,1,1),leafGeometry=new THREE.IcosahedronGeometry(1,1);
+ const geom=new THREE.BoxGeometry(1,1,1),leafGeometry=new THREE.IcosahedronGeometry(1,2);
  const timber=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.93});
  const leaves=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.96});
  const boxes=new THREE.InstancedMesh(geom,timber,192),crowns=new THREE.InstancedMesh(leafGeometry,leaves,80);

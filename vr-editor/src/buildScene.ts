@@ -149,16 +149,18 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
     if(opening.openingKind==="window"){
       const glass:number[]=[];panel(points,glass);addMesh(glass,0xb5d0d9,.42);
       const pane=group.children[group.children.length-1];pane.userData.catalogueWindow=true;
+      if(pane instanceof THREE.Mesh&&pane.material instanceof THREE.MeshStandardMaterial){pane.material.color.setHex(0xdbe5e7);pane.material.opacity=.23;pane.material.roughness=.12;pane.material.metalness=.28;pane.material.envMapIntensity=1.25;pane.material.depthWrite=false;pane.castShadow=false;}
     }
     if (opening.openingKind === "door") {
       const leaf: number[] = [];
       panel(points, leaf);
-      addMesh(leaf, 0xb68b60, 1, false, opening.openingId);
+      addMesh(leaf, 0xe4e1d8, 1, false, opening.openingId);
       const door=group.children[group.children.length-1];
       const slab=nominalDoorSlab(wall,opening);
       if(slab&&door instanceof THREE.Mesh){
         slab.updateMatrix();door.geometry.dispose();door.geometry=slab.geometry.applyMatrix4(slab.matrix);
         (Array.isArray(slab.material)?slab.material:[slab.material]).forEach(m=>m.dispose());door.userData.nominalDoorSlab=true;
+        if(door.material instanceof THREE.MeshStandardMaterial){door.material.roughness=.52;door.castShadow=true;door.receiveShadow=true;}
       }
       door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
       door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
@@ -183,7 +185,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
   if(texture&&exteriorFaces.length){
     const g=new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(exteriorFaces,3)).setAttribute("uv",new THREE.Float32BufferAttribute(exteriorUV,2));
     g.computeVertexNormals();
-    const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:texture.texture,color:profile.outerColor,roughness:.9,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+    const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({map:texture.texture,color:profile.outerColor,roughness:.83,bumpMap:texture.texture,bumpScale:.0015,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
     mesh.userData.exteriorTexture=true;group.add(mesh);
   }
   // Centre-plane witness retains the existing catalogue anchor convention.

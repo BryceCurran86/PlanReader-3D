@@ -48,7 +48,7 @@ export function adjacentMenuButton(layout:MenuLayout,index:number,dx:number,dy:n
  const horizontal=Math.abs(dx)>=Math.abs(dy),direction=Math.sign(horizontal?dx:dy);
  let best=index,score=Infinity;
  for(const {b,i} of enabled){if(i===index)continue;const x=b.x+b.w/2-current.x-current.w/2,y=b.y+b.h/2-current.y-current.h/2;
- const forward=(horizontal?x:y)*direction;if(forward<1)continue;const cross=Math.abs(horizontal?y:x);const rank=forward+cross*3;
+ const forward=(horizontal?x:y)*direction;if(forward<1)continue;const cross=Math.abs(horizontal?y:x);if(cross>forward*.65)continue;const rank=forward+cross*3;
  if(rank<score){best=i;score=rank;}}
  return best;
 }

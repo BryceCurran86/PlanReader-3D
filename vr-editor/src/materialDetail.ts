@@ -1,21 +1,24 @@
 import * as THREE from "three";
 export type DetailPattern="plaster"|"plank"|"grain"|"tile"|"woven"|"fleck"|"stone"|"roof";
-const SIZE=128;
+const SIZE=256;
 const noise=(x:number,y:number)=>((Math.imul(x+197,374761393)^Math.imul(y+123,668265263))>>>0)%1021/1020;
 const clamp=(v:number)=>Math.max(0,Math.min(255,Math.round(v)));
-/** Deterministic neutral tintable albedo and relief, bounded 128² per map.
+/** Deterministic neutral tintable albedo and relief, bounded 256² per map.
  * Physical dimensions are assigned by the renderer UV, not by evidence. */
 export function detailPixels(pattern:DetailPattern,size=SIZE){
  if(!Number.isInteger(size)||size<1||size>512)throw new RangeError("Detail texture size must be an integer from 1 to 512");
  const albedo=new Uint8Array(size*size*4),relief=new Uint8Array(size*size*4);
  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
   const u=x/size,v=y/size,n=noise(x,y),fine=noise(x*3,y*7);
-  let shade=239+n*12,height=126+fine*18;
+  let shade=245+n*5,height=126+fine*12;
   if(pattern==="plank"||pattern==="grain"){
-   const wave=Math.sin(u*75+Math.sin(v*10)*1.7+Math.sin(v*19)*.45);
-   const grain=Math.sin(u*290+Math.sin(v*14)*2.2);
-   shade=226+wave*12+grain*6+n*8;height=132+wave*12+grain*8;
-   if(pattern==="plank"&&(u<.012||v<.004)){shade=100;height=65;}
+   const warp=.012*Math.sin(v*2*Math.PI)+.005*Math.sin(v*6*Math.PI);
+   const ring=Math.sin((u+warp)*Math.PI*2*13+Math.sin(v*2*Math.PI)*.7);
+   const grain=Math.sin((u+warp*.6)*Math.PI*2*49+Math.sin(v*4*Math.PI));
+   const broad=Math.sin(u*Math.PI*2*3+Math.sin(v*Math.PI*2)*.7);
+   const pore=Math.pow(Math.max(0,ring),12);
+   shade=226+broad*9+ring*7+grain*3-pore*13+n*5;height=143+ring*9+grain*4-pore*10;
+   if(pattern==="plank"&&(u<.008||v<.004)){shade=142;height=91;}
   }else if(pattern==="tile"){
    const grout=u<.008||v<.008;shade=grout?152:238+n*10;height=grout?65:200;
   }else if(pattern==="woven"){
