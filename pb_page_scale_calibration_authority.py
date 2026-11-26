@@ -76,6 +76,8 @@ _AUTHORITATIVE_SOURCES = {ScaleSourceType.TITLE_BLOCK.value, ScaleSourceType.SCA
 # The closed source vocabulary. A reading from any other source (an "ai", "default" or "assumed" label, a different case of
 # a known label, an empty string) is rejected rather than reconciled: nothing outside this set may reach a FIRM status.
 _KNOWN_SOURCE_TYPES = frozenset(source.value for source in ScaleSourceType)
+# Only these source types can issue a VALID, firm calibration.
+_FIRM_CAPABLE_SOURCES = frozenset((ScaleSourceType.SCALE_BAR.value, ScaleSourceType.MANUAL.value))
 
 
 def px_per_m_from_ratio(ratio: float) -> float:
@@ -382,17 +384,17 @@ def approve_page_scale_calibration(
     The original issue list is preserved (not cleared) so downstream publish gates and
     audit trails can still see what needed resolving, even after approval.
     """
-    if not math.isfinite(approved_ratio) or approved_ratio <= 0.0:
-        raise ValueError(f"Approved scale ratio must be finite and strictly positive, got {approved_ratio}")
-    if not approved_by:
+    if not isinstance(approved_by, str) or not approved_by.strip():
         raise ValueError("approved_by is required to approve a scale calibration")
+    # Also rejects a bool ratio or one whose px/m overflows.
+    px_per_m = px_per_m_from_ratio(approved_ratio)
 
     scale_text = f"1:{approved_ratio:g}"
     return replace(
         calibration,
         ratio_str=scale_text,
         scale_text=scale_text,
-        px_per_m=px_per_m_from_ratio(approved_ratio),
+        px_per_m=px_per_m,
         method="MANUAL",
         source_type=ScaleSourceType.MANUAL.value,
         status=ScaleCalibrationStatus.USER_APPROVED.value,
@@ -411,14 +413,19 @@ def measurement_authority_for_page_scale(calibration: ScaleCalibration) -> str:
     defaulting to something permissive.
     """
     if calibration.status == ScaleCalibrationStatus.USER_APPROVED.value:
-        return AuthorityStatus.FIRM.value
+        approved_by = calibration.approved_by
+        if isinstance(approved_by, str) and approved_by.strip():
+            return AuthorityStatus.FIRM.value
+        return AuthorityStatus.BLOCKED.value
 
     if calibration.status == ScaleCalibrationStatus.VALID.value:
         if calibration.source_type == ScaleSourceType.TITLE_BLOCK.value:
             # A title-block-only reading is internally consistent but never
             # corroborated — never firm on its own, matching prior PlanReader policy.
             return AuthorityStatus.PROVISIONAL.value
-        return AuthorityStatus.FIRM.value
+        if isinstance(calibration.source_type, str) and calibration.source_type in _FIRM_CAPABLE_SOURCES:
+            return AuthorityStatus.FIRM.value
+        return AuthorityStatus.BLOCKED.value
 
     if calibration.status == ScaleCalibrationStatus.PROVISIONAL.value:
         return AuthorityStatus.PROVISIONAL.value
