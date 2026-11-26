@@ -19,6 +19,15 @@ from PIL import Image
 from shapely.geometry import Point, Polygon
 
 from pb_portable_raster_ocr_authority import RapidOCRBackend
+from pb_source_coincident_fixture_boundary_support_shadow import (
+    evaluate_coincident_fixture_boundary_support_shadow,
+)
+from pb_source_multi_wall_open_room_face_shadow import (
+    MarkedOpeningOrFinishThresholdInput,
+    MultiWallOpenRoomFaceResult,
+    SourceWallSegmentInput,
+    compose_multi_wall_open_room_face_shadow,
+)
 
 SOURCE_PRIMITIVE_CAP = 20_000
 SOURCE_SNAP_PT = 2.5
@@ -276,7 +285,11 @@ def _source_ocr_label(page: fitz.Page, polygon, bbox, room_label: str, ocr):
 
 
 def find_unique_native_tiled_room_face(
-    *, page: fitz.Page, page_number: int, room_label: str,
+    *,
+    page: fitz.Page,
+    page_number: int,
+    room_label: str,
+    allow_coincident_fixture_boundary: bool = True,
 ) -> NativeTiledRoomFace | None:
     """One physical, uniquely named, cross-ink corroborated tile region.
 
@@ -284,6 +297,8 @@ def find_unique_native_tiled_room_face(
     This returns a NON-COMMERCIAL source-face witness; semantic and metric
     authorization remain independent issuer gates.
     """
+    if type(allow_coincident_fixture_boundary) is not bool:
+        raise ValueError("allow_coincident_fixture_boundary must be an explicit boolean")
     if type(page_number) is not int or page_number < 1:
         return None
     label = _norm_room_label(room_label)
@@ -302,10 +317,22 @@ def find_unique_native_tiled_room_face(
             continue
         polygon, box = candidate
         supports = _side_support(drawings, box)
-        if not supports:
-            continue
         hatch_ids = _tiled_hatch_ids(drawings, box)
         if not hatch_ids:
+            continue
+        if not supports and allow_coincident_fixture_boundary:
+            fixture_support = evaluate_coincident_fixture_boundary_support_shadow(
+                drawings=drawings,
+                bbox_pts=box,
+                source_sha256="0" * 64,
+                page_number=page_number,
+                hatch_support_count=len(hatch_ids),
+                exclude_ring_path_id=path_id,
+                structural_snap_pt=SOURCE_SNAP_PT,
+            )
+            if fixture_support.supported:
+                supports = fixture_support.all_support_path_ids
+        if not supports:
             continue
         accepted_dpis = _source_ocr_label(page, polygon, polygon.bounds, label, ocr)
         if accepted_dpis is None:
@@ -322,3 +349,32 @@ def find_unique_native_tiled_room_face(
             raster_ocr_render_dpis=accepted_dpis,
         ))
     return matches[0] if len(matches) == 1 else None
+
+
+def compose_multi_wall_open_room_face_evidence(
+    *,
+    wall_segments: tuple[SourceWallSegmentInput, ...] | list[SourceWallSegmentInput],
+    thresholds: tuple[MarkedOpeningOrFinishThresholdInput, ...] | list[MarkedOpeningOrFinishThresholdInput],
+    room_label: str,
+    room_label_anchor_pts: tuple[float, float],
+    source_sha256: str,
+    page_id: str,
+    viewport_id: str,
+    mm_per_pt_x: float | None = None,
+    mm_per_pt_y: float | None = None,
+) -> MultiWallOpenRoomFaceResult:
+    """Generic multi-wall room-face evidence entrypoint for non-single-path rooms.
+
+    Returns a NON-COMMERCIAL shadow candidate (commercial_projection_allowed=False).
+    """
+    return compose_multi_wall_open_room_face_shadow(
+        wall_segments=wall_segments,
+        thresholds=thresholds,
+        room_label=room_label,
+        room_label_anchor_pts=room_label_anchor_pts,
+        source_sha256=source_sha256,
+        page_id=page_id,
+        viewport_id=viewport_id,
+        mm_per_pt_x=mm_per_pt_x,
+        mm_per_pt_y=mm_per_pt_y,
+    )
