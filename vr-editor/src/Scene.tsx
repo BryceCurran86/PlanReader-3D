@@ -1,3 +1,4 @@
+import {shouldRenderDesktopFrame} from "./visualRealism";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -1966,7 +1967,12 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let adaptiveCap=2,qualityPreference:RenderQuality|null=null;
     let sourceAppearanceKey: readonly unknown[] = [];
     let surfaceVisibilityKey: readonly unknown[] = [];
+    let lastDesktopRender=-Infinity;
     renderer.setAnimationLoop((now) => {
+      if(!renderer.xr.isPresenting){
+        if(document.hidden||!shouldRenderDesktopFrame(now,lastDesktopRender,visualSettings.current.quality,false))return;
+        lastDesktopRender=now;
+      }else lastDesktopRender=-Infinity;
       stationaryNavigation(now);
       const { mood: activeMood, quality: requestedQuality, detail: activeDetail,
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;

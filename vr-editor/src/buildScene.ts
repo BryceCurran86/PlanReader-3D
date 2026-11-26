@@ -20,7 +20,7 @@ import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameV
 import {nominalTrimMesh} from "./constructionTrimVisual.ts";
 import type {WallCornerJoins} from "./wallCornerJoin.ts";
 import {MENU_ATLAS_SIZE,menuAtlasScale} from "./menuAtlas.ts";
-import {openingFrameVisual,nominalDoorSlab} from "./openingFinishVisual.ts";
+import {openingFrameVisual,nominalDoorSlab,windowDetailVisual} from "./openingFinishVisual.ts";
 import {physicalUV} from "./materialDetail.ts";
 import type {MaterialDetailLibrary} from "./materialDetail.ts";
 
@@ -149,9 +149,15 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
     const points = openingOutline(wall, opening);
     const openingGuide=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({ color: 0xf5d9ad }));openingGuide.userData.draftGuide=true;group.add(openingGuide);
     if(opening.openingKind==="window"){
-      const glass:number[]=[];panel(points,glass);addMesh(glass,0xb5d0d9,.42);
+      // Inset glass to the actual frame opening; keep a single economical
+      // reflective pane rather than costly screen-space transmission in VR.
+      const t=Math.min(.045,opening.widthM/8,opening.heightM/8)+.008;
+      const a=opening.offsetM+t,b=opening.offsetM+opening.widthM-t,lo=opening.sillHeightM+t,hi=opening.sillHeightM+opening.heightM-t;
+      const glazing=[atOffset(wall,a,lo),atOffset(wall,a,hi),atOffset(wall,b,hi),atOffset(wall,b,lo)];
+      const glass:number[]=[];panel(glazing,glass);addMesh(glass,0xb5d0d9,.42);
       const pane=group.children[group.children.length-1];pane.userData.catalogueWindow=true;
-      if(pane instanceof THREE.Mesh&&pane.material instanceof THREE.MeshStandardMaterial){pane.material.color.setHex(0xdbe5e7);pane.material.opacity=.23;pane.material.roughness=.12;pane.material.metalness=.28;pane.material.envMapIntensity=1.25;pane.material.depthWrite=false;pane.castShadow=false;}
+      if(pane instanceof THREE.Mesh&&pane.material instanceof THREE.MeshStandardMaterial){pane.material.color.setHex(0xdbe5e7);pane.material.opacity=.18;pane.material.roughness=.065;pane.material.metalness=.12;pane.material.envMapIntensity=1.5;pane.material.depthWrite=false;pane.castShadow=false;}
+      for(const detail of windowDetailVisual(wall,opening))group.add(detail);
     }
     if (opening.openingKind === "door") {
       const leaf: number[] = [];

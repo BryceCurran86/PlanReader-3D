@@ -58,7 +58,8 @@ try {
   assert.equal(await page.getByLabel("Selected ceiling height (mm)",{exact:true}).inputValue(),"2600","Ceiling height must persist when reselected");
   await canvas.evaluate(element=>{window.starterCanvas=element;});
   await page.getByRole("button", { name: "Open example", exact: true }).click();
-  await page.locator(".header-state").getByText("Example plan",{exact:true}).waitFor();
+  try{await page.locator(".header-state").getByText("Example plan",{exact:true}).waitFor();}
+  catch(error){console.error("Example transition diagnostics",JSON.stringify({errors,assetErrors,header:await page.locator(".header-state").textContent(),alerts:await page.getByRole("alert").allTextContents()}));throw error;}
   await page.waitForFunction(()=>!window.starterCanvas.isConnected);
   await canvas.waitFor();
   const layoutClear = () => page.evaluate(() => {

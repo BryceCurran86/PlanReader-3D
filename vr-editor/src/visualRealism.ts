@@ -79,3 +79,10 @@ export function architecturalShadowExtent(width:number,depth:number):number{
  if(!Number.isFinite(width)||!Number.isFinite(depth)||width<=0||depth<=0)return 12;
  return Math.min(150,Math.max(6,Math.hypot(width,depth)*.68+2));
 }
+
+/** Desktop frame pacing leaves time for DOM input, source loading and layout.
+ * XR remains completely under the headset compositor's native frame schedule. */
+export function shouldRenderDesktopFrame(now:number,last:number,quality:RenderQuality,isXR:boolean){
+ if(isXR||!Number.isFinite(last)||now<last)return true;
+ return now-last>= (quality==="performance"?1000/30:1000/45)-1;
+}
