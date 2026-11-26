@@ -725,7 +725,45 @@ def _raster_segment_observation_id(
     return stable_contract_id("source_observation", payload, digest_chars=32)
 
 
+_HEX_DIGIT_SET = frozenset('0123456789abcdef')
+_RASTER_RECEIPT_MATCH_CACHE: dict = {}
+_RASTER_RECEIPT_MATCH_CACHE_MAX = 65536
+
+
 def _raster_segment_receipt_matches_parent(
+    receipt: RasterSegmentVisibilityReceipt, parent: SourceObservationRecord,
+) -> bool:
+    """Memoize the pure receipt/parent binding check on every value it reads.
+
+    The check is a deterministic function of the receipt fields and the parent
+    primitive ref / observation id below plus the module constants. The key
+    holds all of those values (never object identity), so a replaced or
+    altered receipt or record always misses and is fully re-verified. Anything
+    unhashable falls back to the uncached check.
+    """
+    try:
+        key = (
+            receipt.dpi, receipt.visibility_render_sha256, receipt.image_sha256,
+            receipt.pixel_geometry, receipt.geometry, receipt.document_id,
+            receipt.revision_id, receipt.page_id, receipt.source_partition_id,
+            parent.source_primitive_ref, parent.observation_id,
+            RASTER_RENDER_DPI, RASTER_OPENING_PRIMITIVE_RENDER_DPI,
+            RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
+            id(OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS),
+        )
+        cached = _RASTER_RECEIPT_MATCH_CACHE.get(key)
+    except (TypeError, AttributeError):
+        return _raster_segment_receipt_matches_parent_uncached(receipt, parent)
+    if cached is not None:
+        return cached
+    result = _raster_segment_receipt_matches_parent_uncached(receipt, parent)
+    if len(_RASTER_RECEIPT_MATCH_CACHE) >= _RASTER_RECEIPT_MATCH_CACHE_MAX:
+        _RASTER_RECEIPT_MATCH_CACHE.clear()
+    _RASTER_RECEIPT_MATCH_CACHE[key] = result
+    return result
+
+
+def _raster_segment_receipt_matches_parent_uncached(
     receipt: RasterSegmentVisibilityReceipt, parent: SourceObservationRecord,
 ) -> bool:
     """Bind registration facts to the authenticated immutable source parent.
@@ -748,13 +786,13 @@ def _raster_segment_receipt_matches_parent(
                     or identity_version not in OPENING_LOCAL_SOURCE_IDENTITY_VERSIONS
                     or full_sha != receipt.visibility_render_sha256
                     or len(full_sha) != 64
-                    or any(c not in '0123456789abcdef' for c in full_sha)):
+                    or not _HEX_DIGIT_SET.issuperset(full_sha)):
                 return False
         else:
             return False
         if (prefix != "raster_segment" or render_sha != receipt.image_sha256
                 or len(render_sha) != 64
-                or any(c not in '0123456789abcdef' for c in render_sha)
+                or not _HEX_DIGIT_SET.issuperset(render_sha)
                 or str(int(index)) != index or int(index) < 0):
             return False
         expected_geometry = tuple(round(float(value) * 72.0 / receipt.dpi, 6)
