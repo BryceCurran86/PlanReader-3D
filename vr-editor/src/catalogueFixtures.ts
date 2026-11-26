@@ -72,6 +72,7 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
       cylinder(w * 0.31, h, 0, h / 2, 0);
       pipe([[0, h * 0.8, 0], [0, h * 0.8, d * 0.85], [0, h * 0.7, d]], w * 0.16);
       box(w * 0.2, 0.008, d * 0.4, 0, h, d * 0.09);
+      cylinder(w*.12,.004,0,h*.7-.005,d,detail);
       break;
     case "gooseneck":
     case "square-spout":
@@ -81,6 +82,7 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
         [0, h * 0.86, d * 0.91], [0, h * 0.72, d]], w * 0.19, shape === "gooseneck");
       cylinder(w * (count > 1 ? 0.27 : 0.18), 0.025, 0, h * 0.72, d, count > 1 ? detail : body);
       box(w * 0.19, h * 0.16, 0.012, w * 0.47, h * 0.31, 0);
+      cylinder(w*.12,.004,0,h*.72-.014,d,detail);
       break;
     case "wall-spout":
     case "outdoor-tap":
@@ -160,6 +162,7 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
         oval(span * 0.83, h * 0.035, d * 0.78, x, h * 0.81, 0, detail);
         oval(span * 0.76, h * 0.04, d * 0.71, x, h * 0.832, 0, white);
         cylinder(Math.min(0.033, span * 0.09), 0.002, x, h * 0.857, 0, detail);
+        cylinder(Math.min(.019,span*.05),.003,x,h*.859,0,body);
       }
       break;
     }
@@ -204,8 +207,13 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
       worktop = box(w * 1.018, h * 0.047, d * 1.02, 0, h * 0.9765, 0, h < 1.3 ? white : body);
       for (let index = 0; index < count; index++) {
         const x = ((index + 0.5) / count - 0.5) * w;
-        box(w / count - 0.009, h * 0.82, 0.013, x, h * 0.515, d * 0.5);
-        box(w * 0.26 / count, 0.012, 0.019, x, h * 0.79, d * 0.519, detail);
+        const panelWidth=w/count-.009;
+        box(panelWidth,h*.82,.018,x,h*.515,d*.5);
+        // Recessed panel reveal and physical pull with two mounting posts.
+        const pull=Math.min(.16,panelWidth*.48);
+        box(pull,.012,.016,x,h*.79,d*.5+.029,detail);
+        for(const sign of [-1,1])box(.012,.012,.025,x+sign*pull*.36,h*.79,d*.5+.015,detail);
+        if(h<1.3)box(panelWidth*.88,.004,.003,x,h*.68,d*.5+.010,detail);
       }
       if (h >= 1.3) worktop = undefined;
       break;
