@@ -18,7 +18,7 @@ MAX_TARGETS = 2048
 _PRODUCER = "pb_layered_wall_doorway_room_ring_shadow.build_layered_wall_doorway_room_rings"
 
 
-def build_review_snap_targets(*, scope, pdf_path, image_bytes, report):
+def _display_points(*, scope, pdf_path, image_bytes, report, raw):
     if (
         not isinstance(report, dict)
         or report.get("source_sha256") != scope.source_sha256
@@ -47,17 +47,12 @@ def build_review_snap_targets(*, scope, pdf_path, image_bytes, report):
         with Image.open(io.BytesIO(image_bytes)) as png:
             if png.format != "PNG" or png.size != (bounds.width, bounds.height):
                 raise ValueError("Review snap image frame mismatch")
-        network = report.get("exterior_source_wall_network") or {}
-        raw = list(network.get("unjoined_native_wall_endpoints_pdf_pts") or [])
-        raw.extend(hit.get("tip_pdf_pts") for hit in
-                   network.get("source_endpoint_near_misses") or []
-                   if isinstance(hit, dict))
-        raw.extend(report.get("external_wall_path_points") or [])
         if len(raw) > MAX_TARGETS:
             raise ValueError("Too many source snap candidates; use manual placement")
-        targets = set()
+        targets = []
         for point in raw:
             if not isinstance(point, (list, tuple)) or len(point) != 2:
+                targets.append(None)
                 continue
             x, y = point
             if any(type(v) not in (int, float) or not math.isfinite(v) for v in (x, y)):
@@ -66,6 +61,50 @@ def build_review_snap_targets(*, scope, pdf_path, image_bytes, report):
                 continue
             if frame.rotation == 90:
                 x, y = frame.native_height - y, x
-            targets.add((round(100 * x * zoom / bounds.width, 8),
-                         round(100 * y * zoom / bounds.height, 8)))
-        return [{"x": x, "y": y} for x, y in sorted(targets)]
+            targets.append((round(100 * x * zoom / bounds.width, 8),
+                            round(100 * y * zoom / bounds.height, 8)))
+        return targets
+
+
+def build_review_snap_targets(*, scope, pdf_path, image_bytes, report):
+    network = report.get("exterior_source_wall_network") or {}
+    raw = list(network.get("unjoined_native_wall_endpoints_pdf_pts") or [])
+    raw.extend(hit.get("tip_pdf_pts") for hit in
+               network.get("source_endpoint_near_misses") or []
+               if isinstance(hit, dict))
+    raw.extend(report.get("external_wall_path_points") or [])
+    points = _display_points(scope=scope, pdf_path=pdf_path, image_bytes=image_bytes,
+                             report=report, raw=raw)
+    return [{"x": x, "y": y} for x, y in sorted({p for p in points if p is not None})]
+
+
+def build_review_issue_targets(*, scope, pdf_path, image_bytes, report):
+    """Locate only residual post-aperture review candidates, not raw gaps.
+
+    The canonical audit can already explain a raw wall tip as an opening,
+    internal wall, joinery or a covered terminal. These must not be presented
+    as a missing-wall instruction. An empty list is not a closure certificate.
+    """
+    labels = {
+        "unmatched_raw_wall_ink_terminal_needs_post_opening_review":
+            "Unmatched wall endpoint",
+        "ambiguous_competing_hosted_apertures": "Ambiguous opening ownership",
+        "ambiguous_competing_source_roles": "Ambiguous wall / source role",
+    }
+    audit = report.get("source_wall_endpoint_aperture_review") or {}
+    reviews = [item for item in (audit.get("endpoint_reviews") or [])
+               if isinstance(item, dict) and item.get("status") in labels]
+    points = _display_points(
+        scope=scope, pdf_path=pdf_path, image_bytes=image_bytes, report=report,
+        raw=[item.get("endpoint_pdf_pts") for item in reviews],
+    )
+    candidates = {(item["status"], *point)
+                  for item, point in zip(reviews, points) if point is not None}
+    result = []
+    for status, x, y in sorted(candidates):
+        identity = hashlib.sha256(
+            f"{scope.key}:{status}:{x}:{y}".encode("utf-8")
+        ).hexdigest()
+        result.append({"id": identity, "label": labels[status],
+                       "x": x, "y": y})
+    return result
