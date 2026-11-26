@@ -38,11 +38,7 @@ except Exception:  # pragma: no cover - production dependency exists
     cv2 = None
 
 import pb_takeoff_row_contract as takeoff_contract
-
-try:
-    import pb_3d_surface_editor_v1212 as surface_v1212
-except Exception:  # pragma: no cover
-    surface_v1212 = None
+from pb_surface_substrates import infer_substrate, substrate_presets
 
 VERSION = "1.2.19"
 SOURCE_PREFIX = f"PB Auto Geometry v{VERSION}"
@@ -2211,13 +2207,10 @@ def _surface_code_for(substrates: Sequence[Dict[str, str]]) -> str:
     if len(substrates) != 1:
         return "OTHER"
     code = str(substrates[0].get("code") or "OTHER")
-    if surface_v1212 is not None:
-        valid = {str(item.get("code")) for item in surface_v1212.substrate_presets()}
-        if code in valid:
-            return code
-        inferred = surface_v1212.infer_substrate(substrates[0].get("name"))
-        return inferred or "OTHER"
-    return code
+    valid = {str(item.get("code")) for item in substrate_presets()}
+    if code in valid:
+        return code
+    return infer_substrate(substrates[0].get("name"))
 
 
 def _refresh_auto_model(app: Any, workspace_id: int, footprint: Optional[Dict[str, Any]], facades: Sequence[Dict[str, Any]]) -> Optional[int]:

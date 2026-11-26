@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List
 
+from pb_surface_substrates import SUBSTRATE_PRESETS
+
 INTERNAL_SUBSTRATES: List[Dict[str, str]] = [
     {"code": "PB", "name": "Plasterboard / Gyprock", "color": "#D8D1C4"},
     {"code": "FC", "name": "Fibre Cement Sheet", "color": "#C3CBD0"},
@@ -31,12 +33,4 @@ def merge_substrate_presets(existing: Iterable[Dict[str, Any]]) -> List[Dict[str
 
 def install() -> None:
     """Install the internal substrate vocabulary into the shared editor presets."""
-    try:
-        import pb_takeoff_studio_v1211 as studio
-    except Exception:
-        return
-
-    studio.SUBSTRATE_PRESETS[:] = merge_substrate_presets(studio.SUBSTRATE_PRESETS)
-    # pb_3d_surface_editor_v1212 reads this shared list dynamically via
-    # substrate_presets(), so the same options appear there without eagerly
-    # importing the 3D editor during app startup.
+    SUBSTRATE_PRESETS[:] = merge_substrate_presets(SUBSTRATE_PRESETS)

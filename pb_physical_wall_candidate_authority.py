@@ -2194,16 +2194,24 @@ def _producer_wall_strip_relation_overrides(
     records: Sequence[PhysicalWallCandidateRecord],
     strips: Sequence[_ProvenFilledWallStrip],
 ) -> dict[tuple[str, str], PhysicalEquivalenceClass]:
+    if not strips:
+        return {}
+
+    # Build source-primitive -> W4 owner membership once. Previously every
+    # filled strip rescanned every wall and rebuilt each wall's primitive set.
+    # This is an index over the exact existing source IDs, NOT a new wall
+    # association: only the same two source-proven strip face IDs are queried.
+    owners_by_source_primitive: dict[str, set[str]] = defaultdict(set)
+    for record in records:
+        for primitive_id in set(record.physical_identity.source_primitive_ids):
+            if isinstance(primitive_id, str):
+                owners_by_source_primitive[primitive_id].add(record.wall_candidate_id)
     overrides: dict[tuple[str, str], PhysicalEquivalenceClass] = {}
     for strip in strips:
-        face_ids = set(strip.face_raw_ids)
-        member_ids = sorted(
-            {
-                record.wall_candidate_id
-                for record in records
-                if face_ids & set(record.physical_identity.source_primitive_ids)
-            }
-        )
+        member_ids = sorted(set().union(*(
+            owners_by_source_primitive.get(raw_id, ())
+            for raw_id in strip.face_raw_ids
+        )))
         if len(member_ids) < 2:
             continue
         for index, left_id in enumerate(member_ids):
@@ -3106,6 +3114,10 @@ def _source_snap_collapsed_fragment_inventory(graph, identities):
     same snapped node, and one usable identity must own both. This is a
     source-loss audit, never permission to bridge a missing graph edge.
     """
+    collapsed = tuple(graph.get("snap_collapsed_fragments", ()))
+    if not collapsed:
+        return {}
+
     endpoints = defaultdict(list)
     owners = defaultdict(set)
     for candidate_id, identity in identities.items():
@@ -3124,7 +3136,6 @@ def _source_snap_collapsed_fragment_inventory(graph, identities):
                     endpoints[(point, parent)].append((str(edge["id"]), node, parents))
     inventory = defaultdict(list)
     surviving_ids = {str(edge["id"]) for edge in graph.get("edges", ())}
-    collapsed = tuple(graph.get("snap_collapsed_fragments", ()))
     id_counts = Counter(str(fragment.get("id") or "") for fragment in collapsed)
     for fragment in collapsed:
         fragment_id = str(fragment.get("id") or "")
@@ -3136,13 +3147,30 @@ def _source_snap_collapsed_fragment_inventory(graph, identities):
                 or line is None or not parents):
             continue
         parent = min(parents)  # Index only; all parents are checked below.
-        candidates = set()
-        for left_id, left_node, left_parents in endpoints[(line[:2], parent)]:
-            for right_id, right_node, right_parents in endpoints[(line[2:], parent)]:
-                if (left_id == right_id or left_node != right_node
-                        or not parents <= left_parents & right_parents):
-                    continue
-                candidates.update(owners[left_id] & owners[right_id])
+        # Index by the EXACT W2 snap-node identity first, not by proximity.
+        # Formerly every left endpoint paired with every right endpoint,
+        # even when they shared no usable wall owner. For each shared node,
+        # a wall must own two DISTINCT surviving source edges whose ancestry
+        # each contains the entire collapsed fragment's parent set.
+        left_by_node: dict[object, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+        right_by_node: dict[object, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+        left_endpoints = endpoints[(line[:2], parent)]
+        right_endpoints = endpoints[(line[2:], parent)]
+        for edge_id, node, edge_parents in left_endpoints:
+            if parents <= edge_parents:
+                for owner in owners[edge_id]:
+                    left_by_node[node][owner].add(edge_id)
+        for edge_id, node, edge_parents in right_endpoints:
+            if parents <= edge_parents and node in left_by_node:
+                for owner in owners[edge_id]:
+                    if owner in left_by_node[node]:
+                        right_by_node[node][owner].add(edge_id)
+        candidates = {
+            owner
+            for node, right_members in right_by_node.items()
+            for owner, right_edges in right_members.items()
+            if len(left_by_node[node][owner] | right_edges) > 1
+        }
         if len(candidates) != 1:
             continue
         candidate_id = next(iter(candidates))
