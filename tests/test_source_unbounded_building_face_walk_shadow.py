@@ -499,9 +499,10 @@ def test_original_3laurel_p3_path1192_grey_seam_and_party_stay_unbilled():
         drawings = page.get_drawings()
         words = page.get_text("words")
         before = (len(drawings), len(words))
+        # The app's preview admits mitred corner paint; without it #4623's removal of false windows leaves p3 open.
         attempt = attempt_source_native_outer_wall_first(
             drawings, source_words=words, window_source_drawings=drawings,
-            source_page_index=2,
+            source_page_index=2, admit_wall_joint_paint=True,
         )
         bars = _unique_source_wall_bars(drawings)
         receipt = diagnose_source_outside_face_neighbors(

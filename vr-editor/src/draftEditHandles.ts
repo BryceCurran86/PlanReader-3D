@@ -24,7 +24,7 @@ export function pickDraftEditHandle(shape:HandleShape,ray:THREE.Ray):DraftGestur
  const points=draftHandlePoints(shape);
  const hits=points.map(h=>({h,p:new THREE.Vector3(...h.position)}))
   .filter(({p})=>p.clone().sub(ray.origin).dot(ray.direction)>=0&&ray.distanceSqToPoint(p)<=RADIUS*RADIUS)
-  .sort((a,b)=>ray.distanceSqToPoint(a.p)-ray.distanceSqToPoint(b.p));
+  .sort((a,b)=>{const entry=(p:THREE.Vector3)=>p.clone().sub(ray.origin).dot(ray.direction)-Math.sqrt(Math.max(0,RADIUS*RADIUS-ray.distanceSqToPoint(p)));return entry(a.p)-entry(b.p);});
  if(!hits.length)return null;
  const floor=ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3());
  const from=floor?snappedPoint([floor.x,floor.z]):snappedPoint([hits[0].p.x,hits[0].p.z]);
@@ -35,12 +35,14 @@ export function pickDraftEditHandle(shape:HandleShape,ray:THREE.Ray):DraftGestur
 }
 export function createDraftEditHandles(){
  const group=new THREE.Group();group.name="DraftEditHandles";group.visible=false;
+ const geometry=new THREE.SphereGeometry(RADIUS,12,8);
+ const materials=[0x16ad83,0xffc34c].map(color=>new THREE.MeshBasicMaterial({color,depthTest:false,depthWrite:false}));
  const meshes=Array.from({length:5},(_,i)=>{
-  const mesh=new THREE.Mesh(new THREE.SphereGeometry(RADIUS,12,8),new THREE.MeshBasicMaterial({color:i===0?0x16ad83:0xffc34c,depthTest:false}));
+  const mesh=new THREE.Mesh(geometry,materials[i===0?0:1]);
   mesh.renderOrder=20;mesh.visible=false;group.add(mesh);return mesh;
  });
  let previous:HandleShape|null=null;
- return {group,update(shape:HandleShape|null){
+ return {group,dispose(){group.clear();geometry.dispose();materials.forEach(m=>m.dispose());},update(shape:HandleShape|null){
   group.visible=shape!==null;
   if(!shape){previous=null;return;}
   if(previous?.object===shape.object&&previous.kind===shape.kind)return;

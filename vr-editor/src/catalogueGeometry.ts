@@ -171,12 +171,16 @@ export function finishMesh(
   }
   const detail:DetailPattern|null=spec.pattern==="solid"&&(target==="wall"||target==="ceiling")?"plaster":(["plank","grain","tile","woven","fleck"].includes(spec.pattern)?spec.pattern as DetailPattern:null);
   const maps=detail?materialDetailMaps(detail):null;
+  // Cladding relief follows the same physically scaled UV as its colour pattern.
+  const profiled=["masonry","lap","rib","seam","corrugation","profiled-tile","sheet"].includes(spec.pattern);
+  const patternMap=!maps&&spec.pattern!=="solid"?makePattern(spec.pattern):null;
+  const relief=profiled?patternMap:null;
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
     color: spec.color, roughness: spec.roughness,
-    bumpMap:maps?.bumpMap??null,bumpScale:detail==="tile"?.002:detail==="plank"?.0015:.0008,
+    bumpMap:maps?.bumpMap??relief,bumpScale:profiled?.003:detail==="tile"?.002:detail==="plank"?.0015:.0008,
     side: isRoof ? THREE.FrontSide : vertical ? (side === 1 ? THREE.FrontSide : THREE.BackSide)
       : host.material instanceof THREE.Material ? host.material.side : THREE.DoubleSide,
-    map: maps?.map??(spec.pattern === "solid" ? null : makePattern(spec.pattern)),
+    map: maps?.map??patternMap,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -1,
   }));
   if (!isRoof) mesh.position.copy(normal).multiplyScalar(0.0008);
@@ -200,7 +204,12 @@ export function trimRun(
 ) {
   const run = end.clone().sub(start);
   const length = run.length();
-  if (length <= 0.001) return null;
+  if (!Number.isFinite(length)||length <= 0.001||!Number.isFinite(spec.widthM)||!Number.isFinite(spec.depthM)||spec.widthM<=0||spec.depthM<=0) return null;
+  // Normalise the profile basis so skewed input cannot stretch moulding dimensions.
+  const axis=run.clone().normalize();
+  across=across.clone().addScaledVector(axis,-across.dot(axis)).normalize();
+  normal=normal.clone().addScaledVector(axis,-normal.dot(axis)).addScaledVector(across,-normal.dot(across)).normalize();
+  if(across.lengthSq()<.99||normal.lengthSq()<.99)return null;
   const outline = new THREE.Shape();
   outline.moveTo(0, 0);
   outline.lineTo(spec.widthM, 0);

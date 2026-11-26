@@ -67,3 +67,9 @@ export function mayRenderWallFace(
 export function realismBudget(quality:RenderQuality,xr:boolean){
  return {detail:quality!=="performance",landscape:quality!=="performance",shadows:quality!=="performance"&&(!xr||quality==="high"),shadowRefreshMs:xr?1000:100,environmentIntensity:quality==="performance"?.45:quality==="high"?.85:.65};
 }
+
+/** Runtime cap below the user's selected quality; never raise above it. */
+export function adaptiveRenderQuality(requested:RenderQuality,cap:number):RenderQuality{
+ const levels:RenderQuality[]=["performance","balanced","high"];
+ return levels[Math.min(levels.indexOf(requested),Math.max(0,Math.min(2,Math.floor(cap))))]??requested;
+}

@@ -150,6 +150,7 @@ def source_native_trace_preview(
     progress_callback: Callable[[dict], None] | None = None,
     source_owned_doorway_chord_shadow: bool = False,
     source_owned_doorway_chord_closures: bool = False,
+    admit_wall_joint_paint: bool = True,
 ) -> tuple[dict, bytes]:
     """Return actual native-source trace evidence + PNG on the original PDF page.
 
@@ -176,6 +177,10 @@ def source_native_trace_preview(
     topology-only doorway closures, wherever the tracer did not close that doorway itself. Rings, closures, overlay and PNG may then
     differ; no quantity, opening or wall authority follows. One additive summary key says which chords were applied. It cannot be
     combined with the read-only channel above, whose contract is that nothing was applied. With it off nothing changes.
+
+    ``admit_wall_joint_paint`` (default True) lets the exterior outline step keep mitred or junction pieces of black paint on a
+    named wall layer that sit flush against admitted walls on two sides, so a corner painted that way is not read as open. It
+    changes only the review outline; no wall, length, area or quantity follows. The pieces used are counted in the summary.
     """
     pdf_path = Path(pdf_path)
     if pdf_path.suffix.lower() != ".pdf":
@@ -188,6 +193,8 @@ def source_native_trace_preview(
         raise ValueError("new_trace_source_owned_doorway_chord_closures_must_be_bool")
     if source_owned_doorway_chord_shadow and source_owned_doorway_chord_closures:
         raise ValueError("new_trace_doorway_chord_shadow_and_closures_are_exclusive")
+    if type(admit_wall_joint_paint) is not bool:
+        raise ValueError("new_trace_admit_wall_joint_paint_must_be_bool")
     source_bytes = pdf_path.read_bytes()
     sha = hashlib.sha256(source_bytes).hexdigest()
     with fitz.open(stream=source_bytes, filetype="pdf") as document:
@@ -288,6 +295,7 @@ def source_native_trace_preview(
                 window_source_drawings=drawings,
                 source_page_index=page_index,
                 viewport_pdf_pts=viewport_pdf_pts,
+                admit_wall_joint_paint=admit_wall_joint_paint,
             )
         _report("outer_boundary_evidence_ready", .38)
         # The same original-native preview also exposes independently paired
@@ -823,5 +831,8 @@ def source_native_trace_preview(
             summary[_CHORD_SHADOW_KEY] = doorway_chord_shadow
         if doorway_chords is not None:
             summary[_CHORD_CLOSURES_KEY] = doorway_chords
+        if outer_wall.source_wall_joint_paint:
+            # additive and only when corner paint was used, so a page without it keeps its summary
+            summary["external_wall_joint_paint_count"] = len(outer_wall.source_wall_joint_paint)
         _report("trace_complete", 1.0, wall_candidates=sum(native_wall_counts.values()))
         return summary, png
