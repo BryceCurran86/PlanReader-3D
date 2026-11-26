@@ -34,7 +34,7 @@ export type MenuAction =
   | { area: "view"; stage?: ConstructionStage }
   | { area: "footprint"; reset?: boolean }
   | {area:"footprint-size";axis:"x"|"z";delta:number}
-  | {area:"slab";mm:number}
+  | {area:"slab";mm?:number}
   | { area: "history"; action: HistoryAction }
   | { area: "level"; id: string }
   | { area: "done" }
@@ -62,7 +62,7 @@ export type MenuLayout = { title: string; width: number; height: number;
 export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
-  simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;activeFinishId?:string;slabMm?:number;
+  simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;activeFinishId?:string;slabMm?:number;slabTools?:boolean;
   rotationPivot?:WallRotationPivot; connectedRotation?:boolean; angleTools?:boolean; feedback?:string;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
   axis: WallAxis; nudgeM: 0.05 | 0.1 | 0.25;
@@ -143,6 +143,13 @@ export function buildMenuLayout(
     add("Close",702,394,210,65,{area:"finish",action:"close"});
     return {buttons,title:contextTitle(c),width:936,height:512,note:"Choose a category. Existing fixtures retain their position."};
   }
+  if(quest?.slabTools){
+    const mm=quest.slabMm??0;
+    add(mm?"Concrete slab · "+mm+" mm":"Add 100 mm concrete slab",24,88,900,74,{area:"slab",mm:mm||100},{active:!!mm});
+    add("−25 mm",24,174,440,74,{area:"slab",mm:Math.max(50,mm-25)},{disabled:mm<=50});add("+25 mm",484,174,440,74,{area:"slab",mm:Math.min(600,mm+25)},{disabled:!mm||mm>=600});
+    add("Remove slab",24,260,440,74,{area:"slab",mm:0},{disabled:!mm});add("Back",484,260,440,74,{area:"slab"});
+    return {buttons,title:"CONCRETE SLAB",width:936,height:406,note:"Slab follows the closed local perimeter. Nominal thickness only; no engineering specification."};
+  }
   if(footprint.enabled&&quest){
     add("Width −500 mm",24,88,440,74,{area:"footprint-size",axis:"x",delta:-.5});add("Width +500 mm",484,88,440,74,{area:"footprint-size",axis:"x",delta:.5});
     add("Depth −500 mm",24,174,440,74,{area:"footprint-size",axis:"z",delta:-.5});add("Depth +500 mm",484,174,440,74,{area:"footprint-size",axis:"z",delta:.5});
@@ -166,7 +173,7 @@ export function buildMenuLayout(
       {label:"Construction stages",action:{area:"view"}},
       {label:"Budget",action:questAction("budget")},
       {label:"Resize footprint",action:{area:"footprint"},disabled:!footprint.available},
-      {label:quest.slabMm?"Slab · "+quest.slabMm+" mm":"Add concrete slab",action:{area:"slab",mm:quest.slabMm?quest.slabMm>=200?0:quest.slabMm+25:100}},
+      {label:quest.slabMm?"Slab · "+quest.slabMm+" mm":"Add concrete slab",action:{area:"slab"}},
     ];
     entries.forEach((e,i)=>add(e.label,24+(i%2)*460,88+Math.floor(i/2)*86,440,76,e.action,{disabled:e.disabled}));
     const footer=selected?358:446;

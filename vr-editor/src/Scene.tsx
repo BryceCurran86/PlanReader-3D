@@ -432,7 +432,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     // Only a layout actually displayed can authorize a menu action.
     let displayedMenuLayout: ReturnType<typeof menuLayout> | null = null;
     let stickNeedsNeutral=false,menuFocus=-1,menuStickArmed=true,menuStickFocus=false;
-    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;slabTools=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(contextual=false){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
@@ -449,7 +449,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       else closeTools();
     }
-    let budgetOpen=false,budgetPage=0;
+    let budgetOpen=false,budgetPage=0,slabTools=false;
     let compactMenu = true;
     let overviewOpen=false;
     let elevatedReturn: NavOffset|null=null;
@@ -518,7 +518,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
-          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext:liveContext,finishGroup,finishPage,activeFinishId,slabMm:construction.current.slabMm,
+          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext:liveContext,finishGroup,finishPage,activeFinishId,slabMm:construction.current.slabMm,slabTools,
            selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, angleTools, feedback:interaction.current.toolFeedback, gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
@@ -535,7 +535,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     }
     function menuAction(choice: MenuAction) {
       reportTool("");
-      if(choice.area==="slab"){construction.current.onSlab(choice.mm);return;}
+      if(choice.area==="slab"){if(choice.mm===undefined){slabTools=!slabTools;return;}construction.current.onSlab(choice.mm);return;}
       if(choice.area==="footprint-size"){const b=resize.current.box;if(!b||!resize.current.enabled)return;resize.current.onResize(resizeFromDimensions(b,footprintWidth(b)+(choice.axis==="x"?choice.delta:0),footprintDepth(b)+(choice.axis==="z"?choice.delta:0),"centre"));return;}
       if(choice.area==="items"&&choice.action.kind==="edit-fixture"){
         const live=finishContext&&refreshFinishContext(finishContext,itemControls.current.items);
@@ -913,6 +913,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           const geometry=new THREE.BufferGeometry();geometry.setAttribute("position",new THREE.Float32BufferAttribute(surface.vertices.flat(),3));geometry.computeVertexNormals();
           const material=new THREE.MeshStandardMaterial({color:surface.kind==="floor"?0xb4b1a8:surface.kind==="roof"?0x687783:0xf4f0e6,roughness:.85,side:THREE.DoubleSide});
           physicalUV(geometry,surface.kind==="roof"?.3:.5,surface.kind==="roof"?1.4:.5);
+          if(surface.kind==="floor"){const maps=details.get("concrete");material.color.setHex(0xc8c5bc);material.map=maps.map;material.bumpMap=maps.bumpMap;material.bumpScale=.0015;material.roughness=.87;}
           if(surface.kind==="roof"){const maps=details.get("roof");material.map=maps.map;material.bumpMap=maps.bumpMap;material.bumpScale=.003;material.roughness=.68;}
           const mesh=new THREE.Mesh(geometry,material);mesh.userData.surfaceKind=surface.kind;mesh.receiveShadow=true;mesh.castShadow=surface.kind!=="floor";shellGroup.add(mesh);
           if(surface.kind==="floor"&&next){const vertices=surface.vertices.flatMap((_,i)=>i%3===0&&surface.vertices.slice(i,i+3).every(v=>Math.abs(v[1]-.002)<1e-6)?surface.vertices.slice(i,i+3):[]);if(vertices.length){const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(vertices.flat(),3));g.computeVertexNormals();const host=new THREE.Mesh(g,new THREE.MeshBasicMaterial({side:THREE.DoubleSide,visible:false}));host.userData.surfaceKind="floor";shellGroup.add(host);shellFloorHosts=[{id:localFloorHostId(next.levelId),target:"floor",mesh:host}];}}

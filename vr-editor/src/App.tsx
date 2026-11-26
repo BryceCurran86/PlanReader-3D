@@ -72,7 +72,7 @@ export function App() {
   const [addedWallSketch, setAddedWallSketch] = useState<WallVisual | null>(null);
   const [addedWallBatchSketches, setAddedWallBatchSketches] = useState<WallVisual[]>([]);
   const [placed, setPlaced] = useState<{ scene: SceneManifest; build: BuildState } | null>(null);
-  const resizeJournal=useRef(new WeakMap<BuildState["walls"],{other:BuildState["walls"];items:ItemDraft;otherItems:ItemDraft}>());
+  const resizeJournal=useRef(new WeakMap<BuildState["walls"],WeakMap<BuildState["walls"],{items:ItemDraft;otherItems:ItemDraft}>>());
   const [buildSizes, setBuildSizes] = useState(STARTING_SIZES);
   const [buildHint, setBuildHint] = useState("");
   const [vrRate,setVrRate]=useState("");
@@ -510,8 +510,8 @@ export function App() {
     if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) {setToolMessage("Apply or reset the footprint preview before editing walls.");return;}
     if(action.kind==="undo"||action.kind==="redo"){
       const next=updateBuild(buildState,action,scopeKey(manifest),buildLevel,buildSizes);
-      const record=resizeJournal.current.get(buildState.walls);
-      if(record&&record.other===next.walls){
+      const record=resizeJournal.current.get(buildState.walls)?.get(next.walls);
+      if(record){
         if(catalogue?.draft.items!==record.items.items){setToolMessage("Undo later fitting edits before undoing or redoing the footprint.");return;}
         setPlaced({scene:manifest,build:next});changeCatalogue(current=>({...current,draft:record.otherItems}));return;
       }
@@ -560,8 +560,8 @@ export function App() {
         const before=catalogue?.draft??emptyItemDraft(scopeKey(manifest));
         const next=commitLocalFootprint(manifest,buildState,before,projection);
         if(!next){setToolMessage("Cannot apply resize: a wall, opening or hosted item would be invalid.");return;}
-        resizeJournal.current.set(buildState.walls,{other:next.build.walls,items:before,otherItems:next.items});
-        resizeJournal.current.set(next.build.walls,{other:buildState.walls,items:next.items,otherItems:before});
+        const beforeMap=resizeJournal.current.get(buildState.walls)??new WeakMap();beforeMap.set(next.build.walls,{items:before,otherItems:next.items});resizeJournal.current.set(buildState.walls,beforeMap);
+        const afterMap=resizeJournal.current.get(next.build.walls)??new WeakMap();afterMap.set(buildState.walls,{items:next.items,otherItems:before});resizeJournal.current.set(next.build.walls,afterMap);
         setPlaced({scene:manifest,build:next.build});changeCatalogue(current=>({...current,draft:next.items}));
         setResize(null);setLastEdit("draw");setToolMessage("Footprint applied to local building and plan. Continue editing walls.");return;
       }
@@ -596,6 +596,7 @@ export function App() {
 
   function changeSlab(thickness:number){
     if(!manifest||!Number.isFinite(thickness)||thickness!==0&&(thickness<50||thickness>600))return;
+    if(thickness===0&&catalogue?.draft.items.some(p=>p.hostId.startsWith("draft-floor:"))){setToolMessage("Remove or relocate hosted floor items before removing their slab.");return;}
     setShellStore({scene:manifest,settings:{...shellSettings,slabEnabled:thickness!==0,slabMm:thickness||shellSettings.slabMm}});
     setToolMessage(thickness?"Concrete slab · "+thickness+" mm · local design only.":"Concrete slab hidden from local design.");
   }
