@@ -30,6 +30,7 @@ from enum import Enum
 import math
 import re
 import statistics
+import threading
 from typing import Any, Iterable, Optional, Sequence
 
 from pb_dimension_graph_constraint_engine import (
@@ -1201,6 +1202,7 @@ class _VectorScopeIndex:
 _TUPLE_SCOPE_INDEX_CACHE: OrderedDict[
     int, tuple[tuple[ObservedGeometrySegment, ...], _VectorScopeIndex]
 ] = OrderedDict()
+_TUPLE_SCOPE_INDEX_CACHE_LOCK = threading.Lock()
 _TUPLE_SCOPE_INDEX_CACHE_MAX = 4
 
 
@@ -1209,14 +1211,17 @@ def _scope_index_for_segments(
 ) -> _VectorScopeIndex:
     if isinstance(segments, tuple):
         key = id(segments)
-        entry = _TUPLE_SCOPE_INDEX_CACHE.get(key)
-        if entry is not None and entry[0] is segments:
-            _TUPLE_SCOPE_INDEX_CACHE.move_to_end(key)
-            return entry[1]
+        with _TUPLE_SCOPE_INDEX_CACHE_LOCK:
+            entry = _TUPLE_SCOPE_INDEX_CACHE.get(key)
+            if entry is not None and entry[0] is segments:
+                _TUPLE_SCOPE_INDEX_CACHE.move_to_end(key)
+                return entry[1]
         index = _VectorScopeIndex(segments)
-        _TUPLE_SCOPE_INDEX_CACHE[key] = (segments, index)
-        if len(_TUPLE_SCOPE_INDEX_CACHE) > _TUPLE_SCOPE_INDEX_CACHE_MAX:
-            _TUPLE_SCOPE_INDEX_CACHE.popitem(last=False)
+        with _TUPLE_SCOPE_INDEX_CACHE_LOCK:
+            _TUPLE_SCOPE_INDEX_CACHE[key] = (segments, index)
+            _TUPLE_SCOPE_INDEX_CACHE.move_to_end(key)
+            if len(_TUPLE_SCOPE_INDEX_CACHE) > _TUPLE_SCOPE_INDEX_CACHE_MAX:
+                _TUPLE_SCOPE_INDEX_CACHE.popitem(last=False)
         return index
     return _VectorScopeIndex(segments)
 

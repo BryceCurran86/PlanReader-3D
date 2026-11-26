@@ -146,3 +146,37 @@ def test_view_isolation_and_orientation_edge_cases() -> None:
     obs = _obs("o_vp_a", (190.0, 92.0, 210.0, 100.0), view_id="vp_a")
     binding = bind_observation_to_vector_geometry(obs, segs, cal)
     assert binding.status == BindingStatus.UNSUPPORTED.value
+
+
+def test_tuple_scope_index_cache_is_thread_safe_under_concurrent_access() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    cal = DimensionLayoutCalibration(
+        median_word_height_pt=8.0,
+        line_search_distance_pt=16.0,
+        witness_endpoint_distance_pt=12.0,
+        chain_axis_tolerance_pt=4.4,
+    )
+    segment_sets = [
+        (
+            _seg(f"h_{k}", (100.0 + k, 100.0), (300.0 + k, 100.0), path_idx=1),
+            _seg(f"w1_{k}", (100.0 + k, 88.0), (100.0 + k, 112.0), path_idx=2),
+            _seg(f"w2_{k}", (300.0 + k, 88.0), (300.0 + k, 112.0), path_idx=3),
+        )
+        for k in range(12)
+    ]
+
+    def _worker(worker_idx: int) -> list[str]:
+        out: list[str] = []
+        for step in range(40):
+            k = (worker_idx + step) % len(segment_sets)
+            obs = _obs(f"o_{worker_idx}_{step}", (190.0 + k, 92.0, 210.0 + k, 100.0))
+            b = bind_observation_to_vector_geometry(obs, segment_sets[k], cal)
+            assert b.status == BindingStatus.WITNESS_BOUND.value
+            assert b.dimension_line_id == f"h_{k}"
+            out.append(b.dimension_line_id)
+        return out
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(_worker, range(8)))
+    assert len(results) == 8 and all(len(r) == 40 for r in results)
