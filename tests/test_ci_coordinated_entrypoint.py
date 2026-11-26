@@ -163,3 +163,14 @@ def test_automatic_full_release_requires_complete_isolated_shards():
     assert full.index("Require every automatic shard to succeed") < full.index("Download only full-suite shard receipts")
     assert full.index("Verify every collected test executed exactly once across four shards") < full.index("Smoke test (envelope")
     assert "if: github.event_name == 'workflow_dispatch'" in full
+
+def test_shared_worker_experiment_is_manual_and_fetches_complete_history():
+    experiment = (ROOT / ".github/workflows/ci-worker-comparison.yml").read_text(encoding="utf-8")
+    assert "workflow_dispatch:" in experiment
+    assert "pull_request:" not in experiment
+    assert "fetch-depth: 0" in experiment
+    assert "workers: [0, 2, 4, 8]" in experiment
+    assert "not release CI" in experiment
+    assert "never a release verdict" in experiment
+    assert "Fast-fail workflow and source integrity contract assertions" in job("shard")
+    assert job("shard").index("Fast-fail workflow") < job("shard").index("Execute one isolated complete-collection shard")

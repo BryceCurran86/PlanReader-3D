@@ -3,7 +3,7 @@
  * Ground/sky are deliberately marked as presentation context, not source BIM.
  */
 export type LightingMood = "daylight" | "studio" | "dusk" | "night";
-export type RenderQuality = "balanced" | "high";
+export type RenderQuality = "performance" | "balanced" | "high";
 export interface VisualPreset {
   label: string;
   background: number;
@@ -47,14 +47,14 @@ export function isLightingMood(v: unknown): v is LightingMood {
   return typeof v === "string" && Object.hasOwn(VISUAL_PRESETS, v);
 }
 export function isRenderQuality(v: unknown): v is RenderQuality {
-  return v === "balanced" || v === "high";
+  return v === "performance" || v === "balanced" || v === "high";
 }
 export function maxRenderPixelRatio(quality: RenderQuality, isXR: boolean): number {
   // Headset compositor controls its own size; don't add an expensive desktop multiplier.
-  return isXR ? 1 : quality === "high" ? 2 : 1.5;
+  return isXR ? 1 : quality === "high" ? 2 : quality==="performance"?1:1.5;
 }
 export function shadowMapSize(quality: RenderQuality): number {
-  return quality === "high" ? 2048 : 1024;
+  return quality === "high" ? 2048 : quality==="performance"?512:1024;
 }
 /** Only authentic existing wall faces with stated heights may be lit as surfaces. */
 export function mayRenderWallFace(
@@ -62,4 +62,8 @@ export function mayRenderWallFace(
 ): boolean {
   return kind === "wallFace" && typeof heightM === "number" &&
     Number.isFinite(heightM) && heightM > 0 && heightM < 1000;
+}
+
+export function realismBudget(quality:RenderQuality,xr:boolean){
+ return {detail:quality!=="performance",landscape:quality!=="performance",shadows:quality!=="performance"&&(!xr||quality==="high"),shadowRefreshMs:xr?1000:100,environmentIntensity:quality==="performance"?.45:quality==="high"?.85:.65};
 }

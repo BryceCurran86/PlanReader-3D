@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import {materialDetailMaps} from "./materialDetail.ts";
+import type {DetailPattern} from "./materialDetail.ts";
 import type { ItemTarget, ItemVisual, Pattern, TrimProfile } from "./itemCatalogue";
 
 type FinishSpec = Extract<ItemVisual, { kind: "surface" }>;
@@ -167,11 +169,14 @@ export function finishMesh(
     }
     geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   }
+  const detail:DetailPattern|null=spec.pattern==="solid"&&(target==="wall"||target==="ceiling")?"plaster":(["plank","grain","tile","woven","fleck"].includes(spec.pattern)?spec.pattern as DetailPattern:null);
+  const maps=detail?materialDetailMaps(detail):null;
   const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
     color: spec.color, roughness: spec.roughness,
+    bumpMap:maps?.bumpMap??null,bumpScale:detail==="tile"?.002:detail==="plank"?.0015:.0008,
     side: isRoof ? THREE.FrontSide : vertical ? (side === 1 ? THREE.FrontSide : THREE.BackSide)
       : host.material instanceof THREE.Material ? host.material.side : THREE.DoubleSide,
-    map: spec.pattern === "solid" ? null : makePattern(spec.pattern),
+    map: maps?.map??(spec.pattern === "solid" ? null : makePattern(spec.pattern)),
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -1,
   }));
   if (!isRoof) mesh.position.copy(normal).multiplyScalar(0.0008);

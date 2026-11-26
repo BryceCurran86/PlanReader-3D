@@ -20,7 +20,7 @@ on:
           - focused
           - readiness
       workers:
-        description: "Manual reference full suite: serial (default), 2, 4 or 8 experimental workers"
+        description: "Manual reference only: serial recommended; shared-worker modes are experimental"
         required: true
         default: '0'
         type: choice
@@ -115,6 +115,12 @@ jobs:
           python -m ruff --version
       - name: Verify pinned checkout
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Fast-fail workflow and source integrity contract assertions
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_ci_coordinated_entrypoint.py tests/test_ci_v2_truth_workflow.py tests/test_gpt3_private_original_type_change_ci_guard.py tests/test_gpt3_v2_truth_nul_quoted_paths_separation.py tests/test_gpt3_v2_truth_rename_diff_separation.py tests/test_ci_compare_worker_runs.py
       - name: Execute one isolated complete-collection shard
         env:
           PYTHONPATH: .
