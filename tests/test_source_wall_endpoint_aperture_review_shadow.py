@@ -315,9 +315,10 @@ def test_original_3laurel_p3_raw_terminals_are_not_missing_outer_walls():
         drawings = page.get_drawings()
         words = page.get_text("words")
         before = (len(drawings), len(words))
+        # The app's preview admits mitred corner paint; without it #4623's removal of false windows leaves p3 open.
         attempt = attempt_source_native_outer_wall_first(
             drawings, source_words=words, window_source_drawings=drawings,
-            source_page_index=2,
+            source_page_index=2, admit_wall_joint_paint=True,
         )
         after = (len(page.get_drawings()), len(page.get_text("words")))
     assert before == after

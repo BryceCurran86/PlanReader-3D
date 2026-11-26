@@ -50,6 +50,10 @@ from pb_source_sliding_door_footprint_continuity import (
     ExteriorSlidingDoorFootprintBridge,
     detect_exterior_sliding_door_footprint_bridges,
 )
+from pb_source_wall_joint_paint_continuity import (
+    SourceWallJointPaint,
+    detect_source_wall_joint_paint,
+)
 from pb_source_swing_door_footprint_continuity import (
     ExteriorSwingDoorFootprintBridge,
     detect_exterior_swing_door_footprint_bridges,
@@ -104,6 +108,9 @@ class SourceNativeOuterWallAttempt:
     source_wall_endpoint_aperture_review: OriginalSourceWallEndpointAudit = field(
         default_factory=OriginalSourceWallEndpointAudit
     )
+    # Native non-rectangular wall paint admitted to the TOPOLOGY union only
+    # (off unless admit_wall_joint_paint is True). Never a bar or a quantity.
+    source_wall_joint_paint: tuple[SourceWallJointPaint, ...] = ()
 
 
 def _independent_outside_nonwall_audit_complete(
@@ -150,6 +157,7 @@ def attempt_source_native_outer_wall_first(
     window_source_drawings: Sequence[Mapping[str, Any] | object] | None = None,
     source_page_index: int = -1,
     viewport_pdf_pts: tuple[float, float, float, float] | Sequence[tuple[float, float, float, float]] | None = None,
+    admit_wall_joint_paint: bool = False,
 ) -> SourceNativeOuterWallAttempt:
     """Find one joined perimeter in *source wall fills*, NOT the sheet bbox.
 
@@ -157,9 +165,15 @@ def attempt_source_native_outer_wall_first(
     Requires all other painted structural wall bands be contained inside the
     candidate. Ambiguous outer candidates and separate wings fail closed.
     This is deliberately stricter than a raster contour or concave hull.
+
+    ``admit_wall_joint_paint`` (default False) also lets mitred or junction
+    pieces of native wall paint into the topology union; see
+    ``pb_source_wall_joint_paint_continuity``.
     """
     if type(source_ink_already_scoped) is not bool:
         raise ValueError("source_ink_already_scoped_must_be_bool")
+    if type(admit_wall_joint_paint) is not bool:
+        raise ValueError("admit_wall_joint_paint_must_be_bool")
     if type(source_page_index) is not int or source_page_index < -1:
         raise ValueError("source_page_index_invalid")
     viewports = _as_viewports(viewport_pdf_pts)
@@ -186,7 +200,7 @@ def attempt_source_native_outer_wall_first(
             if source_ink_already_scoped
             else _source_wall_ink_candidate_drawings(baseline_source_drawings)[0]
         )
-    named, _other = _collect_strips(wall_ink)
+    named, barrier_polygons = _collect_strips(wall_ink)
     dark = _collect_dark_painted_source_wall_strips(wall_ink)
     # Architectural walls can be two separate native ink strokes, not opaque
     # filled rectangles. The original preflight omitted them entirely.
@@ -384,6 +398,25 @@ def attempt_source_native_outer_wall_first(
     def _bridge_paint(bounds: tuple[float, float, float, float]):
         return box(*bounds).buffer(CONTACT_PT, join_style=2)
 
+    # A mitred corner or junction piece is native wall paint, not a bridge. It
+    # joins this topology union only; it never becomes a bar or a path owner.
+    # Scope barrier polygons to the active viewports before contact checks so
+    # out-of-viewport pieces never enter joint detection.
+    scoped_barriers = (
+        tuple(
+            (path_index, polygon)
+            for path_index, polygon in barrier_polygons
+            if getattr(polygon, "is_empty", True) is False
+            and any(_bbox_intersects(polygon.bounds, vp) for vp in viewports)
+        )
+        if viewports is not None else barrier_polygons
+    )
+    joint_paint = detect_source_wall_joint_paint(
+        scoped_barriers, source_drawings=wall_ink, wall_bars=bars,
+        page_index=source_page_index,
+    ) if admit_wall_joint_paint else ()
+    counts["source_wall_joint_paint"] = joint_paint
+
     union = unary_union(
         [bar.polygon for bar in bars]
         + [_bridge_paint(bridge.bounds_pdf_pts) for bridge in window_bridges]
@@ -392,6 +425,7 @@ def attempt_source_native_outer_wall_first(
         + [_bridge_paint(bridge.bounds_pdf_pts) for bridge in sliding_bridges]
         + [_bridge_paint(seam.bounds_pdf_pts) for seam in neutral_seams]
         + list(door_host_ink)
+        + [Polygon(j.outline_pdf_pts).buffer(CONTACT_PT, join_style=2) for j in joint_paint]
     )
     counts["source_wall_endpoint_aperture_review"] = _review(union)
     # No duplicate original-page decode/union. This outside-face walker
