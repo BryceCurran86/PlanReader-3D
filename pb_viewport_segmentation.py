@@ -3449,6 +3449,7 @@ def _native_multipath_semantic_frame_candidates_shadow(
 
 _SEGMENT_PAGE_VIEWPORTS_CACHE: OrderedDict[tuple[Any, ...], tuple[SegmentedViewport, ...]] = OrderedDict()
 _SEGMENT_PAGE_VIEWPORTS_CACHE_MAX = 64
+_MODULE_GLOBALS_SNAPSHOT: tuple[tuple[str, Any], ...] = ()
 
 
 def _segment_page_viewports_cache_key(
@@ -3459,6 +3460,12 @@ def _segment_page_viewports_cache_key(
     source_native_multipath_semantic_frame_shadow: bool,
     source_connected_text_cell_plan_frame_shadow: bool,
 ) -> Optional[tuple[Any, ...]]:
+    if not _MODULE_GLOBALS_SNAPSHOT:
+        return None
+    mod_globals = globals()
+    for name, orig_obj in _MODULE_GLOBALS_SNAPSHOT:
+        if mod_globals.get(name) is not orig_obj:
+            return None
     if fitz is None or not isinstance(page, fitz.Page):
         return None
     doc = getattr(page, "parent", None)
@@ -3468,9 +3475,15 @@ def _segment_page_viewports_cache_key(
         xref = int(page.xref)
         if xref <= 0:
             return None
+        if any(page.annots() or ()):
+            return None
         rect = page.rect
         content_sha = hashlib.sha256(bytes(page.read_contents() or b"")).digest()
         xobjects = tuple(page.get_xobjects() or ())
+        xobject_shas = tuple(
+            hashlib.sha256(bytes(doc.xref_stream(int(xo[0])) or b"")).digest()
+            for xo in xobjects
+        )
         fonts = tuple(page.get_fonts() or ())
         return (
             int(page_number),
@@ -3481,6 +3494,7 @@ def _segment_page_viewports_cache_key(
             int(doc.page_count),
             content_sha,
             xobjects,
+            xobject_shas,
             fonts,
             source_connected_table_cell_shadow,
             source_native_multipath_semantic_frame_shadow,
@@ -4004,3 +4018,11 @@ def _raster_ink_title_cell_evidence(
                 "authenticated_viewport": False,
             })
     return tuple(rows)
+
+
+_MODULE_GLOBALS_SNAPSHOT = tuple(
+    (name, obj)
+    for name, obj in sorted(globals().items())
+    if not name.startswith("__")
+    and name not in ("_SEGMENT_PAGE_VIEWPORTS_CACHE", "_MODULE_GLOBALS_SNAPSHOT")
+)
