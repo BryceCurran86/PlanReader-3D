@@ -1,25 +1,30 @@
 import * as THREE from "three";
 export type ArchitecturalMap="wood-colour.jpg"|"wood-normal.jpg"|"wood-rough.jpg"|"plaster-normal.jpg"|"plaster-rough.jpg"|"grass-colour.jpg";
 export const architecturalAssetUrl=(name:ArchitecturalMap|"outdoor.hdr")=>new URL("architectural-assets/"+name,document.baseURI).href;
-const images=new Map<string,Promise<HTMLCanvasElement|HTMLImageElement>>();
+const images=new Map<string,Promise<HTMLCanvasElement>>();
 function sourceFor(name:ArchitecturalMap){
  let pending=images.get(name);
  if(!pending){
-  pending=new Promise<HTMLCanvasElement|HTMLImageElement>((resolve,reject)=>{
+  pending=new Promise<HTMLCanvasElement>((resolve,reject)=>{
    const image=new Image();
    image.onload=()=>{
-    if(name==="wood-colour.jpg"){
-     // Keep catalogue paint/stain swatches authoritative: preserve photographed grain,
-     // remove baked hue and normalize the diffuse map before tinting.
-     const canvas=document.createElement("canvas");canvas.width=image.width;canvas.height=image.height;
+    try{
+     // CanvasTexture requires a canvas consistently, including after asynchronous load.
+     const canvas=document.createElement("canvas");
+     canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
      const ctx=canvas.getContext("2d");
-     if(ctx){ctx.drawImage(image,0,0);const p=ctx.getImageData(0,0,canvas.width,canvas.height);
+     if(!ctx||canvas.width<1||canvas.height<1)throw Error("Cannot decode photographic map: "+name);
+     ctx.drawImage(image,0,0);
+     if(name==="wood-colour.jpg"){
+      // Neutralize photographed diffuse hue while retaining grain for editable colourways.
+      const p=ctx.getImageData(0,0,canvas.width,canvas.height);
       let mean=0;for(let i=0;i<p.data.length;i+=4)mean+=.2126*p.data[i]+.7152*p.data[i+1]+.0722*p.data[i+2];
       mean=Math.max(1,mean/(p.data.length/4));
       for(let i=0;i<p.data.length;i+=4){const v=.2126*p.data[i]+.7152*p.data[i+1]+.0722*p.data[i+2];const shade=Math.max(0,Math.min(255,220+(v-mean)*.85));p.data[i]=p.data[i+1]=p.data[i+2]=shade;}
-      ctx.putImageData(p,0,0);resolve(canvas);return;}
-    }
-    resolve(image);
+      ctx.putImageData(p,0,0);
+     }
+     resolve(canvas);
+    }catch(error){reject(error);}
    };
    image.onerror=()=>reject(Error("Missing local photographic asset: "+name));
    image.src=architecturalAssetUrl(name);
@@ -38,7 +43,16 @@ export function photoTexture(name:ArchitecturalMap):THREE.Texture|null{
  ctx.fillStyle=normal?"#8080ff":name==="grass-colour.jpg"?"#637d45":colour?"#eeeeee":"#ffffff";ctx.fillRect(0,0,1,1);
  const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=colour?THREE.SRGBColorSpace:THREE.NoColorSpace;
  texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.anisotropy=4;texture.magFilter=THREE.LinearFilter;texture.minFilter=THREE.LinearMipmapLinearFilter;
- let disposed=false;texture.addEventListener("dispose",()=>{disposed=true;});
- void sourceFor(name).then(source=>{if(!disposed){canvas.width=source.width;canvas.height=source.height;ctx.drawImage(source,0,0);texture.needsUpdate=true;}}).catch(error=>console.error(error));
+ let disposed=false;const onDispose=()=>{disposed=true;};texture.addEventListener("dispose",onDispose);
+ void sourceFor(name).then(source=>{
+  if(disposed)return;
+  // Release the 1px placeholder GPU allocation before uploading a larger image.
+  // Temporarily detach our listener: this is a storage refresh, not owner disposal.
+  texture.removeEventListener("dispose",onDispose);
+  texture.dispose();
+  texture.addEventListener("dispose",onDispose);
+  texture.image=source;texture.needsUpdate=true;
+  document.documentElement.setAttribute("data-photo-"+name.replace(".jpg",""),"loaded");
+ }).catch(error=>{console.error("Local photographic map unavailable",name,error);});
  return texture;
 }

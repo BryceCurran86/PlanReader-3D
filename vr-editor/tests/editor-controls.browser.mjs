@@ -30,7 +30,7 @@ try {
   page.setDefaultTimeout(12000);
   const errors = [],assetErrors=[],externalRequests=[];
   page.on("pageerror", error => errors.push(error.message));
-  page.on("console", message=>{if(message.type()==="error"&&/Local architectural HDR unavailable|Missing local photographic asset/.test(message.text()))assetErrors.push(message.text());});
+  page.on("console", message=>{if(message.type()==="error"&&/Local architectural HDR unavailable|Missing local photographic asset|Local photographic map unavailable/.test(message.text()))assetErrors.push(message.text());});
   page.on("request", request=>{if(/^https?:/.test(request.url())&&!request.url().startsWith("http://127.0.0.1:"))externalRequests.push(request.url());});
   await page.goto("http://127.0.0.1:" + server.address().port);
   const canvas = page.locator(".viewport canvas");
@@ -44,6 +44,8 @@ try {
     return {count:files.length,decoded};
   });
   assert.equal(photoFiles.count,7);assert.equal(photoFiles.decoded.length,6);
+  // Verify the real renderer's material loader consumed the photos, not merely that URLs decode.
+  await page.waitForFunction(()=>["wood-colour","wood-normal","wood-rough","plaster-normal","plaster-rough","grass-colour"].every(name=>document.documentElement.getAttribute("data-photo-"+name)==="loaded"),undefined,{timeout:30000});
   assert.ok(photoFiles.decoded.every(f=>f.width>=512&&f.height>=512),"Photographic maps must decode at useful resolution");
   await page.locator(".build-tools").getByText("Draft walls (7)",{exact:true}).waitFor();
   const selection=page.locator("#selected-draft-object");
