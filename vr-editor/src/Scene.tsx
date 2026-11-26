@@ -2032,7 +2032,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
         activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
-        const hover=active>=0&&displayedMenuLayout?menuTarget(displayedMenuLayout):null;
+        const hover=toolsOpen&&active>=0&&displayedMenuLayout?menuTarget(displayedMenuLayout):null;
         const hostTool=buildState.tool==="door"||buildState.tool==="window"||buildState.tool==="frame"||buildState.tool==="move"||buildState.tool==="stretch"||buildState.tool==="opening-move";
         const canLock=active>=0&&!hover&&(!buildState.tool||hostTool)&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
         if(canLock&&magnetic){
@@ -2163,7 +2163,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z);
       const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
       garden.update(gardenBounds,outdoor&&budget.landscape);
-      const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items];
+      const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items,renderer.xr.isPresenting];
       if(!nextMaterialKey.every((v,i)=>v===materialBudgetKey[i])){
         materialBudgetKey=nextMaterialKey;
         for(const layer of [wallAdditionLayer,shellGroup])layer.traverse(obj=>{if(obj instanceof THREE.Mesh&&obj.material instanceof THREE.MeshStandardMaterial){const m=obj.material;const original=m.userData.originalBump??m.bumpMap;if(original)m.userData.originalBump=original;const map=budget.detail?original??null:null;if(m.bumpMap!==map){m.bumpMap=map;m.needsUpdate=true;}}});
