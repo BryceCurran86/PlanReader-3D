@@ -1,11 +1,11 @@
 import * as THREE from "three";
 export type ArchitecturalMap="wood-colour.jpg"|"wood-normal.jpg"|"wood-rough.jpg"|"plaster-normal.jpg"|"plaster-rough.jpg"|"grass-colour.jpg";
 export const architecturalAssetUrl=(name:ArchitecturalMap|"outdoor.hdr")=>new URL("architectural-assets/"+name,document.baseURI).href;
-const images=new Map<string,Promise<THREE.Source>>();
+const images=new Map<string,Promise<HTMLCanvasElement|HTMLImageElement>>();
 function sourceFor(name:ArchitecturalMap){
  let pending=images.get(name);
  if(!pending){
-  pending=new Promise<THREE.Source>((resolve,reject)=>{
+  pending=new Promise<HTMLCanvasElement|HTMLImageElement>((resolve,reject)=>{
    const image=new Image();
    image.onload=()=>{
     if(name==="wood-colour.jpg"){
@@ -17,9 +17,9 @@ function sourceFor(name:ArchitecturalMap){
       let mean=0;for(let i=0;i<p.data.length;i+=4)mean+=.2126*p.data[i]+.7152*p.data[i+1]+.0722*p.data[i+2];
       mean=Math.max(1,mean/(p.data.length/4));
       for(let i=0;i<p.data.length;i+=4){const v=.2126*p.data[i]+.7152*p.data[i+1]+.0722*p.data[i+2];const shade=Math.max(0,Math.min(255,220+(v-mean)*.85));p.data[i]=p.data[i+1]=p.data[i+2]=shade;}
-      ctx.putImageData(p,0,0);resolve(new THREE.Source(canvas));return;}
+      ctx.putImageData(p,0,0);resolve(canvas);return;}
     }
-    resolve(new THREE.Source(image));
+    resolve(image);
    };
    image.onerror=()=>reject(Error("Missing local photographic asset: "+name));
    image.src=architecturalAssetUrl(name);
@@ -39,6 +39,6 @@ export function photoTexture(name:ArchitecturalMap):THREE.Texture|null{
  const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=colour?THREE.SRGBColorSpace:THREE.NoColorSpace;
  texture.wrapS=texture.wrapT=THREE.RepeatWrapping;texture.anisotropy=4;texture.magFilter=THREE.LinearFilter;texture.minFilter=THREE.LinearMipmapLinearFilter;
  let disposed=false;texture.addEventListener("dispose",()=>{disposed=true;});
- void sourceFor(name).then(source=>{if(!disposed){texture.image=source.data;texture.needsUpdate=true;}}).catch(error=>console.error(error));
+ void sourceFor(name).then(source=>{if(!disposed){texture.image=source;texture.needsUpdate=true;}}).catch(error=>console.error(error));
  return texture;
 }
