@@ -6,7 +6,7 @@ import type { EditorObject, SceneManifest } from "./types";
 import { studyColor } from "./finishStudy";
 import { safeDrafts } from "./reviewDraft";
 import type { DraftHistory, WallDraft } from "./reviewDraft";
-import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget } from "./visualRealism";
+import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget,adaptiveRenderQuality } from "./visualRealism";
 import {createMaterialDetailLibrary,physicalUV} from "./materialDetail";
 import {createPresentationGarden} from "./presentationGarden";
 import {RoomEnvironment} from "three/addons/environments/RoomEnvironment.js";
@@ -907,6 +907,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const sceneScope = scopeKey(manifest);
     let lastAddedWall = "";
     let draftMeshes = new Map<string,{signature:string;object:THREE.Object3D}>();
+    const wallHostCache=new WeakMap<THREE.Group,CatalogueHost[]>();
     let lastBuildWalls = build.current.buildState.walls;
     let lastBuildCeilings = build.current.buildState.ceilings;
     let lastBuildLevel = build.current.buildLevel;
@@ -967,7 +968,9 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           if(openDoors.has(id))nextOpenDoors.add(id);
         }
         nextMeshes.set(key,{signature,object:group});
-        draftItemHosts.push(...draftCatalogueHosts(wall, group));
+        let hosts=wallHostCache.get(group);
+        if(!hosts){hosts=draftCatalogueHosts(wall,group,corner);wallHostCache.set(group,hosts);}
+        draftItemHosts.push(...hosts);
       }
       for (const ceiling of ceilings) {
         const key="ceiling:"+ceiling.proposalId,signature=JSON.stringify(ceiling);
@@ -1859,12 +1862,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let appliedMovementKey:readonly unknown[]=[];
     let planExtra:WallVisual[]=[];let planExtraBatch:WallVisual[]|undefined;let planExtraSingle:WallVisual|null|undefined;
     let frameStart=0,previousFrame=0,frameCount=0,worstFrame=0,slowWindows=0,fastWindows=0;
+    let adaptiveCap=2,qualityPreference:RenderQuality|null=null;
     let sourceAppearanceKey: readonly unknown[] = [];
     let surfaceVisibilityKey: readonly unknown[] = [];
     renderer.setAnimationLoop((now) => {
       stationaryNavigation(now);
-      const { mood: activeMood, quality: activeQuality, detail: activeDetail,
+      const { mood: activeMood, quality: requestedQuality, detail: activeDetail,
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
+      if(!renderer.xr.isPresenting||qualityPreference!==requestedQuality){adaptiveCap=2;qualityPreference=requestedQuality;slowWindows=fastWindows=0;}
+      const activeQuality=adaptiveRenderQuality(requestedQuality,adaptiveCap);
       // Fallback xr-standard grips when SteamVR omits native squeeze events.
       // Native grip events always take precedence. Neither path changes source.
       const { buildState, buildLevel } = build.current;
@@ -2340,9 +2346,14 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
             slowWindows=fps<target*.85?slowWindows+1:0;
             fastWindows=fps>=target*.97?fastWindows+1:0;
             const foveation=renderer.xr.getFoveation();
-            if(typeof foveation==="number"&&Number.isFinite(foveation)){
-              if(slowWindows>=2){renderer.xr.setFoveation(Math.min(1,foveation+.15));slowWindows=0;}
-              else if(fastWindows>=5){renderer.xr.setFoveation(Math.max(.25,foveation-.1));fastWindows=0;}
+            if(slowWindows>=2){
+              if(typeof foveation==="number"&&Number.isFinite(foveation)&&foveation<.95)renderer.xr.setFoveation(Math.min(1,foveation+.15));
+              else adaptiveCap=Math.max(0,Math.min(adaptiveCap,["performance","balanced","high"].indexOf(activeQuality))-1);
+              slowWindows=0;
+            }else if(fastWindows>=5){
+              if(adaptiveCap<2)adaptiveCap++;
+              else if(typeof foveation==="number"&&Number.isFinite(foveation))renderer.xr.setFoveation(Math.max(.25,foveation-.1));
+              fastWindows=0;
             }
             report(true,{fps:Math.round(fps),frameMs:elapsed/frameCount,worstMs:worstFrame,
               drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,
