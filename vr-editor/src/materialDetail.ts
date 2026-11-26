@@ -6,6 +6,7 @@ const clamp=(v:number)=>Math.max(0,Math.min(255,Math.round(v)));
 /** Deterministic neutral tintable albedo and relief, bounded 128² per map.
  * Physical dimensions are assigned by the renderer UV, not by evidence. */
 export function detailPixels(pattern:DetailPattern,size=SIZE){
+ if(!Number.isInteger(size)||size<1||size>512)throw new RangeError("Detail texture size must be an integer from 1 to 512");
  const albedo=new Uint8Array(size*size*4),relief=new Uint8Array(size*size*4);
  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
   const u=x/size,v=y/size,n=noise(x,y),fine=noise(x*3,y*7);
