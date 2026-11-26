@@ -19,7 +19,7 @@ from pb_guided_plan_review import (
 from pb_native_page_frame import native_page_frame
 
 _PRODUCER = "pb_layered_wall_doorway_room_ring_shadow.build_layered_wall_doorway_room_rings"
-_GEOMETRY = ("topology", "room_faces", "opening_hosts", "floor_areas",
+_GEOMETRY = ("topology", "room_faces", "opening_hosts", "exclusions", "floor_areas",
              "ceiling_areas", "net_wall_areas", "finishes", "costing", "model")
 _METRIC = ("scale", "room_faces", "opening_dimensions", "floor_areas",
            "ceiling_areas", "net_wall_areas", "finishes", "costing", "model")
@@ -55,7 +55,7 @@ def _affected_stages(shapes, answers):
         if issue == "scale":
             stages.update(_METRIC)
         elif issue == "height":
-            stages.update(("height", "opening_dimensions", "net_wall_areas",
+            stages.update(("height", "opening_dimensions", "ceiling_areas", "net_wall_areas",
                            "finishes", "costing", "model"))
         elif issue == "finishes":
             stages.update(("finishes", "costing", "model"))
@@ -151,3 +151,47 @@ def build_native_review_packet(*, scope: ReviewScope, pdf_path, image_bytes,
         }
         packet["packet_sha256"] = _json_digest(packet)
         return packet
+
+
+def changed_review_stages(previous, current):
+    """Conservative affected-stage set for an update, including removed marks.
+
+    Full snapshot packets are not deltas. A downstream consumer must compare
+    against its own previously applied packet, not assume an empty new packet
+    means nothing has changed. Packet digests detect accidental mutation;
+    they do not authenticate user geometry or confer commercial authority.
+    """
+    def check(packet):
+        payload = {key: value for key, value in packet.items() if key != "packet_sha256"}
+        if (_json_digest(payload) != packet.get("packet_sha256")
+                or packet.get("schema_version") != 1
+                or packet.get("automatic_source_verified") is not False
+                or packet.get("commercial_projection_allowed") is not False
+                or packet.get("frozen_benchmark_allowed") is not False):
+            raise ValueError("Invalid review packet")
+    check(current)
+    if previous is None:
+        return list(current["affected_stage_candidates"])
+    check(previous)
+    if previous["scope"] != current["scope"]:
+        raise ValueError("Cannot carry corrections across different review scopes")
+    if previous["review_revision"] > current["review_revision"]:
+        raise ValueError("Cannot apply an older review revision")
+    if previous["packet_sha256"] == current["packet_sha256"]:
+        return []
+    if previous["review_revision"] == current["review_revision"]:
+        raise ValueError("Conflicting review packets at the same revision")
+    old = {c["correction_id"]: c for c in previous["corrections"]}
+    new = {c["correction_id"]: c for c in current["corrections"]}
+    changed = [c for key in old.keys() | new.keys()
+               if old.get(key) != new.get(key)
+               for c in (old.get(key), new.get(key)) if c is not None]
+    old_answers = previous["unbound_review_answers"]
+    new_answers = current["unbound_review_answers"]
+    stages = set(_affected_stages(changed, {}))
+    for key in old_answers.keys() | new_answers.keys():
+        if old_answers.get(key) != new_answers.get(key):
+            for answer in (old_answers.get(key), new_answers.get(key)):
+                if answer is not None:
+                    stages.update(_affected_stages([], {key: answer}))
+    return [stage for stage in _STAGE_ORDER if stage in stages]
