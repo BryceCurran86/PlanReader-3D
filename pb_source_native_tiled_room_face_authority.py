@@ -247,7 +247,13 @@ def _source_ocr_label(page: fitz.Page, polygon, bbox, room_label: str, ocr):
         clip = fitz.Rect(*bbox) + (-2.0, -2.0, 2.0, 2.0)
         pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72),
                               clip=clip, alpha=False)
-        image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+        try:
+            mode = "RGB" if pix.n == 3 else ("L" if pix.n == 1 else "RGBA")
+            image = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+            if mode != "RGB":
+                image = image.convert("RGB")
+        finally:
+            del pix
         matches = []
         for line in ocr.extract_lines(image, dpi=dpi):
             if line.confidence is None or line.confidence < .90:

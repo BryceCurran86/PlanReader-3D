@@ -35,7 +35,7 @@ def test_single_pass_fitz_page_matches_two_pass_and_calls_get_drawings_once() ->
                 assert a.get(k) == b.get(k)
 
         # Verify extract_native_page produces identical segments/rects
-        res = vg.extract_native_page(p, page_index=0)
+        res = vg.extract_native_page(p)
         assert len(res["segments"]) >= 5
         assert len(res["rects"]) >= 1
     finally:

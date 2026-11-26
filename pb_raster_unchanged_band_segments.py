@@ -57,6 +57,38 @@ def _closed_source_boxes(primitives):
     return tuple(sorted(boxes))
 
 
+from collections import OrderedDict
+import hashlib
+import threading
+
+_DECODED_PNG_BGR_CACHE_MAX = 4
+_DECODED_PNG_BGR_CACHE: "OrderedDict[str, np.ndarray]" = OrderedDict()
+_DECODED_PNG_BGR_CACHE_LOCK = threading.Lock()
+
+
+def _decode_png_bgr_cached(png: bytes) -> np.ndarray | None:
+    """Decode immutable PNG bytes to a read-only BGR ndarray with bounded SHA-256 LRU reuse."""
+    if not isinstance(png, (bytes, bytearray, memoryview)):
+        return None
+    raw = bytes(png) if not isinstance(png, bytes) else png
+    key = hashlib.sha256(raw).hexdigest()
+    with _DECODED_PNG_BGR_CACHE_LOCK:
+        cached = _DECODED_PNG_BGR_CACHE.get(key)
+        if cached is not None:
+            _DECODED_PNG_BGR_CACHE.move_to_end(key)
+            return cached
+    decoded = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+    if decoded is None:
+        return None
+    decoded.flags.writeable = False
+    with _DECODED_PNG_BGR_CACHE_LOCK:
+        _DECODED_PNG_BGR_CACHE[key] = decoded
+        _DECODED_PNG_BGR_CACHE.move_to_end(key)
+        while len(_DECODED_PNG_BGR_CACHE) > _DECODED_PNG_BGR_CACHE_MAX:
+            _DECODED_PNG_BGR_CACHE.popitem(last=False)
+    return decoded
+
+
 def detect_unchanged_terminal_band_segments(
     image_png: bytes, full_png: bytes, *, dpi: int,
     registration_scale: tuple[float, float] = (1.0, 1.0),
@@ -73,8 +105,7 @@ def detect_unchanged_terminal_band_segments(
         raise ValueError("positive integer DPI required")
     if type(shadow_inclusive_source_cells) is not bool:
         raise ValueError("shadow source-cell mode must be bool")
-    image, full = (cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
-                   for png in (image_png, full_png))
+    image, full = _decode_png_bgr_cached(image_png), _decode_png_bgr_cached(full_png)
     if image is None or full is None or image.shape != full.shape:
         raise ValueError("matched source render extents required")
     primitives = detect_raster_opening_source_primitives(
@@ -148,8 +179,7 @@ def detect_original_one_ended_ink_band_segments(
         raise ValueError("positive original-source integer DPI required")
     if not isinstance(source_closed_flank_boxes, (list, tuple)):
         raise ValueError("source-closed flank inventory required")
-    image, full = (cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
-                   for png in (image_png, full_png))
+    image, full = _decode_png_bgr_cached(image_png), _decode_png_bgr_cached(full_png)
     if image is None or full is None or image.shape != full.shape:
         raise ValueError("identical native-frame source renders required")
     found = set()
@@ -251,8 +281,7 @@ def detect_original_jamb_anchored_ink_segments(
         raise ValueError("positive integer original source DPI required")
     if not isinstance(original_source_jambs, (tuple, list)):
         raise ValueError("source-issued jamb inventory required")
-    source, full = (cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
-                    for png in (image_png, full_png))
+    source, full = _decode_png_bgr_cached(image_png), _decode_png_bgr_cached(full_png)
     if source is None or full is None or source.shape != full.shape:
         raise ValueError("different source and full render frames")
     emitted = set()
