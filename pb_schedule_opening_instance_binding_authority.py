@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import math
 import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
+from operator import is_
 from types import MappingProxyType
 from typing import Any
 
@@ -904,6 +906,49 @@ def _schedule_entries_for_page(
     return result
 
 
+def _read_trusted_text(text_integrity, published, opening):
+    """Every trusted text observation of the opening's snapshot, by page, and the native word addresses."""
+    trusted_by_page: dict[str, list[tuple[str, str, tuple[float, ...]]]] = {}
+    native_words: dict[str, tuple[str, str, int, int, int]] = {}
+    native_census_authenticated = bool(published.text_observation_ids)
+    for observation_id in published.text_observation_ids:
+        text_result = text_integrity.resolve_text(
+            ObservationSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                observation_id=observation_id,
+            )
+        )
+        if (
+            text_result.status is not EvidenceResolutionStatus.CORROBORATED
+            or text_result.trusted_text is None
+            or text_result.receipt is None
+        ):
+            native_census_authenticated = False
+            continue
+        receipt = text_result.receipt
+        if all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in (receipt.block_no, receipt.line_no, receipt.word_no)
+        ):
+            native_words[observation_id] = (
+                text_result.trusted_text, receipt.page_id,
+                receipt.block_no, receipt.line_no, receipt.word_no,
+            )
+        else:
+            native_census_authenticated = False
+        trusted_by_page.setdefault(receipt.page_id, []).append(
+            (
+                observation_id,
+                text_result.trusted_text,
+                tuple(float(value) for value in receipt.geometry),
+            )
+        )
+    return trusted_by_page, native_words, native_census_authenticated
+
+
 class ScheduleOpeningInstanceBindingAuthority:
     def __init__(
         self,
@@ -959,6 +1004,7 @@ class ScheduleOpeningInstanceBindingProducer:
         self._source_visibility_producer = source_visibility_producer
         self._rotated_native_schedule_shadow = rotated_native_schedule_shadow
         self._results: dict[_RecordKey, ScheduleOpeningInstanceBindingResult] = {}
+        self._text_reuse: dict | None = None
 
     @classmethod
     def from_source_visibility_producer(
@@ -972,6 +1018,36 @@ class ScheduleOpeningInstanceBindingProducer:
             rotated_native_schedule_shadow=rotated_native_schedule_shadow,
             _seal=_BINDING_PRODUCER_SEAL,
         )
+
+    @contextmanager
+    def reusing_page_text(self) -> Iterator["ScheduleOpeningInstanceBindingProducer"]:
+        """Within this block, publish_scope reads a snapshot's trusted text once for all the openings it publishes.
+
+        For a loop that publishes many openings with nothing else running between them. Before each reuse the snapshot and every
+        text receipt must be the same objects as when the text was read, otherwise it is read again. Outside the block, and for
+        direct calls, nothing changes.
+        """
+        if self._text_reuse is not None:
+            yield self
+            return
+        self._text_reuse = {}
+        try:
+            yield self
+        finally:
+            self._text_reuse = None
+
+    def _trusted_text(self, text_integrity, published, opening):
+        if self._text_reuse is None:
+            return _read_trusted_text(text_integrity, published, opening)
+        key = (opening.document_id, opening.revision_id, opening.source_sha256, opening.snapshot_id)
+        receipts = text_integrity.receipt_objects(opening.snapshot_id, published.text_observation_ids)
+        kept = self._text_reuse.get(key)
+        if kept is not None and kept[0] is published and len(kept[1]) == len(receipts) and all(map(is_, kept[1], receipts)):
+            return kept[2]
+        text = _read_trusted_text(text_integrity, published, opening)
+        # The receipts are the ones seen before reading, so a change during the read forces a re-read next time.
+        self._text_reuse[key] = (published, receipts, text)
+        return text
 
     def publish_scope(
         self,
@@ -1058,44 +1134,9 @@ class ScheduleOpeningInstanceBindingProducer:
                 ),
             )
 
-        trusted_by_page: dict[str, list[tuple[str, str, tuple[float, ...]]]] = {}
-        native_words: dict[str, tuple[str, str, int, int, int]] = {}
-        native_census_authenticated = bool(published.text_observation_ids)
-        for observation_id in published.text_observation_ids:
-            text_result = text_integrity.resolve_text(
-                ObservationSelector(
-                    document_id=opening.document_id,
-                    revision_id=opening.revision_id,
-                    source_sha256=opening.source_sha256,
-                    snapshot_id=opening.snapshot_id,
-                    observation_id=observation_id,
-                )
-            )
-            if (
-                text_result.status is not EvidenceResolutionStatus.CORROBORATED
-                or text_result.trusted_text is None
-                or text_result.receipt is None
-            ):
-                native_census_authenticated = False
-                continue
-            receipt = text_result.receipt
-            if all(
-                isinstance(value, int) and not isinstance(value, bool) and value >= 0
-                for value in (receipt.block_no, receipt.line_no, receipt.word_no)
-            ):
-                native_words[observation_id] = (
-                    text_result.trusted_text, receipt.page_id,
-                    receipt.block_no, receipt.line_no, receipt.word_no,
-                )
-            else:
-                native_census_authenticated = False
-            trusted_by_page.setdefault(receipt.page_id, []).append(
-                (
-                    observation_id,
-                    text_result.trusted_text,
-                    tuple(float(value) for value in receipt.geometry),
-                )
-            )
+        trusted_by_page, native_words, native_census_authenticated = self._trusted_text(
+            text_integrity, published, opening,
+        )
 
         contained_tag_candidates: list[tuple[str, str, BBox, str]] = []
         for observation_id, text, geometry in trusted_by_page.get(opening.page_id, []):

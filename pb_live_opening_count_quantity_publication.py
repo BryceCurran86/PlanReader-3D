@@ -169,61 +169,62 @@ def publish_live_authenticated_opening_count_quantities(
     binding_results = {}
     physical_source_receipts: dict[str, tuple[str, ...]] = {}
     seen_physical_opening_ids: set[str] = set()
-    for observation_id in semantic_record.representative_observation_ids:
-        opening_selector = ObservationSelector(
-            document_id=published.revision.document_id,
-            revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256,
-            snapshot_id=published.snapshot.snapshot_id,
-            observation_id=str(observation_id),
-        )
-        existence = physical.prove_existence(opening_selector)
-        opening = existence.existence_record
-        if (
-            existence.status is not EvidenceResolutionStatus.CORROBORATED
-            or opening is None
-        ):
-            # The upstream semantic inventory says this source scope is
-            # complete. Losing one of its candidate physical members would
-            # make a matching schedule count for a smaller subset look FIRM.
-            # Fail closed for the entire mark inventory, not the one member.
-            return ()
-        # A complete source semantic universe may not collapse two distinct
-        # existence observations into one identical opening identity by
-        # dictionary overwrite. Preserve unresolved universes as ABSTAIN.
-        if (
-            type(opening.record_id) is not str
-            or not opening.record_id.strip()
-            or opening.record_id in seen_physical_opening_ids
-        ):
-            return ()
-        # The producer's source-owned physical opening must belong to this
-        # original document, revision, snapshot, page and observation receipt.
-        if (
-            opening.document_id != published.revision.document_id
-            or opening.revision_id != published.revision.revision_id
-            or opening.source_sha256 != published.revision.source_sha256
-            or opening.snapshot_id != published.snapshot.snapshot_id
-            or opening.page_id not in semantic_pages
-            or not _authentic_source_id_universe(opening.source_observation_ids)
-            or observation_id not in opening.source_observation_ids
-        ):
-            return ()
-        seen_physical_opening_ids.add(opening.record_id)
-        physical_source_receipts[opening.record_id] = tuple(opening.source_observation_ids)
-        selector = ScheduleOpeningInstanceBindingSelector(
-            document_id=opening.document_id,
-            revision_id=opening.revision_id,
-            source_sha256=opening.source_sha256,
-            snapshot_id=opening.snapshot_id,
-            decision_scope_id=scope_id,
-            opening_record_id=opening.record_id,
-        )
-        binding_selectors[opening.record_id] = selector
-        binding_results[opening.record_id] = binding_producer.publish_scope(
-            opening_selector=opening_selector,
-            decision_scope_id=scope_id,
-        )
+    with binding_producer.reusing_page_text():
+        for observation_id in semantic_record.representative_observation_ids:
+            opening_selector = ObservationSelector(
+                document_id=published.revision.document_id,
+                revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256,
+                snapshot_id=published.snapshot.snapshot_id,
+                observation_id=str(observation_id),
+            )
+            existence = physical.prove_existence(opening_selector)
+            opening = existence.existence_record
+            if (
+                existence.status is not EvidenceResolutionStatus.CORROBORATED
+                or opening is None
+            ):
+                # The upstream semantic inventory says this source scope is
+                # complete. Losing one of its candidate physical members would
+                # make a matching schedule count for a smaller subset look FIRM.
+                # Fail closed for the entire mark inventory, not the one member.
+                return ()
+            # A complete source semantic universe may not collapse two distinct
+            # existence observations into one identical opening identity by
+            # dictionary overwrite. Preserve unresolved universes as ABSTAIN.
+            if (
+                type(opening.record_id) is not str
+                or not opening.record_id.strip()
+                or opening.record_id in seen_physical_opening_ids
+            ):
+                return ()
+            # The producer's source-owned physical opening must belong to this
+            # original document, revision, snapshot, page and observation receipt.
+            if (
+                opening.document_id != published.revision.document_id
+                or opening.revision_id != published.revision.revision_id
+                or opening.source_sha256 != published.revision.source_sha256
+                or opening.snapshot_id != published.snapshot.snapshot_id
+                or opening.page_id not in semantic_pages
+                or not _authentic_source_id_universe(opening.source_observation_ids)
+                or observation_id not in opening.source_observation_ids
+            ):
+                return ()
+            seen_physical_opening_ids.add(opening.record_id)
+            physical_source_receipts[opening.record_id] = tuple(opening.source_observation_ids)
+            selector = ScheduleOpeningInstanceBindingSelector(
+                document_id=opening.document_id,
+                revision_id=opening.revision_id,
+                source_sha256=opening.source_sha256,
+                snapshot_id=opening.snapshot_id,
+                decision_scope_id=scope_id,
+                opening_record_id=opening.record_id,
+            )
+            binding_selectors[opening.record_id] = selector
+            binding_results[opening.record_id] = binding_producer.publish_scope(
+                opening_selector=opening_selector,
+                decision_scope_id=scope_id,
+            )
 
     if (
         not binding_selectors

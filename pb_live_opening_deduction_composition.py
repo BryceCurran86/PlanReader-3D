@@ -131,20 +131,21 @@ def compose_live_opening_deductions(
     traces_by_opening = {
         trace.opening_identity_id: trace for trace in physical_void_composition.traces
     }
-    for opening_id, trace in traces_by_opening.items():
-        binding_selector = wall_opening_composition.binding_selectors.get(opening_id)
-        if binding_selector is None:
-            continue
-        schedule.publish_scope(
-            opening_selector=ObservationSelector(
-                document_id=published.revision.document_id,
-                revision_id=published.revision.revision_id,
-                source_sha256=published.revision.source_sha256,
-                snapshot_id=published.snapshot.snapshot_id,
-                observation_id=trace.representative_observation_id,
-            ),
-            decision_scope_id=binding_selector.decision_scope_id,
-        )
+    with schedule.reusing_page_text():
+        for opening_id, trace in traces_by_opening.items():
+            binding_selector = wall_opening_composition.binding_selectors.get(opening_id)
+            if binding_selector is None:
+                continue
+            schedule.publish_scope(
+                opening_selector=ObservationSelector(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=published.snapshot.snapshot_id,
+                    observation_id=trace.representative_observation_id,
+                ),
+                decision_scope_id=binding_selector.decision_scope_id,
+            )
 
     selectors: list[OpeningDeductionApplicabilitySelector] = []
     for opening_id, trace in sorted(traces_by_opening.items()):
