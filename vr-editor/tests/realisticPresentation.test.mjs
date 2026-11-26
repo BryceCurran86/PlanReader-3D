@@ -11,7 +11,7 @@ import {sameFixtureFamily} from "../src/contextFinishes.ts";
 import {createPresentationGarden} from "../src/presentationGarden.ts";
 test("physical textures are deterministic distinct bounded albedo and relief maps",()=>{
  for(const pattern of ["plaster","plank","tile","woven","fleck","stone","roof"]){
-  const pixels=detailPixels(pattern);assert.equal(pixels.albedo.length,128*128*4);
+  const pixels=detailPixels(pattern);assert.equal(pixels.albedo.length,256*256*4);
   assert.deepEqual(pixels,detailPixels(pattern));assert.notDeepEqual(pixels.albedo,pixels.relief);
   assert.ok(pixels.albedo.every((v,i)=>i%4!==3||v===255));
  }
@@ -35,7 +35,7 @@ test("three quality modes retain headset caps and offer distinct realism budgets
  assert.equal(realismBudget("performance",true).detail,false);
  assert.equal(realismBudget("balanced",true).detail,true);
  assert.equal(realismBudget("high",true).shadows,true);
- assert.equal(realismBudget("balanced",true).shadows,false);
+ assert.equal(realismBudget("balanced",true).shadows,true);
  assert.ok(realismBudget("high",true).shadowRefreshMs>=1000);
 });
 test("garden remains isolated and uses fixed draw-call budget",()=>{

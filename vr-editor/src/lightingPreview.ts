@@ -11,3 +11,13 @@ export function nearestPreviewLights<T extends {id:string;position:readonly [num
  if(!eye.every(Number.isFinite))return [];
  return fixtures.filter(f=>f.position.every(Number.isFinite)).map(f=>({f,d:distance(f.position)})).filter(x=>x.d<=100).sort((a,b)=>a.d-b.d||a.f.id.localeCompare(b.f.id)).slice(0,MAX_PREVIEW_LIGHTS).map(x=>x.f);
 }
+
+/** Illustrative fixture beam profiles, not certified photometric ratings. */
+export function previewBeam(shape:string){
+ switch(shape){
+ case "downlight":return {candela:85,angle:Math.PI/4,penumbra:.62,range:6};
+ case "sconce":return {candela:45,angle:Math.PI/2.5,penumbra:.8,range:4};
+ case "pendant":return {candela:65,angle:Math.PI/2.1,penumbra:.8,range:6};
+ default:return {candela:55,angle:Math.PI/2.1,penumbra:.9,range:6};
+ }
+}

@@ -6,10 +6,12 @@ import type { EditorObject, SceneManifest } from "./types";
 import { studyColor } from "./finishStudy";
 import { safeDrafts } from "./reviewDraft";
 import type { DraftHistory, WallDraft } from "./reviewDraft";
-import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget,adaptiveRenderQuality } from "./visualRealism";
+import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget,adaptiveRenderQuality,architecturalShadowExtent } from "./visualRealism";
 import {createMaterialDetailLibrary,physicalUV} from "./materialDetail";
 import {createPresentationGarden} from "./presentationGarden";
 import {RoomEnvironment} from "three/addons/environments/RoomEnvironment.js";
+import {RGBELoader} from "three/addons/loaders/RGBELoader.js";
+import {architecturalAssetUrl} from "./architecturalAssets";
 import type { LightingMood, RenderQuality } from "./visualRealism";
 import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
@@ -56,7 +58,7 @@ import { budgetHeadline } from "./vrAssemblyStudy";
 import { defaultWallAssembly, wallAssembly, wallDimensionText, profileDetails } from "./wallProfiles";
 import {chooseWallAim,wallAimWithin,MAGNET_RELEASE} from "./wallMagnet";
 import type {WallAim,WallTarget} from "./wallMagnet";
-import {displayedMenuAction,thumbstickSector} from "./toolWheelInput";
+import {displayedMenuAction,thumbstickSector,adjacentMenuButton} from "./toolWheelInput";
 import {createWallTextureLibrary} from "./wallTextures";
 import {layerVisible,editableSurfaceVisible,draftWallLayerVisible,cycleLayer,itemLayerVisible} from "./constructionLayers";
 import type {LayerOverrides} from "./constructionLayers";
@@ -365,6 +367,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const environmentMap=pmrem.fromScene(lightingRoom,.04);
     lightingRoom.dispose();pmrem.dispose();
     scene.environment=environmentMap.texture;scene.environmentIntensity=.65;
+    let outdoorHdr:THREE.DataTexture|null=null,disposedScene=false;
+    const fallbackSky=new THREE.Color(initialPreset.background);
+    // A source/example inspection scene uses the inexpensive neutral studio map.
+    // The photographic exterior is illustrative only for the editable starter house.
+    const architecturalStarter=manifest.scope.workspaceId==="starter-house-local";
+    if(architecturalStarter)void new RGBELoader().loadAsync(architecturalAssetUrl("outdoor.hdr")).then(hdr=>{
+      if(disposedScene){hdr.dispose();return;}
+      hdr.mapping=THREE.EquirectangularReflectionMapping;outdoorHdr=hdr;renderer.domElement.dataset.architecturalEnvironment="loaded";
+    }).catch(error=>{if(!disposedScene)renderer.domElement.dataset.architecturalEnvironment="failed";console.error("Local architectural HDR unavailable",error);});
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local-floor");
     renderer.xr.setFramebufferScaleFactor(0.8);
@@ -417,8 +428,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let lastMenuSignature="",lastMenuDraw=0,menuPose:"radial"|"panel"|null=null,lastMenuHover=-2;
     // Only a layout actually displayed can authorize a menu action.
     let displayedMenuLayout: ReturnType<typeof menuLayout> | null = null;
-    let stickNeedsNeutral=false;
-    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    let stickNeedsNeutral=false,menuFocus=-1,menuStickArmed=true,menuStickFocus=false;
+    const closeTools=()=>{toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(contextual=false){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
@@ -427,11 +438,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         activeGrip=null;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;
         const right=inputSources.findIndex(source=>source?.handedness==="right"&&source.targetRayMode==="tracked-pointer");
         if(contextual&&right>=0&&interaction.current.mode==="inspect"&&!resize.current.projection&&!resize.current.enabled){
-          aimController(controllers[right]);finishContext=itemView.contextAt(raycaster);
+          syncItems();aimController(controllers[right]);finishContext=itemView.contextAt(raycaster);
           if(finishContext)finishGroup=initialFinishGroup(finishContext);
           else{closeTools();reportTool("Aim at a wall, floor, door or fitting, then squeeze right grip.");return;}
         }
-        displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;
+        displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuPose=null;lastMenuDraw=0;lastMenuHover=-2;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;
       }
       else closeTools();
     }
@@ -514,6 +525,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           radial,layersOpen,layers:construction.current.layers,liningBoard:construction.current.liningBoard,liningHidden:!!selectedDraftId&&inspectedWall===selectedDraftId,
         });
       if(!layout.radial&&!angleTools&&!budgetOpen && !numberPad && !helpOpen && liveBudget.current.summary.status!=="disabled")layout.title+=" · "+budgetHeadline(liveBudget.current.summary);
+      if(!layout.radial&&interaction.current.toolFeedback)layout.note=interaction.current.toolFeedback;
       return layout;
     }
     function menuAction(choice: MenuAction) {
@@ -533,7 +545,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if(choice.action==="apply"&&finishGroup&&choice.itemId&&contextChoices(finishContext,finishGroup).some(i=>i.id===choice.itemId)){
           const existing=finishContext.entry&&getCatalogueItem(finishContext.entry.itemId);
           itemControls.current.onAction({kind:"apply-finish",itemId:choice.itemId,hit:finishContext.hit,...(existing?.visual.kind==="fixture"?{replaceId:finishContext.entry!.id}:{})});
-          closeTools();
+          // Keep the selected face and palette open for repeated comparisons.
         }
         return;
       }
@@ -1454,6 +1466,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       if(!toolsOpen)return null;
       const rayHit=buildOverlay.menuHit(raycaster,layout);
       if(rayHit?.action)return rayHit;
+      if(!layout.radial&&menuStickFocus&&menuFocus>=0&&!layout.buttons[menuFocus]?.disabled&&layout.buttons[menuFocus])return {index:menuFocus,action:layout.buttons[menuFocus].action};
       if(layout.radial){
         const right=inputSources.find(s=>s?.handedness==="right");
         const i=thumbstickSector(standardThumbstick(right));
@@ -1462,17 +1475,21 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       return rayHit;
     }
     function activateMenu(choice:MenuAction){
-      displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;
+      // Never leave a stale hit map live while changing a submenu.
+      displayedMenuLayout=null;cachedMenu=null;lastMenuLayoutTime=-Infinity;menuFocus=-1;menuStickFocus=false;menuStickArmed=false;
+      lastMenuSignature="";lastMenuHover=-2;
+      buildOverlay.hideMenu();
       menuAction(choice);
       if(choice.area==="build"||choice.area==="done"||choice.area==="footprint"||(choice.area==="items"&&choice.action.kind==="choose")||(choice.area==="draft"&&(choice.action==="move"||choice.action==="stretch"))||(choice.area==="opening"&&choice.action==="drag"))closeTools();
     }
     function activateDisplayedMenu(current: ReturnType<typeof menuLayout>) {
       const shown=displayedMenuLayout;
-      if(!shown)return;
+      if(!shown)return false;
       const hit=menuTarget(shown);
-      if(!hit?.action)return;
+      if(!hit?.action)return false;
       const action=displayedMenuAction(shown,current,hit.index);
-      if(action)activateMenu(action);
+      if(!action)return false;
+      activateMenu(action);return true;
     }
     function menuKey(layout: ReturnType<typeof menuLayout>) {
       const hit=menuTarget(layout);
@@ -1485,7 +1502,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const layout = menuLayout("");
         menuConsumed[index]=true;
         // The first trigger press activates one button. Release never needs to hit it again.
-        activateDisplayedMenu(layout);
+        if(!activateDisplayedMenu(layout))reportTool("Aim at a visible button, or move right stick to choose, then trigger.");
         return;
       }
       const menu = null;
@@ -1530,8 +1547,8 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       xrGestures[index] = null;
       if (gesture && completeDrag(gesture, index)) return;
       if(gesture?.direct&&"previous" in gesture){updateDraftSelection(gesture.previous.proposalId);select(null);reportTool("Selected draft "+gesture.kind+" · hold trigger and drag.");return;}
-      // Menu actions dispatch exclusively on selectstart.
-      if(toolsOpen)return;
+      // Native selectstart consumes its matching select; runtimes without start can use select.
+      if(toolsOpen){activateDisplayedMenu(menuLayout(""));return;}
       if ((toolsOpen&&(itemBrowser.open || stageMenuOpen || budgetOpen || layersOpen || wallProfilesOpen || helpOpen)) || resize.current.enabled) return;
       const item = itemControls.current.active;
       if (item) {
@@ -1746,7 +1763,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const disconnected1 = () => disconnect(1);
     const onSessionStart = () => {
       toolsOpen=false;ghostMode=false;displayedMenuLayout=null;menuPose=null;menuConsumed.fill(false);renderer.shadowMap.enabled=false;
-      reportTool("Left grip opens tools. Aim or use right stick, then trigger. Left stick walks when tools are closed.");
+      reportTool("Left grip: tools. Right grip while aiming: finishes. Aim or move right stick, then trigger.");
       elevatedReturn=null;navBase=null;navOffset=identityNavOffset();turnArmed=true;lastNavTime=0;
       cancelPointer();
       lastController = -1;
@@ -1849,6 +1866,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     const lightEye=new THREE.Vector3();
     let lastQuality: RenderQuality | null = null;
     let shadowKey:readonly unknown[]=[];let lastShadowRefresh=-Infinity;
+    let shadowHouseBounds:{minX:number;maxX:number;minZ:number;maxZ:number}|null=null;
     let materialBudgetKey:readonly unknown[]=[];
     let lastPresenting=false;
     let lastDetail: SurfaceDetail | null = null;
@@ -2020,11 +2038,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       let activeDimensionRay=false;
       if (renderer.xr.isPresenting) {
         // Cache the menu model and avoid large canvas uploads on every XR frame.
-        if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=250)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
+        if(toolsOpen&&(!cachedMenu||now-lastMenuLayoutTime>=100)){cachedMenu=menuLayout(prompt);lastMenuLayoutTime=now;}
         const layout=toolsOpen?cachedMenu:null;
         if(layout){
           const hitLayout=displayedMenuLayout??layout;
-          if(menuPose===null)buildOverlay.sizeMenu(hitLayout);
+          if(menuPose===null||!displayedMenuLayout)buildOverlay.sizeMenu(hitLayout);
           const pose=hitLayout.radial?"radial":"panel";
           // Keep one world-space anchor through submenu transitions. Never
           // attach the tool surface to a moving controller during selection.
@@ -2038,6 +2056,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         const active = favoured >= 0 ? favoured : inputSources.findIndex(isPointer);
         if (active >= 0) aimController(controllers[active]);
         activeDimensionRay=active>=0&&!buildState.tool&&!item&&!toolsOpen;
+        if(toolsOpen&&displayedMenuLayout&&!displayedMenuLayout.radial){
+          const stick=standardThumbstick(inputSources.find(s=>s?.handedness==="right"));
+          if(Math.hypot(...stick)<.25)menuStickArmed=true;
+          else if(menuStickArmed&&Math.hypot(...stick)>.6){menuFocus=adjacentMenuButton(displayedMenuLayout,menuFocus,stick[0],stick[1]);menuStickFocus=true;menuStickArmed=false;}
+        }
         const hover=toolsOpen&&active>=0&&displayedMenuLayout?menuTarget(displayedMenuLayout):null;
         const hostTool=buildState.tool==="door"||buildState.tool==="window"||buildState.tool==="frame"||buildState.tool==="move"||buildState.tool==="stretch"||buildState.tool==="opening-move";
         const canLock=active>=0&&!hover&&(!buildState.tool||hostTool)&&!item&&!toolsOpen&&!resize.current.enabled&&!teleportSettings.current.teleportMode;
@@ -2070,15 +2093,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         if (layout && !simpleHome && !finishContext && !itemBrowser.open && !stageMenuOpen && !budgetOpen && !layersOpen && !wallProfilesOpen && !helpOpen && !selectedDraftWall())
           layout.note = itemPick?.hit ? "Pull the trigger to place." :
           itemPick?.reason ?? buildTarget?.hint ?? prompt;
-        if(displayedMenuLayout&&!displayedMenuLayout.radial)buildOverlay.highlightMenu(displayedMenuLayout,hover?.index??-1);
-        if(layout&&(!displayedMenuLayout||now-lastMenuDraw>=250)){
+        if(layout&&(!displayedMenuLayout||now-lastMenuDraw>=100)){
           const signature=JSON.stringify(layout);
           lastMenuDraw=now;
-          if(signature!==lastMenuSignature||!displayedMenuLayout||(layout.radial&&(hover?.index??-1)!==lastMenuHover)){
+          if(signature!==lastMenuSignature||!displayedMenuLayout||(hover?.index??-1)!==lastMenuHover){
             buildOverlay.sizeMenu(layout);
-            buildOverlay.drawMenu(layout,hover?.index??-1);
-            lastMenuSignature=signature;displayedMenuLayout=layout;
-            lastMenuDraw=now;lastMenuHover=hover?.index??-1;
+            if(buildOverlay.drawMenu(layout,hover?.index??-1)){
+              buildOverlay.showMenu();lastMenuSignature=signature;displayedMenuLayout=layout;
+              lastMenuDraw=now;lastMenuHover=hover?.index??-1;
+            }else{displayedMenuLayout=null;buildOverlay.hideMenu();}
           }
         }
       } else {
@@ -2166,13 +2189,15 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
       }
       const outdoor=visualSettings.current.outdoor&&!topEditing();
-      environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z);
+      const photographicSky=outdoor&&activeMood==="daylight"&&outdoorHdr!==null&&activeQuality!=="performance";
+      environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z,photographicSky);
       const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
       garden.update(gardenBounds,outdoor&&budget.landscape);
+      if(gardenBounds&&shadowHouseBounds!==gardenBounds){shadowHouseBounds=gardenBounds;lightCenter.set((gardenBounds.minX+gardenBounds.maxX)/2,1.2,(gardenBounds.minZ+gardenBounds.maxZ)/2);const extent=architecturalShadowExtent(gardenBounds.maxX-gardenBounds.minX,gardenBounds.maxZ-gardenBounds.minZ);const sc=sunlight.shadow.camera;sc.left=sc.bottom=-extent;sc.right=sc.top=extent;sc.near=.5;sc.far=80;sc.updateProjectionMatrix();sunlight.target.position.copy(lightCenter);scene.add(sunlight.target);sunlight.position.set(...VISUAL_PRESETS[activeMood].sunPosition).add(lightCenter);shadowKey=[];}
       const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items,renderer.xr.isPresenting];
       if(!nextMaterialKey.every((v,i)=>v===materialBudgetKey[i])){
         materialBudgetKey=nextMaterialKey;
-        for(const layer of [wallAdditionLayer,shellGroup])layer.traverse(obj=>{if(obj instanceof THREE.Mesh&&obj.material instanceof THREE.MeshStandardMaterial){const m=obj.material;const original=m.userData.originalBump??m.bumpMap;if(original)m.userData.originalBump=original;const map=budget.detail?original??null:null;if(m.bumpMap!==map){m.bumpMap=map;m.needsUpdate=true;}}});
+        for(const layer of [wallAdditionLayer,shellGroup])layer.traverse(obj=>{if(obj instanceof THREE.Mesh&&obj.material instanceof THREE.MeshStandardMaterial){const m=obj.material;const original=m.userData.originalBump??m.bumpMap;if(original)m.userData.originalBump=original;const map=budget.detail?original??null:null;if(m.bumpMap!==map){m.bumpMap=map;m.needsUpdate=true;}const originalNormal=m.userData.originalNormal??m.normalMap;if(originalNormal)m.userData.originalNormal=originalNormal;const normal=budget.detail?originalNormal??null:null;if(m.normalMap!==normal){m.normalMap=normal;m.needsUpdate=true;}}});
       }
       grid.visible = activeInspection.showGrid&&!outdoor;
       const useShadows=activeInspection.showShadows&&budget.shadows;
@@ -2184,7 +2209,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       if (lastMood !== activeMood) {
         const preset = VISUAL_PRESETS[activeMood];
-        scene.background = new THREE.Color(preset.background);
+        fallbackSky.setHex(preset.background);
         ambient.color.setHex(preset.ambientSky);
         ambient.groundColor.setHex(preset.ambientGround);
         ambient.intensity = preset.ambientIntensity;
@@ -2212,8 +2237,11 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
         }
         lastDetail = activeDetail;
       }
+      scene.background=photographicSky?outdoorHdr:fallbackSky;
+      const desiredEnvironment=budget.detail?(activeMood==="daylight"&&outdoorHdr?outdoorHdr:environmentMap.texture):null;
+      if(scene.environment!==desiredEnvironment)scene.environment=desiredEnvironment;
+      scene.environmentIntensity=budget.environmentIntensity*(activeMood==="daylight"&&outdoorHdr?0.6:1);
       if (lastQuality !== activeQuality||lastPresenting!==renderer.xr.isPresenting) {
-        scene.environment=budget.detail?environmentMap.texture:null;scene.environmentIntensity=budget.environmentIntensity;
         const size = shadowMapSize(activeQuality);
         sunlight.shadow.mapSize.set(size, size);
         if (sunlight.shadow.map) {
@@ -2449,6 +2477,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
           materials.forEach(m => m.dispose());
         }
       });
+      disposedScene=true;outdoorHdr?.dispose();
       roughTile.dispose();wallTextures.dispose();details.dispose();environment.dispose();garden.dispose();environmentMap.dispose();
       buildOverlay.dispose();
       planOverview.dispose();

@@ -39,11 +39,11 @@ export function createWallTextureLibrary(){
    const pattern=exteriorPattern(profile);if(!pattern)return null;
    let texture=cache.get(pattern);
    if(!texture){
-    texture=new THREE.DataTexture(patternPixels(pattern),128,128,THREE.RGBAFormat);
+    texture=new THREE.DataTexture(patternPixels(pattern,256),256,256,THREE.RGBAFormat);
     texture.colorSpace=THREE.SRGBColorSpace;
     texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
-    texture.magFilter=THREE.NearestFilter;
-    texture.minFilter=THREE.NearestMipmapLinearFilter;
+    texture.magFilter=THREE.LinearFilter;
+    texture.minFilter=THREE.LinearMipmapLinearFilter;texture.anisotropy=4;
     texture.generateMipmaps=true;texture.needsUpdate=true;cache.set(pattern,texture);
    }
    return {texture,repeat:patternRepeat(pattern)};

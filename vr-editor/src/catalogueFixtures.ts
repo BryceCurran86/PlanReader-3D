@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import {RoundedBoxGeometry} from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { ItemTarget, ItemVisual } from "./itemCatalogue";
 
 type FixtureSpec = Extract<ItemVisual, { kind: "fixture" }>;
@@ -24,6 +25,9 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
   }
   function box(w: number, h: number, d: number, x: number, y: number, z: number, material = body) {
     return mesh(new THREE.BoxGeometry(w, h, d), x, y, z, material);
+  }
+  function softBox(w:number,h:number,d:number,x:number,y:number,z:number,material=body){
+    return mesh(new RoundedBoxGeometry(w,h,d,2,Math.min(.035,w/4,h/4,d/4)),x,y,z,material);
   }
   function cylinder(radius: number, depth: number, x: number, y: number, z: number, material = body) {
     return mesh(new THREE.CylinderGeometry(radius, radius, depth, 16), x, y, z, material);
@@ -158,11 +162,17 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
       for (let index = 0; index < bowls; index++) {
         const x = ((index + 0.5) / bowls - 0.5) * w;
         const span = w / bowls;
-        oval(span, h, d, x, h / 2, 0);
-        oval(span * 0.83, h * 0.035, d * 0.78, x, h * 0.81, 0, detail);
-        oval(span * 0.76, h * 0.04, d * 0.71, x, h * 0.832, 0, white);
-        cylinder(Math.min(0.033, span * 0.09), 0.002, x, h * 0.857, 0, detail);
-        cylinder(Math.min(.019,span*.05),.003,x,h*.859,0,body);
+        // Continuous outer shell, rolled rim and actual recessed bowl. No flat
+        // dark ellipse pretending to be a cavity. Nominal catalogue envelope retained.
+        const bowl=ceramicBowlGeometry(span,h,d);
+        const shell=mesh(bowl,x,0,0,body);shell.name="Ceramic bowl shell";
+        const drain=cylinder(Math.min(.028,span*.065),.003,x,h*.19+.002,0,detail);
+        drain.name="Bowl drain";
+        const wasteRadius=Math.min(.028,span*.065);
+        const collar=mesh(new THREE.TorusGeometry(wasteRadius*.82,Math.min(.002,wasteRadius*.12),8,24),x,h*.19+.004,0,white);
+        collar.rotation.x=-Math.PI/2;collar.name="Waste flange";
+        const plug=cylinder(Math.min(.017,span*.04),.004,x,h*.19+.004,0,white);
+        plug.name="Waste plug";
       }
       break;
     }
@@ -183,16 +193,16 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
       }
       break;
     case "sofa":
-      box(w*.94,h*.20,d*.9,0,h*.17,0);
-      box(w*.94,h*.57,d*.18,0,h*.67,-d*.39);
-      for(let i=0;i<3;i++){const x=(i-1)*w*.28;box(w*.27,h*.19,d*.68,x,h*.40,d*.04);box(w*.27,h*.35,d*.13,x,h*.65,-d*.27);}
-      for(const sign of [-1,1]){box(w*.105,h*.43,d*.91,sign*w*.447,h*.48,0);for(const z of [-1,1])box(.045,.11,.045,sign*w*.43,.055,z*d*.39,detail);}
+      softBox(w*.94,h*.20,d*.9,0,h*.17,0);
+      softBox(w*.94,h*.57,d*.18,0,h*.67,-d*.39);
+      for(let i=0;i<3;i++){const x=(i-1)*w*.28;softBox(w*.27,h*.19,d*.68,x,h*.40,d*.04);softBox(w*.27,h*.35,d*.13,x,h*.65,-d*.27);}
+      for(const sign of [-1,1]){softBox(w*.105,h*.43,d*.91,sign*w*.447,h*.48,0);for(const z of [-1,1])box(.045,.11,.045,sign*w*.43,.055,z*d*.39,detail);}
       break;
     case "bed":
       box(w,h*.26,d,0,h*.19,0,detail);
-      box(w*.98,h*.27,d*.98,0,h*.45,0,white);
-      box(w*.98,h*.075,d*.71,0,h*.62,d*.14);
-      box(w,h*.8,.07,0,h*.60,-d*.48);
+      softBox(w*.98,h*.27,d*.98,0,h*.45,0,white);
+      softBox(w*.98,h*.075,d*.71,0,h*.62,d*.14);
+      softBox(w,h*.8,.07,0,h*.60,-d*.48);
       for(const sign of [-1,1])oval(w*.41,.12,d*.22,sign*w*.25,h*.65,-d*.30,white);
       break;
     case "coffee-table":
@@ -221,4 +231,16 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
   const used = new Set(group.children.flatMap(part => part instanceof THREE.Mesh ? [part.material] : []));
   for (const material of [body, detail, white, lens]) if (!used.has(material)) material.dispose();
   return { group, worktop };
+}
+
+/** Bounded, closed ring shell, suitable for a bath or basin without a costly CSG pass. */
+export function ceramicBowlGeometry(w:number,h:number,d:number){
+ const rings:[[number,number],[number,number],[number,number],[number,number],[number,number],[number,number],[number,number],[number,number]]=[[.001,0],[.72,0],[.94,.18],[1,.93],[.98,1],[.88,.97],[.65,.24],[.001,.19]];
+ const segments=40,positions:number[]=[],indices:number[]=[];
+ for(const [radius,y] of rings)for(let i=0;i<segments;i++){const t=i*2*Math.PI/segments;positions.push(Math.cos(t)*w*.5*radius,y*h,Math.sin(t)*d*.5*radius);}
+ for(let j=0;j<rings.length-1;j++)for(let i=0;i<segments;i++){const n=(i+1)%segments,a=j*segments+i,b=j*segments+n,c=(j+1)*segments+i,e=(j+1)*segments+n;indices.push(a,c,b,b,c,e);}
+ // Close tiny centre holes at the bottom and inside the bowl.
+ const bottom=positions.length/3;positions.push(0,0,0);const inner=positions.length/3;positions.push(0,h*.19,0);
+ for(let i=0;i<segments;i++){const n=(i+1)%segments;indices.push(bottom,i,n,inner,(rings.length-1)*segments+n,(rings.length-1)*segments+i);}
+ const g=new THREE.BufferGeometry();g.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));g.setIndex(indices);g.computeVertexNormals();return g;
 }
