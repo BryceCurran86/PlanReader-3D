@@ -167,7 +167,7 @@ def editor_shapes(shapes):
     return out
 
 
-def normalise_answer(issue, decision, note, dimension_mm=None):
+def normalise_answer(issue, decision, note, dimension_mm=None, correction_id=None):
     if issue not in ISSUES or decision not in DECISIONS:
         raise ValueError("Unknown review question or decision")
     if not isinstance(note, str) or not note.strip() or len(note) > 2000:
@@ -178,7 +178,14 @@ def normalise_answer(issue, decision, note, dimension_mm=None):
                 not math.isfinite(dimension_mm) or dimension_mm <= 0 or
                 dimension_mm > 1_000_000):
             raise ValueError("Enter a positive relevant dimension in mm")
-    return {"decision": decision, "note": note.strip(), "dimension_mm": dimension_mm}
+    result = {"decision": decision, "note": note.strip(), "dimension_mm": dimension_mm}
+    if correction_id is not None:
+        if (issue != "scale" or decision != "correction_recorded"
+                or dimension_mm is None or type(correction_id) is not str
+                or not _ID.fullmatch(correction_id)):
+            raise ValueError("Select a valid dimension witness for the scale answer")
+        result["correction_id"] = correction_id
+    return result
 
 
 def _ensure(conn):
@@ -234,6 +241,14 @@ def save_review(connect, scope, *, expected_revision, shapes, answers):
         raise ValueError("Invalid review answers")
     clean_answers = {issue: normalise_answer(issue, **answer)
                      for issue, answer in answers.items()}
+    # Missing targets are never silently transferred to another line.
+    scale = clean_answers.get("scale", {})
+    if scale.get("correction_id") is not None:
+        selected = [shape for shape in clean_shapes
+                    if shape["id"] == scale["correction_id"]
+                    and shape["category"] == "dimension_witness"]
+        if len(selected) != 1:
+            raise ValueError("Scale witness was removed; clear or reselect the scale answer")
     payload = json.dumps({
         "coordinate_frame": "displayed_image_percent",
         "authority": "user_review_draft",
