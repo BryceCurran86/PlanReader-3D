@@ -75,6 +75,9 @@ CROSS_VIEW_CEILING_FINISH_RCP_UNAVAILABLE = (
 CROSS_VIEW_CEILING_FINISH_NATIVE_BLOCK_UNAVAILABLE = (
     "cross_view_ceiling_finish_native_block_unavailable"
 )
+CROSS_VIEW_CEILING_FINISH_SPATIAL_MATERIAL_ONLY = (
+    "cross_view_ceiling_finish_spatial_viewport_material_only"
+)
 
 _PRODUCER_SEAL = object()
 _RECORD_SEAL = object()
@@ -208,8 +211,13 @@ class CrossViewCeilingFinishRecord:
         """Producer origin, retained when public receipt IDs are copied."""
         return self._seal is _MATERIAL_ONLY_RECORD_SEAL or (
             type(self.record_id) is str
-            and self.record_id.startswith(
-                "cross_view_ceiling_finish_original_zone_"
+            and (
+                self.record_id.startswith(
+                    "cross_view_ceiling_finish_original_zone_"
+                )
+                or self.record_id.startswith(
+                    "cross_view_ceiling_finish_spatial_viewport_"
+                )
             )
         )
 
@@ -676,7 +684,17 @@ class CrossViewCeilingFinishProducer:
             source=self._source, correspondence=correspondence,
         )
 
-    def publish(self) -> CrossViewCeilingFinishResult:
+    def publish(
+        self,
+        *,
+        allow_spatial_viewport_label_association: bool = False,
+        max_spatial_association_radius_pts: float = 90.0,
+        min_spatial_uniqueness_margin_ratio: float = 0.65,
+    ) -> CrossViewCeilingFinishResult:
+        if type(allow_spatial_viewport_label_association) is not bool:
+            raise TypeError(
+                "allow_spatial_viewport_label_association must be bool"
+            )
         eligible_rooms = tuple(
             room
             for room in self._rooms.rooms
@@ -797,6 +815,17 @@ class CrossViewCeilingFinishProducer:
                     SourceMaterialDefinitionRecord,
                     _TrustedLine,
                     _TrustedLine,
+                    bool,
+                ]
+            ],
+        ] = {}
+        unmatched_occurrences_by_viewport: dict[
+            tuple[str, str],
+            list[
+                tuple[
+                    SourceMaterialOccurrenceRecord,
+                    SourceMaterialDefinitionRecord,
+                    _TrustedLine,
                 ]
             ],
         ] = {}
@@ -860,6 +889,10 @@ class CrossViewCeilingFinishProducer:
                 if len(labels) != 1:
                     if len(labels) > 1:
                         conflict = True
+                    elif allow_spatial_viewport_label_association:
+                        unmatched_occurrences_by_viewport.setdefault(key, []).append(
+                            (occurrence, definition, occurrence_line)
+                        )
                     continue
                 label = next(iter(labels))
                 matching_label_lines = [
@@ -876,8 +909,103 @@ class CrossViewCeilingFinishProducer:
                         definition,
                         occurrence_line,
                         matching_label_lines[0],
+                        False,
                     )
                 )
+
+        if allow_spatial_viewport_label_association and unmatched_occurrences_by_viewport:
+            from pb_source_spatial_ceiling_label_association_shadow import (
+                CeilingMaterialHeightObservation,
+                RoomLabelSpatialObservation,
+                ViewportScopeInput,
+                associate_ceiling_labels_spatially_shadow,
+            )
+
+            for key in sorted(unmatched_occurrences_by_viewport):
+                page_id, viewport_id = key
+                viewport_bbox = rcp_viewports[key]
+                vp_labels = room_label_lines.get(key, ())
+                if not vp_labels:
+                    continue
+                lines_by_label: dict[str, list[_TrustedLine]] = defaultdict(list)
+                for line, label in vp_labels:
+                    lines_by_label[label].append(line)
+
+                spatial_rooms: list[RoomLabelSpatialObservation] = []
+                label_line_by_room_id: dict[str, _TrustedLine] = {}
+                for label, lines in sorted(lines_by_label.items()):
+                    if len(lines) != 1:
+                        conflict = True
+                        continue
+                    room = unique_rooms[label]
+                    line = lines[0]
+                    label_line_by_room_id[room.physical_room_id] = line
+                    spatial_rooms.append(
+                        RoomLabelSpatialObservation(
+                            room_id=room.physical_room_id,
+                            room_label=_clean(room.room_label),
+                            source_sha256=published.revision.source_sha256,
+                            page_id=page_id,
+                            viewport_id=viewport_id,
+                            bbox_pdf_pts=line.bbox,
+                            block_no=line.block_no,
+                        )
+                    )
+                if not spatial_rooms:
+                    continue
+
+                obs_lookup: dict[
+                    str,
+                    tuple[
+                        SourceMaterialOccurrenceRecord,
+                        SourceMaterialDefinitionRecord,
+                        _TrustedLine,
+                    ],
+                ] = {}
+                spatial_obs: list[CeilingMaterialHeightObservation] = []
+                for occ, defn, occ_line in unmatched_occurrences_by_viewport[key]:
+                    obs_lookup[occ.record_id] = (occ, defn, occ_line)
+                    spatial_obs.append(
+                        CeilingMaterialHeightObservation(
+                            observation_id=occ.record_id,
+                            material_code=occ.code,
+                            height_mm=None,
+                            source_sha256=published.revision.source_sha256,
+                            page_id=page_id,
+                            viewport_id=viewport_id,
+                            bbox_pdf_pts=occ.bbox_pdf_pts,
+                            block_no=occ_line.block_no,
+                        )
+                    )
+
+                spatial_report = associate_ceiling_labels_spatially_shadow(
+                    viewport=ViewportScopeInput(
+                        source_sha256=published.revision.source_sha256,
+                        page_id=page_id,
+                        viewport_id=viewport_id,
+                        bbox_pdf_pts=viewport_bbox,
+                    ),
+                    rooms=spatial_rooms,
+                    ceiling_observations=spatial_obs,
+                    max_association_radius_pts=max_spatial_association_radius_pts,
+                    min_uniqueness_margin_ratio=min_spatial_uniqueness_margin_ratio,
+                )
+                for assoc in spatial_report.room_associations:
+                    if "conflicting_ceiling_material_codes" in assoc.reason_codes:
+                        conflict = True
+                        continue
+                    if assoc.status != "CORROBORATED_SPATIAL_SHADOW":
+                        continue
+                    if assoc.room_id in candidates_by_room:
+                        continue
+                    if len(assoc.supporting_observation_ids) != 1:
+                        conflict = True
+                        continue
+                    occ, defn, occ_line = obs_lookup[assoc.supporting_observation_ids[0]]
+                    label_line = label_line_by_room_id[assoc.room_id]
+                    candidates_by_room.setdefault(assoc.room_id, []).append(
+                        (occ, defn, occ_line, label_line, True)
+                    )
 
         records: list[CrossViewCeilingFinishRecord] = []
         unresolved = {
@@ -892,7 +1020,7 @@ class CrossViewCeilingFinishProducer:
                 if len(candidates) > 1:
                     conflict = True
                 continue
-            occurrence, definition, occurrence_line, label_line = candidates[0]
+            occurrence, definition, occurrence_line, label_line, is_spatial = candidates[0]
             payload = {
                 "physical_room_id": room.physical_room_id,
                 "canonical_room_id": room.canonical_room_id,
@@ -905,10 +1033,18 @@ class CrossViewCeilingFinishProducer:
                 "finish_occurrence_record_id": occurrence.record_id,
                 "finish_definition_record_id": definition.record_id,
             }
+            if is_spatial:
+                record_prefix = "cross_view_ceiling_finish_spatial_viewport"
+                commercial_allowed = False
+                seal = _MATERIAL_ONLY_RECORD_SEAL
+            else:
+                record_prefix = "cross_view_ceiling_finish"
+                commercial_allowed = True
+                seal = _RECORD_SEAL
             records.append(
                 CrossViewCeilingFinishRecord(
                     record_id=stable_contract_id(
-                        "cross_view_ceiling_finish",
+                        record_prefix,
                         payload,
                         digest_chars=32,
                     ),
@@ -932,7 +1068,8 @@ class CrossViewCeilingFinishProducer:
                     occurrence_receipt_ids=occurrence_line.receipt_ids,
                     occurrence_bbox_pdf_pts=occurrence.bbox_pdf_pts,
                     support_snapshot_id=published.snapshot.snapshot_id,
-                    _seal=_RECORD_SEAL,
+                    commercial_projection_allowed=commercial_allowed,
+                    _seal=seal,
                 )
             )
             unresolved.discard(room.physical_room_id)
@@ -946,9 +1083,20 @@ class CrossViewCeilingFinishProducer:
             unresolved.update(disputed_room_ids)
         records = list(surviving_records)
         unresolved_ids = tuple(sorted(unresolved))
-        if records and not unresolved_ids and not conflict:
+        has_spatial_material_only = any(record.material_only for record in records)
+        if records and not unresolved_ids and not conflict and not has_spatial_material_only:
             status = EvidenceResolutionStatus.CORROBORATED
             reasons = (CROSS_VIEW_CEILING_FINISH_RESOLVED,)
+        elif records and has_spatial_material_only:
+            status = EvidenceResolutionStatus.CANDIDATE
+            reasons = (
+                (
+                    CROSS_VIEW_CEILING_FINISH_PARTIAL,
+                    CROSS_VIEW_CEILING_FINISH_SPATIAL_MATERIAL_ONLY,
+                )
+                if (unresolved_ids or conflict)
+                else (CROSS_VIEW_CEILING_FINISH_SPATIAL_MATERIAL_ONLY,)
+            )
         elif records:
             status = EvidenceResolutionStatus.CANDIDATE
             reasons = (CROSS_VIEW_CEILING_FINISH_PARTIAL,)
@@ -1213,6 +1361,7 @@ __all__ = [
     "CROSS_VIEW_CEILING_FINISH_RCP_UNAVAILABLE",
     "CROSS_VIEW_CEILING_FINISH_RESOLVED",
     "CROSS_VIEW_CEILING_FINISH_SCHEMA_VERSION",
+    "CROSS_VIEW_CEILING_FINISH_SPATIAL_MATERIAL_ONLY",
     "CROSS_VIEW_CEILING_FINISH_UNAVAILABLE",
     "CrossViewCeilingFinishProducer",
     "CrossViewCeilingFinishRecord",
