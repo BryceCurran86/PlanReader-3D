@@ -1681,6 +1681,99 @@ def enrich_live_canonical_floor_finishes(
     return floors
 
 
+def build_green_exclusion_epoxy_linkage_consumer_shadow(
+    *,
+    rooms: Sequence[object],
+    green_witnesses: Sequence[object],
+    label_observations: Sequence[object],
+    finish_legend_definitions: Sequence[object] = (),
+):
+    """Live fail-closed consumer bridge to pb_source_green_exclusion_epoxy_linkage_shadow.
+
+    Emits typed diagnostic linkage only; never grants firm quantity or customer authority.
+    """
+    from pb_source_green_exclusion_epoxy_linkage_shadow import (
+        link_green_exclusions_and_epoxy_labels,
+    )
+
+    report = link_green_exclusions_and_epoxy_labels(
+        rooms=rooms,
+        green_witnesses=green_witnesses,
+        label_observations=label_observations,
+        finish_legend_definitions=finish_legend_definitions,
+    )
+    if getattr(report, "commercial_quantity_authority", False) is not False:
+        raise RuntimeError("green-exclusion/epoxy shadow consumer must never grant commercial authority")
+    return report
+
+
+def build_room_legend_linkage_consumer_shadow(
+    *,
+    legend_rows: Sequence[object],
+    room_faces: Sequence[object],
+    number_callouts: Sequence[object],
+):
+    """Live fail-closed consumer bridge to pb_source_room_legend_linkage_shadow.
+
+    Parses legend rows and emits typed room-legend linkage only; never grants firm quantity authority.
+    """
+    from pb_source_room_legend_linkage_shadow import (
+        link_room_legend_to_physical_rooms,
+        parse_room_legend_rows,
+    )
+
+    legend_result = parse_room_legend_rows(legend_rows)
+    report = link_room_legend_to_physical_rooms(
+        legend_result=legend_result,
+        room_faces=room_faces,
+        number_callouts=number_callouts,
+    )
+    if getattr(report, "commercial_quantity_authority", False) is not False:
+        raise RuntimeError("room-legend shadow consumer must never grant commercial authority")
+    return report
+
+
+def build_room_finish_rcp_handoff_consumer_shadow(
+    *,
+    rooms: Sequence[object],
+    legend_rows: Sequence[object] = (),
+    room_faces: Sequence[object] = (),
+    room_number_bubbles: Sequence[object] = (),
+    exclusion_room_candidates: Sequence[object] = (),
+    green_hatch_witnesses: Sequence[object] = (),
+    floor_finish_label_observations: Sequence[object] = (),
+    finish_legend_definitions: Sequence[object] = (),
+    rcp_zones: Sequence[object] = (),
+    rcp_bubbles: Sequence[object] = (),
+    rcp_zone_label_by_id: Optional[dict[str, str]] = None,
+):
+    """Live fail-closed consumer bridge to pb_source_room_finish_rcp_handoff_shadow.
+
+    Assembles a typed non-authoritative handoff packet across green-exclusion/epoxy,
+    room-legend, and RCP bubble reports without promoting any shadow to firm authority.
+    """
+    from pb_source_room_finish_rcp_handoff_shadow import (
+        assemble_room_finish_rcp_handoff_shadow,
+    )
+
+    packet = assemble_room_finish_rcp_handoff_shadow(
+        rooms=rooms,
+        legend_rows=legend_rows,
+        room_faces=room_faces,
+        room_number_bubbles=room_number_bubbles,
+        exclusion_room_candidates=exclusion_room_candidates,
+        green_hatch_witnesses=green_hatch_witnesses,
+        floor_finish_label_observations=floor_finish_label_observations,
+        finish_legend_definitions=finish_legend_definitions,
+        rcp_zones=rcp_zones,
+        rcp_bubbles=rcp_bubbles,
+        rcp_zone_label_by_id=rcp_zone_label_by_id,
+    )
+    if getattr(packet, "commercial_quantity_authority", False) is not False:
+        raise RuntimeError("room-finish/RCP handoff consumer must never grant commercial authority")
+    return packet
+
+
 __all__ = [
     "CROSS_VIEW_FLOOR_FINISH_CONFLICT",
     "CROSS_VIEW_FLOOR_FINISH_DEFINITION_UNAVAILABLE",
@@ -1694,5 +1787,8 @@ __all__ = [
     "CrossViewFloorFinishProducer",
     "CrossViewFloorFinishRecord",
     "CrossViewFloorFinishResult",
+    "build_green_exclusion_epoxy_linkage_consumer_shadow",
+    "build_room_finish_rcp_handoff_consumer_shadow",
+    "build_room_legend_linkage_consumer_shadow",
     "enrich_live_canonical_floor_finishes",
 ]

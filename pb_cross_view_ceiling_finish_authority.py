@@ -1352,6 +1352,30 @@ class CrossViewCeilingFinishProducer:
             unresolved_physical_room_ids=remaining,
         )
 
+    def publish_rcp_bubble_height_material_shadow(
+        self,
+        *,
+        rcp_zones: Sequence[object],
+        rcp_bubbles: Sequence[object],
+    ):
+        """Live fail-closed consumer bridge to pb_source_rcp_bubble_height_material_shadow.
+
+        Consumes producer-owned RCP zone polygons and bubble text observations only;
+        never promotes shadow associations to firm ceiling quantities or customer rows.
+        """
+        from pb_source_rcp_bubble_height_material_shadow import (
+            RcpBubbleAssociationReport,
+            associate_rcp_bubbles_to_ceiling_zones_shadow,
+        )
+
+        report: RcpBubbleAssociationReport = associate_rcp_bubbles_to_ceiling_zones_shadow(
+            zones=rcp_zones,
+            bubbles=rcp_bubbles,
+        )
+        if getattr(report, "commercial_quantity_authority", False) is not False:
+            raise RuntimeError("RCP bubble shadow consumer must never grant commercial authority")
+        return report
+
 
 __all__ = [
     "CROSS_VIEW_CEILING_FINISH_CONFLICT",

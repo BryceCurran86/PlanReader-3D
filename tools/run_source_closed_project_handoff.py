@@ -74,6 +74,7 @@ from pb_live_ceiling_area_customer_projection import (
 from pb_live_opening_customer_projection import project_live_opening_customer_rows
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_area_source_closed_export import (
+    FloorFinishBoundingWallAuthorityIncompleteError,
     seal_live_floor_finish_area_run,
 )
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
@@ -1005,20 +1006,69 @@ def _generate_project_handoff_locked(
         floor_finish_quantities
     )
     summary["family_counts"]["wall_finish_area"] = len(wall_finish_quantities)
+    floor_finish_family_abstained = False
     if (
         (floor_finish_quantities or disputed_numeric_floor_finish)
         and verified_floor_finish_customer_rows_from_original is None
     ):
-        family_runs.append(
-            (
-                "floor_finish_area",
-                seal_live_floor_finish_area_run(
-                    claim,
-                    workspace_id=int(workspace_id),
-                    project_id=project_id,
-                ),
+        try:
+            family_runs.append(
+                (
+                    "floor_finish_area",
+                    seal_live_floor_finish_area_run(
+                        claim,
+                        workspace_id=int(workspace_id),
+                        project_id=project_id,
+                    ),
+                )
             )
-        )
+        except FloorFinishBoundingWallAuthorityIncompleteError as exc:
+            floor_finish_family_abstained = True
+            affected_ids = sorted(
+                {
+                    str(q.quantity_id)
+                    for q in floor_finish_quantities
+                    if getattr(q, "quantity_id", None)
+                }
+                | ({exc.quantity_id} if exc.quantity_id else set())
+            )
+            wall_status_obj = getattr(claim, "canonical_wall_status", None)
+            room_status_obj = getattr(claim, "canonical_room_status", None)
+            summary.setdefault("family_abstentions", {})["floor_finish_area"] = {
+                "status": "abstained",
+                "reason_code": exc.reason_code,
+                "first_gate": "FLOOR_FINISH_BOUNDING_WALL_AUTHORITY_INCOMPLETE",
+                "failing_quantity_id": exc.quantity_id,
+                "affected_quantity_ids": affected_ids,
+                "room_entity_id": exc.room_entity_id,
+                "missing_bounding_wall_ids": list(exc.missing_bounding_wall_ids),
+                "canonical_wall_status": (
+                    getattr(wall_status_obj, "value", str(wall_status_obj))
+                    if wall_status_obj is not None
+                    else None
+                ),
+                "canonical_room_status": (
+                    getattr(room_status_obj, "value", str(room_status_obj))
+                    if room_status_obj is not None
+                    else None
+                ),
+                "canonical_wall_source_pages": list(
+                    getattr(claim, "canonical_wall_source_pages", ()) or ()
+                ),
+                "canonical_room_source_pages": list(
+                    getattr(claim, "canonical_room_source_pages", ()) or ()
+                ),
+                "unresolved_wall_candidate_count": len(
+                    getattr(claim, "unresolved_wall_candidate_ids", ()) or ()
+                ),
+            }
+            summary["floor_finish_customer_first_gate"] = (
+                "FLOOR_FINISH_BOUNDING_WALL_AUTHORITY_INCOMPLETE"
+            )
+            summary["claim_reason_codes"] = [
+                *summary["claim_reason_codes"],
+                exc.reason_code,
+            ]
 
     if clean_family_group in {"all", "core"}:
         opening_area_quantities = _non_abstained(
@@ -1334,8 +1384,10 @@ def _generate_project_handoff_locked(
     # Project-level reconciliation is another source authority gate. Do not
     # publish even individually valid family files until the complete combined
     # seal passes duplicate, lineage and source-envelope checks.
+    # A typed family-level abstention (e.g. floor-finish bounding wall authority
+    # incomplete) must NEVER publish a partial combined seal or customer approval.
     combined = None
-    if family_runs:
+    if family_runs and not floor_finish_family_abstained:
         try:
             combined = combine_source_closed_runs(
                 tuple(run for _, run in family_runs),
@@ -1410,7 +1462,7 @@ def _generate_project_handoff_locked(
     # A failure to project a finish must never silently become an approved
     # customer row or block unrelated, already source-sealed families.
     verified_floor_finish_customer_rows = None
-    if floor_finish_quantities:
+    if floor_finish_quantities and not floor_finish_family_abstained:
         finish_runs = tuple(
             run for family, run in family_runs if family == "floor_finish_area"
         )
@@ -1680,6 +1732,15 @@ def _generate_project_handoff_locked(
         summary["combined_run_id"] = combined.run_id
         summary["combined_quantity_count"] = len(combined.quantities)
         summary["status"] = "sealed"
+    elif floor_finish_family_abstained:
+        summary["combined_quantity_count"] = 0
+        summary["combined_run_file"] = None
+        summary["combined_run_id"] = None
+        summary["customer_rows_verified"] = False
+        summary["customer_rows_file"] = None
+        summary["verified_customer_row_count"] = 0
+        summary["benchmark_score_granted"] = False
+        summary["status"] = "source_attempt_recorded_unsealed"
     else:
         summary["combined_quantity_count"] = 0
         # ABSTAIN with a bounded-source complexity failure is not an empty
