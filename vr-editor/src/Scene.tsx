@@ -1,4 +1,4 @@
-import {shouldRenderDesktopFrame} from "./visualRealism";
+import {DesktopRenderGovernor} from "./visualRealism";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -86,6 +86,7 @@ import {reviewOpeningCorners} from "./sourceOpeningReview";
 
 type Props = {
   manifest: SceneManifest;
+  isSceneLoading:()=>boolean;
   visibleIds: ReadonlySet<string>;
   level: string;
   levels: readonly string[];
@@ -270,9 +271,10 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell,slabMm,onSlab, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell,slabMm,onSlab, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const sceneLoading=useRef(isSceneLoading);sceneLoading.current=isSceneLoading;
   const interaction = useRef({ visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback });
   interaction.current = { visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback };
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -1967,17 +1969,17 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
     let adaptiveCap=2,qualityPreference:RenderQuality|null=null;
     let sourceAppearanceKey: readonly unknown[] = [];
     let surfaceVisibilityKey: readonly unknown[] = [];
-    let lastDesktopRender=-Infinity;
+    const desktopGovernor=new DesktopRenderGovernor();
     renderer.setAnimationLoop((now) => {
-      if(!renderer.xr.isPresenting){
-        if(document.hidden||!shouldRenderDesktopFrame(now,lastDesktopRender,visualSettings.current.quality,false))return;
-        lastDesktopRender=now;
-      }else lastDesktopRender=-Infinity;
+      const presenting=renderer.xr.isPresenting;
+      if(!presenting&&!desktopGovernor.allow(now,visualSettings.current.quality,document.hidden||sceneLoading.current()))return;
+      if(presenting)desktopGovernor.reset();
+      const renderStarted=performance.now();
       stationaryNavigation(now);
       const { mood: activeMood, quality: requestedQuality, detail: activeDetail,
         inspection: activeInspection, cameraRequest: requestedCamera } = visualSettings.current;
       if(!renderer.xr.isPresenting||qualityPreference!==requestedQuality){adaptiveCap=2;qualityPreference=requestedQuality;slowWindows=fastWindows=0;}
-      const activeQuality=adaptiveRenderQuality(requestedQuality,adaptiveCap);
+      const activeQuality=adaptiveRenderQuality(requestedQuality,presenting?adaptiveCap:desktopGovernor.cap);
       // Fallback xr-standard grips when SteamVR omits native squeeze events.
       // Native grip events always take precedence. Neither path changes source.
       const { buildState, buildLevel } = build.current;
@@ -2470,6 +2472,7 @@ export function SceneView({ manifest, visibleIds, level, levels, onLevel, mode, 
       }
       if(!renderer.xr.isPresenting)controls.update();
       renderer.render(scene, camera);
+      if(!presenting)desktopGovernor.complete(now,performance.now()-renderStarted);
       // Frame callback cadence is diagnostic, not a compositor/GPU time measurement.
       // Adjust only WebXR foveation (when supported), never geometry or source authority.
       if(renderer.xr.isPresenting){
