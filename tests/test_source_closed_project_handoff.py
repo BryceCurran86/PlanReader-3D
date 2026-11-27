@@ -1430,3 +1430,69 @@ def test_source_family_customer_verifier_is_project_neutral_and_fail_closed(monk
     assert handoff._verified_source_family_handoff(**{**args, "family": "wall_finish_area"}) is None
     assert handoff._verified_source_family_handoff(**{**args, "expected_count": 2}) is None
     assert handoff._verified_source_family_handoff(**{**args, "workspace_id": 0}) is None
+
+
+@pytest.mark.parametrize(
+    ("family_group", "expected_recover"),
+    [
+        ("floor_area", False),
+        ("surfaces", False),
+        ("all", True),
+        ("core", True),
+    ],
+)
+def test_project_handoff_gates_opening_area_recovery_by_family_group(
+    tmp_path,
+    monkeypatch,
+    family_group: str,
+    expected_recover: bool,
+) -> None:
+    """floor_area and surfaces omit opening-area recovery; all and core keep it."""
+    import tools.run_source_closed_project_handoff as handoff
+
+    pdf = tmp_path / f"plan_{family_group}.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (1,), 3))
+    seen: dict[str, object] = {}
+
+    def _collect(pdf_path, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(
+            status="unavailable",
+            reason_codes=("live-authority-unavailable",),
+            quantity_m2=None,
+            wall_net_area_quantity_evidence=(),
+            opening_count_quantity_evidence=(),
+            opening_area_quantity_evidence=(),
+            opening_linear_quantity_evidence=(),
+            room_area_quantity_evidence=(),
+            floor_finish_area_quantity_evidence=(),
+        )
+
+    monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim", _collect)
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
+    )
+
+    handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id="project-gating",
+        workspace_id=1,
+        output_dir=tmp_path / f"out_{family_group}",
+        family_group=family_group,
+    )
+
+    assert seen["recover_supported_opening_areas"] is expected_recover

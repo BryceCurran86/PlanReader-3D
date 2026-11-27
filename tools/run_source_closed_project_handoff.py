@@ -867,7 +867,12 @@ def _generate_project_handoff_locked(
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
             pages=claim_execution_pages,
-            recover_supported_opening_areas=True,
+            # Opening-area recovery replays single-page wall/opening geometry
+            # and is only relevant to opening-bearing families ("all", "core").
+            # Skipping it for "floor_area" and "surfaces" avoids a redundant
+            # full page-decode + raster pixmap pass while holding the primary
+            # claim in memory.
+            recover_supported_opening_areas=(clean_family_group in {"all", "core"}),
             topology_pages=(topology_pages if topology_restricted else None),
             # Core-family execution never activates cross-view room-area
             # measurement. Surface/all execution retains the source-classified
