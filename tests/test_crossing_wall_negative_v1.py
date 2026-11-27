@@ -38,6 +38,11 @@ REAL_DOORS = {
                                                                            ((240, 80), (240, 200))],
     "jambs-overdrawn-inward": _wall(50, 450, 200, [(200, 240)]) + [((200, 200), (200, 208)), ((200, 220), (200, 212)),
                                                                    ((240, 200), (240, 208)), ((240, 220), (240, 212))],
+    # short lining/architrave ticks carrying on past both faces: a door, because they stop within one wall thickness
+    "lining-ticks-beyond-both-faces": _wall(50, 450, 200, [(200, 240)]) + [((200, 196), (200, 200)),
+                                                                           ((200, 220), (200, 224)),
+                                                                           ((240, 196), (240, 200)),
+                                                                           ((240, 220), (240, 224))],
 }
 
 
@@ -82,6 +87,35 @@ def test_real_doors_are_unchanged_by_the_option(name):
     expected = _found(REAL_DOORS[name], on=False)
     assert expected[0] >= 1
     assert _found(REAL_DOORS[name]) == expected
+
+
+def _split_stems(piece, overshoot=None):
+    """The crossing wall's four outer stem pieces cut into short pieces (or shortened to ``overshoot`` beyond a face)."""
+    lines = [line for line in CROSS_THROUGH if not (line[0][0] == line[1][0] and (line[1][1] <= 200 or line[0][1] >= 220))]
+    for x in (260, 280):
+        for face, far in ((200, 80 if overshoot is None else 200 - overshoot),
+                          (220, 360 if overshoot is None else 220 + overshoot)):
+            step = piece if far > face else -piece
+            points = [face]
+            while abs(far - points[-1]) > piece:
+                points.append(points[-1] + step)
+            points.append(far)
+            lines += [((x, a), (x, b)) for a, b in zip(points, points[1:])]
+    return lines
+
+
+@pytest.mark.parametrize("seed", [None, 5])
+def test_a_crossing_wall_cut_into_short_pieces_is_still_not_a_door(seed):
+    assert _found(_split_stems(6.0), on=False)[0] >= 1
+    assert _found(_split_stems(6.0), seed=seed) == (0, 0)
+
+
+@pytest.mark.parametrize("overshoot,removed", [(6.0, False), (19.0, False), (20.0, True), (45.0, True)])
+def test_only_lines_carrying_on_a_whole_wall_thickness_make_it_a_crossing(overshoot, removed):
+    lines = _split_stems(8.0, overshoot=overshoot)
+    before = _found(lines, on=False)
+    assert before == (1, 1)
+    assert _found(lines) == ((0, 0) if removed else before)
 
 
 def test_the_option_must_be_a_boolean():

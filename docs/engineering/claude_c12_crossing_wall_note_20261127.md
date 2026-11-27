@@ -13,8 +13,13 @@ passing through, not jambs.
 
 ## Proposed (opt-in, default off)
 `SourceVisibilityProducer(crossing_wall_negative_shadow=True)`: in `_visible_structural_candidates`, drop a support whose
-left and right jamb each have a collinear source segment continuing from both of their ends away from the wall. A door beside
-a stem (continuation on one side, or on one jamb only) is kept. It can only remove candidates.
+left and right jamb each carry on, collinearly, from both of their ends away from the wall for at least their own length (one
+wall thickness); pieces chain end to end. A door beside a stem (continuation on one side, or on one jamb only) is kept, and so
+is a door with short lining or architrave ticks beyond both faces. It can only remove candidates.
+
+## Look-alike found and fixed (28 Nov)
+The first version counted any continuation, so a door with 4 pt ticks beyond both faces of a 20 pt wall was removed. Now:
+ticks and 19 pt stubs are kept, 20 pt and longer removed, a crossing wall cut into 6 pt pieces still removed.
 
 ## Must not influence
 Any drawing count or expected opening number. Originals before/after are required before any default change.

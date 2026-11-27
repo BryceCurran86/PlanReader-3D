@@ -3611,25 +3611,33 @@ class PhysicalOpeningAuthority:
         ] = {}
 
         def continues_outward(jamb: SourceObservationRecord) -> bool:
-            """Collinear source segments leave BOTH ends of this jamb away from the wall (C12, opt-in)."""
+            """Collinear source carries on from BOTH ends of this jamb, away from the wall, for at least the jamb's own
+            length (C12, opt-in). Pieces chain end to end, so splitting the line changes nothing; short lining or
+            architrave ticks beyond a face stop short of that."""
             line = _line_geometry(jamb)
             ends = ((line[0], line[1]), (line[2], line[3]))
+            thickness = math.dist(*ends)
+            limit = _COORD_EQ_ABS_TOL if tolerance is None else tolerance
+            if thickness <= limit:
+                return False
             for here, other_end in (ends, ends[::-1]):
-                outward = (here[0] - other_end[0], here[1] - other_end[1])
-                first_bin = point_bin(here)
-                neighbours = {item.observation_id: item for dx in (-1, 0, 1) for dy in (-1, 0, 1)
-                              for item in endpoint_point_index.get((first_bin[0] + dx, first_bin[1] + dy), ())}
-                if not any(
-                    item.observation_id != jamb.observation_id
-                    and _collinear(line, _line_geometry(item), tolerance)
-                    and any(
-                        _point_close(start, here, tolerance)
-                        and (far[0] - here[0]) * outward[0] + (far[1] - here[1]) * outward[1] > 0.0
-                        for start, far in ((_line_geometry(item)[:2], _line_geometry(item)[2:]),
-                                           (_line_geometry(item)[2:], _line_geometry(item)[:2]))
-                    )
-                    for item in neighbours.values()
-                ):
+                unit = ((here[0] - other_end[0]) / thickness, (here[1] - other_end[1]) / thickness)
+                reach, frontier, seen = 0.0, [here], {jamb.observation_id}
+                while frontier and reach + limit < thickness:
+                    point = frontier.pop()
+                    first_bin = point_bin(point)
+                    neighbours = {item.observation_id: item for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                                  for item in endpoint_point_index.get((first_bin[0] + dx, first_bin[1] + dy), ())}
+                    for item in neighbours.values():
+                        if item.observation_id in seen or not _collinear(line, _line_geometry(item), tolerance):
+                            continue
+                        x0, y0, x1, y1 = _line_geometry(item)
+                        for start, far in (((x0, y0), (x1, y1)), ((x1, y1), (x0, y0))):
+                            if _point_close(start, point, tolerance):
+                                seen.add(item.observation_id)
+                                frontier.append(far)
+                                reach = max(reach, (far[0] - here[0]) * unit[0] + (far[1] - here[1]) * unit[1])
+                if reach + limit < thickness:
                     return False
             return True
 
