@@ -58,6 +58,37 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
   }
 
   switch (shape) {
+    case "shower-screen": {
+      const glass=new THREE.MeshStandardMaterial({color:0xdce9e7,roughness:.075,metalness:.08,transparent:true,opacity:.19,depthWrite:false,side:THREE.DoubleSide,envMapIntensity:1.4});
+      const pane=box(w-.024,h-.018,.008,0,h/2,0,glass);pane.name="Shower safety-glass preview";pane.castShadow=false;
+      box(.018,h,d,-w/2+.009,h/2,0).name="Screen wall channel";
+      box(w,.012,d,0,.006,0).name="Screen bottom channel";
+      for(const y of [h*.23,h*.78])box(.035,.045,d,w/2-.018,y,0).name="Screen retaining clamp";
+      break;
+    }
+    case "oven": {
+      softBox(w,h,d*.94,0,h/2,-d*.03).name="Oven cabinet";
+      box(w*.9,h*.095,.012,0,h*.87,d*.455,detail).name="Oven control fascia";
+      const glass=new THREE.MeshStandardMaterial({color:0x20272a,metalness:.18,roughness:.12});
+      box(w*.84,h*.56,.018,0,h*.47,d*.475,glass).name="Oven door glazing";
+      box(w*.78,.021,.027,0,h*.765,d*.486).name="Oven handle";
+      for(let i=0;i<4;i++)disk(.017,.013,(i-1.5)*w*.18,h*.87,d*.47);
+      break;
+    }
+    case "fridge":
+    case "dishwasher": {
+      softBox(w,h,d*.92,0,h/2,-d*.04).name="Appliance carcass";
+      const divisions=shape==="fridge"?[.32,.68]:[1];let bottom=.035;
+      for(const fraction of divisions){const height=(h-.065)*fraction;softBox(w*.97,height-.008,d*.06,0,bottom+height/2,d*.46).name="Appliance door";box(w*.62,.019,.019,0,bottom+height-.04,d*.489,detail).name="Appliance handle";bottom+=height;}
+      box(w*.85,.035,.012,0,.0175,d*.42,detail).name="Recessed appliance plinth";
+      break;
+    }
+    case "cooktop": {
+      softBox(w,h,d,0,h/2,0,detail).name="Induction glass surface";
+      const ringMaterial=new THREE.MeshStandardMaterial({color:0x7b8183,roughness:.5});
+      for(const x of [-.24,.24])for(const z of [-.23,.23]){const radius=Math.min(w,d)*.17;const ring=mesh(new THREE.TorusGeometry(radius,.0013,4,32),x*w,h+.001,z*d,ringMaterial);ring.rotation.x=-Math.PI/2;ring.name="Induction zone";ring.castShadow=false;}
+      break;
+    }
     case "service-box":
       box(w, h, d, 0, h / 2, d / 2);
       for (let line = -1; line <= 1; line++) {
