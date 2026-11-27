@@ -67,7 +67,11 @@ Check on tracer inputs captured from six real pages: results identical to the pr
 
 Not covered: the preview still repeats its steps before the tracer (page read, wall-ink scoping, outer wall, door review, space key) on every correction.
 
-C08 stays open until the review callback passes a session cache.
+## Review-screen callback (MAX #4764 7208354928)
+
+`pb_guided_review_recalculation.recalculate_review` runs the preview with a saved packet using one bounded cache per session. It checks workspace, page, source and revision; refuses older or conflicting packets; drops a replaced source; keeps a result only for its exact packet. No screen on `main` calls it: the correction screen exists only on #4795. `claude_review_screen_wiring_4795.patch` adds the button there and shares the cache with the app's single-page trace; it applies to #4795 `7fb0872c2e` merged with this branch, and its Streamlit run test passes.
+
+C08 stays open until the screen change is merged.
 
 ## One measurement (one residential floor plan page: one tracer pass, 18 rooms)
 
