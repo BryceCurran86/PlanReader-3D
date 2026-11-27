@@ -8,8 +8,10 @@ created between the two internally replayed original-source producers.
 from __future__ import annotations
 
 from dataclasses import replace
+import gc
 from hashlib import sha256
 import math
+from time import perf_counter
 
 from pb_live_opening_area_quantity_publication import (
     _opening_quantity, publish_live_opening_area_quantities,
@@ -496,13 +498,59 @@ def _preserve_page_local_area_receipts(broad, local):
     )
 
 
-def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_version, single_width_uniform_page_door_height_shadow: bool = False, page_local_source_path=None):
+def _page_local_receipt_reproof_skip_reason(baseline) -> str | None:
+    """Return a non-None reason when page-local receipt preservation is a mathematical no-op.
+
+    ``_preserve_page_local_area_receipts`` only replaces quantities in the
+    intersection ``broad.opening_quantity_evidence & local.opening_quantity_evidence``
+    and immediately returns ``broad`` whenever independent net-wall / count /
+    dimension evidence is present or ``broad.opening_quantity_evidence`` is empty.
+    Skipping the second full page-local claim decode in those cases is
+    provably equivalent while avoiding holding two full page claims in memory.
+    """
+    if (
+        getattr(baseline, "quantity_m2", None) is not None
+        or getattr(baseline, "opening_count_quantity_evidence", ())
+        or getattr(baseline, "opening_dimension_quantity_evidence", ())
+    ):
+        return "coupled_baseline_receipts_retained_directly"
+    if not getattr(baseline, "opening_quantity_evidence", ()):
+        return "empty_baseline_opening_quantity_evidence"
+    return None
+
+
+def recover_source_opening_areas(
+    baseline,
+    pdf_bytes,
+    *,
+    page_id,
+    producer_version,
+    single_width_uniform_page_door_height_shadow: bool = False,
+    page_local_source_path=None,
+    telemetry_sink=None,
+):
     """Re-prove a single original topology page, then append only new areas."""
+    t_start = perf_counter()
     digest = sha256(pdf_bytes).hexdigest()
+    telemetry = {
+        "page_id": str(page_id),
+        "source_sha256_prefix": digest[:16],
+        "baseline_opening_count": len(getattr(baseline, "canonical_openings", ()) or ()),
+        "baseline_opening_quantity_count": len(
+            getattr(baseline, "opening_quantity_evidence", ()) or ()
+        ),
+        "page_local_reproof_executed": False,
+        "page_local_reproof_skipped_reason": None,
+        "published_opening_area_count": 0,
+    }
     if not baseline.canonical_openings:
+        telemetry["total_s"] = round(perf_counter() - t_start, 4)
+        if isinstance(telemetry_sink, dict):
+            telemetry_sink.update(telemetry)
         return baseline
     if any(o.source_sha256 != digest for o in baseline.canonical_openings):
         raise SourceClosedRunConflictError("original PDF changed during opening source replay")
+    t_ingest = perf_counter()
     source = SourceVisibilityProducer(
         producer_method="live-physical-net-wall", producer_version=producer_version,
         raster_paired_outer_faces_shadow=True,
@@ -512,35 +560,59 @@ def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_versi
         source_locator="memory://live-physical-net-wall-source.pdf",
         page_ids=(int(page_id),),
     )
+    telemetry["ingest_s"] = round(perf_counter() - t_ingest, 4)
     if not source.raster_opening_image_placements(published.revision.revision_id, page_id):
         # This recovery policy consumes original raster image evidence only.
         # An image-free native drawing keeps its independently valid native
         # claim; an empty raster universe never grants a new measurement.
+        telemetry["page_local_reproof_skipped_reason"] = "no_raster_opening_image_placements"
+        telemetry["total_s"] = round(perf_counter() - t_start, 4)
+        if isinstance(telemetry_sink, dict):
+            telemetry_sink.update(telemetry)
         return baseline
     if page_local_source_path is not None:
         from pathlib import Path
-        from pb_live_physical_net_wall_integration import _collect_live_physical_net_wall_claim
 
         path = Path(page_local_source_path)
         if sha256(path.read_bytes()).hexdigest() != digest:
             raise SourceClosedRunConflictError("page-local source bytes differ from opening replay")
-        local = _collect_live_physical_net_wall_claim(
-            path, pages=(int(page_id) - 1,),
-            single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
-        )
-        if sha256(path.read_bytes()).hexdigest() != digest:
-            raise SourceClosedRunConflictError("page-local source changed during receipt reproof")
-        baseline = _preserve_page_local_area_receipts(baseline, local)
+        skip_reason = _page_local_receipt_reproof_skip_reason(baseline)
+        if skip_reason is not None:
+            telemetry["page_local_reproof_skipped_reason"] = skip_reason
+            telemetry["page_local_reproof_s"] = 0.0
+        else:
+            from pb_live_physical_net_wall_integration import _collect_live_physical_net_wall_claim
+
+            t_local = perf_counter()
+            local = _collect_live_physical_net_wall_claim(
+                path, pages=(int(page_id) - 1,),
+                single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
+            )
+            if sha256(path.read_bytes()).hexdigest() != digest:
+                raise SourceClosedRunConflictError("page-local source changed during receipt reproof")
+            baseline = _preserve_page_local_area_receipts(baseline, local)
+            # Release page-local claim before composing the raster-augmented
+            # wall/opening authority so both full page structures are not live
+            # in memory at the same time.
+            del local
+            gc.collect()
+            telemetry["page_local_reproof_executed"] = True
+            telemetry["page_local_reproof_s"] = round(perf_counter() - t_local, 4)
+    t_compose = perf_counter()
     composition = compose_live_wall_opening_authority(
         source_visibility_producer=source, revision_id=published.revision.revision_id,
         page_ids=(page_id,), include_unmeasured_ink_closed_flanks_shadow=True,
         source_fragment_roles_shadow=True,
     )
+    telemetry["wall_opening_compose_s"] = round(perf_counter() - t_compose, 4)
+    t_voids = perf_counter()
     voids = compose_live_physical_opening_voids(
         source_visibility_producer=source, wall_opening_composition=composition,
         single_width_uniform_page_door_height_shadow=single_width_uniform_page_door_height_shadow,
     )
     quantities = publish_live_opening_area_quantities(voids)
+    telemetry["voids_and_publish_s"] = round(perf_counter() - t_voids, 4)
+    telemetry["published_opening_area_count"] = len(quantities)
     published = source.published_snapshot_for_revision(published.revision.revision_id)
     for opening in voids.canonical_openings:
         if not any(q.input_entity_ids == (opening.canonical_opening_id,) for q in quantities):
@@ -571,4 +643,9 @@ def recover_source_opening_areas(baseline, pdf_bytes, *, page_id, producer_versi
     )
     if source.published_snapshot_for_revision(published.revision.revision_id) != published:
         raise SourceClosedRunConflictError("opening source snapshot changed during reproof")
+    del voids, composition, source
+    gc.collect()
+    telemetry["total_s"] = round(perf_counter() - t_start, 4)
+    if isinstance(telemetry_sink, dict):
+        telemetry_sink.update(telemetry)
     return result
