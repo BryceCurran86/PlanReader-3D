@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {photoTexture} from "./architecturalAssets.ts";
-export type DetailPattern="plaster"|"plank"|"grain"|"tile"|"woven"|"fleck"|"stone"|"roof";
+export type DetailPattern="plaster"|"plank"|"grain"|"tile"|"woven"|"fleck"|"stone"|"roof"|"concrete";
 const SIZE=256;
 const noise=(x:number,y:number)=>((Math.imul(x+197,374761393)^Math.imul(y+123,668265263))>>>0)%1021/1020;
 const clamp=(v:number)=>Math.max(0,Math.min(255,Math.round(v)));
@@ -28,6 +28,10 @@ export function detailPixels(pattern:DetailPattern,size=SIZE){
    const vein=Math.sin(u*17+Math.sin(v*13)*2.7+v*11);
    shade=pattern==="stone"?234-Math.max(0,vein-.87)*150+n*9:221+n*28;
    height=pattern==="stone"?180:115+fine*50;
+  }else if(pattern==="concrete"){
+   // Subtle trowelled mottling and fine aggregate; tileable at the edges.
+   const tau=Math.PI*2,cloud=Math.sin(tau*u*3+Math.sin(tau*v*2))*Math.cos(tau*v*3)+.4*Math.cos(tau*(u*5+v*4));
+   const pore=fine>.985?18:0;shade=224+cloud*7+n*8-pore;height=136+cloud*4+fine*18-pore;
   }else if(pattern==="roof"){
    const groove=u<.018||u>.98;shade=groove?120:220+25*Math.sin(u*Math.PI);height=groove?60:155+35*Math.sin(u*Math.PI);
   }

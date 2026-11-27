@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import type {SceneManifest} from "./types.ts";
 import {architecturalPlan,paintArchitecturalPlan} from "./architecturalPlan.ts";
+import type {DraftShell} from "./connectedDraftShell.ts";
 import type {FootprintProjection} from "./footprintResize.ts";
 import type {BuildState,PlanPoint,WallVisual} from "./buildPlacement.ts";
 
@@ -42,13 +43,13 @@ export function createVrPlanOverview(scene:THREE.Scene,manifest:SceneManifest){
  let last:readonly unknown[]=[],lastHead=new THREE.Vector3(),placed=false;
  const head=new THREE.Vector3(),forward=new THREE.Vector3(),right=new THREE.Vector3();
  function update(build:Pick<BuildState,"walls">,level:string,
-   visible:ReadonlySet<string>,camera:THREE.Camera,enabled:boolean,projection:FootprintProjection|null=null,moves:readonly {objectId:string;dx:number;dz:number}[]=EMPTY_MOVES,extra:readonly WallVisual[]=EMPTY_WALLS){
+   visible:ReadonlySet<string>,camera:THREE.Camera,enabled:boolean,projection:FootprintProjection|null=null,moves:readonly {objectId:string;dx:number;dz:number}[]=EMPTY_MOVES,extra:readonly WallVisual[]=EMPTY_WALLS,shell:DraftShell|null=null){
   mesh.visible=enabled;
   if(!enabled){placed=false;return;}
-  const key=[build.walls,level,visible,projection,moves,extra] as const;
+  const key=[build.walls,level,visible,projection,moves,extra,shell] as const;
   if(!key.every((v,i)=>v===last[i])&&ctx){
    last=key;
-   paintArchitecturalPlan(ctx,architecturalPlan(manifest,build,level,visible,projection,moves,extra),800,800);
+   paintArchitecturalPlan(ctx,architecturalPlan(manifest,build,level,visible,projection,moves,extra,shell),800,800);
    texture.needsUpdate=true;
   }
   camera.getWorldPosition(head);

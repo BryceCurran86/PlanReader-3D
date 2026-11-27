@@ -177,10 +177,10 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
       break;
     }
     case "toilet":
-      oval(w * 0.72, h * 0.38, d * 0.62, 0, h * 0.19, d * 0.09);
-      oval(w, h * 0.35, d * 0.76, 0, h * 0.43, d * 0.10);
-      oval(w * 0.81, h * 0.058, d * 0.61, 0, h * 0.60, d * 0.10, white);
-      box(w * 0.89, h * 0.43, d * 0.31, 0, h * 0.78, -d * 0.27);
+      oval(w*.72,h*.38,d*.62,0,h*.19,d*.09);
+      const bowl=mesh(ceramicBowlGeometry(w,h*.38,d*.76),0,h*.25,d*.10,body);bowl.name="Recessed toilet bowl";
+      const seat=mesh(new THREE.TorusGeometry(1,.10,8,40),0,h*.64,d*.10,white);seat.rotation.x=-Math.PI/2;seat.scale.set(w*.43,d*.33,h*.20);seat.name="Open toilet seat";
+      softBox(w*.89,h*.43,d*.31,0,h*.78,-d*.27);
       cylinder(0.018, 0.004, 0, h, -d * 0.27, detail);
       break;
     case "rail":
@@ -212,16 +212,17 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
     case "vanity":
     case "cabinet":
     case "bench":
-      box(w * 0.91, h * 0.085, d * 0.91, 0, h * 0.0425, 0, detail);
-      box(w, h * 0.87, d * 0.98, 0, h * 0.52, 0);
-      worktop = box(w * 1.018, h * 0.047, d * 1.02, 0, h * 0.9765, 0, h < 1.3 ? white : body);
+      const plinth=box(w*.91,h*.085,d*.80,0,h*.0425,-d*.06,detail);plinth.name="Recessed cabinet plinth";
+      const carcass=box(w,h*.87,d*.94,0,h*.52,-d*.02);carcass.name="Cabinet carcass";
+      const topMaterial=h<1.3?white:body;
+      worktop=softBox(w*1.018,h*.047,d*1.02,0,h*.9765,0,topMaterial);worktop.name="Bevelled benchtop";
       for (let index = 0; index < count; index++) {
         const x = ((index + 0.5) / count - 0.5) * w;
         const panelWidth=w/count-.009;
-        box(panelWidth,h*.82,.018,x,h*.515,d*.5);
+        const front=softBox(panelWidth,h*.82,.018,x,h*.515,d*.5);front.name="Radiused cabinet front";
         // Recessed panel reveal and physical pull with two mounting posts.
         const pull=Math.min(.16,panelWidth*.48);
-        box(pull,.012,.016,x,h*.79,d*.5+.029,detail);
+        const handle=softBox(pull,.012,.016,x,h*.79,d*.5+.029,detail);handle.name="Cabinet pull";
         for(const sign of [-1,1])box(.012,.012,.025,x+sign*pull*.36,h*.79,d*.5+.015,detail);
         if(h<1.3)box(panelWidth*.88,.004,.003,x,h*.68,d*.5+.010,detail);
       }
