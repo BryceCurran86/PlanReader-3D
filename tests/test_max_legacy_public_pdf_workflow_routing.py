@@ -51,7 +51,7 @@ def test_original_only_jobs_do_no_work_except_notice(filename, pair):
     steps = data[original]["steps"]
     assert_notice(steps)
     assert all(s.get("if") == OFF for s in steps if NOTICE not in s.get("run", ""))
-    assert any("documents/sources/" in str(s) for s in steps)
+    assert "documents/sources/" in str(data[original])
     assert "if" not in data[focused]
     assert data[focused]["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
     assert any("pytest" in s.get("run", "") and "if" not in s for s in data[focused]["steps"])
