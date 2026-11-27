@@ -1098,7 +1098,11 @@ class SourceVisibilityProducer:
                  source_glyph_ledger_text_trust: bool = False,
                  raster_corner_framed_opening_shadow: bool = False,
                  angled_opening_precision_shadow: bool = False,
-                 crossing_wall_negative_shadow: bool = False) -> None:
+                 crossing_wall_negative_shadow: bool = False,
+                 raster_image_paint_only_shadow: bool = False) -> None:
+        if type(raster_image_paint_only_shadow) is not bool:
+            raise ValueError("raster image paint only shadow must be explicit boolean")
+        self._raster_image_paint_only_shadow = raster_image_paint_only_shadow
         if type(crossing_wall_negative_shadow) is not bool:
             raise ValueError("crossing wall negative shadow must be explicit boolean")
         self._crossing_wall_negative_shadow = crossing_wall_negative_shadow
@@ -2934,6 +2938,22 @@ class SourceVisibilityProducer:
                         segment.geometry_pt, image_regions
                     )
                 )
+                if self._raster_image_paint_only_shadow:
+                    # Line work and text drawn over a picture already have native observations (shadow, default off).
+                    from pb_raster_segment_paint_lineage_shadow import segments_painted_in
+
+                    picture_png = self._producer.render_native_page_png(
+                        document_id=published.revision.document_id,
+                        revision_id=published.revision.revision_id,
+                        source_sha256=published.revision.source_sha256,
+                        snapshot_id=snapshot.snapshot_id,
+                        page_id=page_id,
+                        dpi=float(RASTER_RENDER_DPI),
+                        images_only=True,
+                    )[0]
+                    painted = segments_painted_in(
+                        picture_png, [segment.geometry_pt for segment in segments], dpi=RASTER_RENDER_DPI)
+                    segments = tuple(segment for segment, kept in zip(segments, painted) if kept)
             # Visibility publishes each proven source-owned primitive regardless
             # of whether enough neighbouring primitives exist to prove a wall or
             # opening. Object-completeness gates belong downstream. Re-sort using

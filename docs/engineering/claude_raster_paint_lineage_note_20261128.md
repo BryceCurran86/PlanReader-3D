@@ -20,7 +20,14 @@ ink; if they are not, and native line segments cover it within the render's pixe
   all such lines listed, none chosen;
 - `image_ink` (image share at least 90%, native cover under 90%), `vector_ink` (image share at most 10%, native cover at least
   90%), `image_and_vector` (both at least 90%), else `unattributed`.
-It names no new identities, changes nothing and no live path imports it. Segments and lines must be in the same page frame.
+It names no new identities and changes nothing. Segments and lines must be in the same page frame.
+
+## Opt-in producer filter (shadow, 2026-11-28)
+Measured on Lot16 sheet 3: 1,890 of 1,997 unattributed segments lie inside native word boxes (glyph strokes), and 1,542 of
+2,094 wall candidates are made only of such strokes. `SourceVisibilityProducer(raster_image_paint_only_shadow=True)`: on a
+page with native visible vectors and images, an image-region raster segment is kept only when its ink is in the images-only
+render. Default off: segments, identities and receipts unchanged. Pages without vectors (scans) or without images are not
+affected. Segment indices (so raster ids) differ when on.
 
 ## Must not influence
 Any wall count or quantity expectation. Originals: counts only, before any use.
