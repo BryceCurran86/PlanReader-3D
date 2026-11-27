@@ -13,6 +13,7 @@ import pytest
 import pb_wall_plan_view_scope_report as report
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_visibility_authority import SourceVisibilityProducer
+from tests.test_physical_wall_candidate_viewport_scope_v1 import _draw_plan
 from tests.test_source_owned_physical_plan_view import _sheet
 
 BLACK, GREEN = (0.0, 0.0, 0.0), (0.0, 0.5, 0.0)
@@ -62,16 +63,16 @@ def test_sheet_furniture_stays_out_of_the_plan_view_and_the_page_scope_is_untouc
     page = _page(_plan_sheet())
     plain = _page(_plan_sheet(furniture=False))
     assert page["page_scope"]["candidates"] > plain["page_scope"]["candidates"]
-    (view,) = page["plan_views"]
-    (plain_view,) = plain["plan_views"]
+    (view,) = page["proven_plan_views"]
+    (plain_view,) = plain["proven_plan_views"]
     assert view["candidates"] == plain_view["candidates"] > 0 and view["boundary_tainted"] == 0
 
 
 def test_green_paint_leaves_only_the_wall_ink_variant():
     page = _page(_plan_sheet(furniture=False))
     without_green = _page(_plan_sheet(furniture=False, green=False))
-    (ink,), (view,) = page["plan_views_wall_ink"], page["plan_views"]
-    (clean,) = without_green["plan_views_wall_ink"]
+    (ink,), (view,) = page["proven_plan_views_wall_ink"], page["proven_plan_views"]
+    (clean,) = without_green["proven_plan_views_wall_ink"]
     assert ink == clean and ink["candidates"] < view["candidates"]
 
 
@@ -79,7 +80,7 @@ def test_green_paint_leaves_only_the_wall_ink_variant():
                          ids=["register", "schedule", "elevation"])
 def test_a_sheet_without_an_authenticated_plan_view_says_so(data):
     page = _page(data)
-    assert page["plan_views"] == page["plan_views_wall_ink"] == report.NO_PLAN_VIEW
+    assert all(page[name] == report.NO_PLAN_VIEW for name in report.VIEW_VARIANTS)
 
 
 def test_the_report_is_repeatable_and_resolves_nothing_in_an_incomplete_scope():
@@ -87,7 +88,7 @@ def test_the_report_is_repeatable_and_resolves_nothing_in_an_incomplete_scope():
     first, second = _report(data), _report(data)
     assert first == second
     (page,) = first["pages"]
-    for scope in [page["page_scope"], *page["plan_views"], *page["plan_views_wall_ink"]]:
+    for scope in [page["page_scope"], *(s for name in report.VIEW_VARIANTS if page[name] != report.NO_PLAN_VIEW for s in page[name])]:
         if not scope["scope_complete"]:
             assert scope["resolved_walls"] == 0 and scope["room_faces_with_all_walls_resolved"] == 0
 
@@ -98,6 +99,32 @@ def test_resolved_walls_follow_the_live_composition_rule():
     assert report.resolved_wall_ids(complete) == {"a", "b", "c"}
     for change in ({"scope_complete": False}, {"status": EvidenceResolutionStatus.ABSTAINED}, {"equivalence": None}):
         assert report.resolved_wall_ids(SimpleNamespace(**{**vars(complete), **change})) == set()
+
+
+def _framed_plan(tmp_path, *, green=False, crossing=False):
+    path = tmp_path / f"plan-{green}-{crossing}.pdf"
+    _draw_plan(path, crossing=crossing)
+    if green:
+        with fitz.open(path) as document:
+            document[0].draw_line((90, 150), (210, 150), color=GREEN, width=0.5)
+            document.saveIncr()
+    return path.read_bytes()
+
+
+def test_a_framed_titled_plan_is_an_authenticated_view_without_being_a_proven_one(tmp_path):
+    page = _page(_framed_plan(tmp_path))
+    (view,) = page["authenticated_plan_views"]
+    assert view["view_type"] == "floor_plan" and view["candidates"] > 0 and view["scope_complete"]
+    assert page["proven_plan_views"] == report.NO_PLAN_VIEW
+
+
+def test_green_paint_and_crossing_lines_show_up_in_the_authenticated_view(tmp_path):
+    plain = _page(_framed_plan(tmp_path))
+    green = _page(_framed_plan(tmp_path, green=True))
+    (view,), (ink,) = green["authenticated_plan_views"], green["authenticated_plan_views_wall_ink"]
+    assert ink["candidates"] < view["candidates"] and ink == plain["authenticated_plan_views_wall_ink"][0]
+    (crossed,) = _page(_framed_plan(tmp_path, crossing=True))["authenticated_plan_views"]
+    assert not crossed["scope_complete"] and crossed["primitives_crossing_boundary"] >= 1
 
 
 def test_only_a_source_producer_is_accepted():

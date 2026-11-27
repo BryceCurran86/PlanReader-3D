@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pb_live_physical_net_wall_integration import LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION  # noqa: E402
 from pb_source_visibility_authority import SourceVisibilityProducer  # noqa: E402
-from pb_wall_plan_view_scope_report import NO_PLAN_VIEW, wall_plan_view_scope_report  # noqa: E402
+from pb_wall_plan_view_scope_report import NO_PLAN_VIEW, VIEW_VARIANTS, wall_plan_view_scope_report  # noqa: E402
 
 COUNTS = ("scope_complete", "candidates", "boundary_tainted", "primitives_crossing_boundary", "primitives_ownership_ambiguous",
           "resolved_walls", "room_faces", "room_faces_with_all_walls_resolved")
@@ -33,7 +33,7 @@ def main() -> None:
     result = wall_plan_view_scope_report(source, revision_id=published.revision.revision_id, page_ids=page_ids)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     for page in result["pages"]:
-        for name in ("page_scope", "plan_views", "plan_views_wall_ink"):
+        for name in ("page_scope", *VIEW_VARIANTS):
             scopes = page[name]
             if scopes == NO_PLAN_VIEW:
                 print(f"page {page['page_id']} {name}: {NO_PLAN_VIEW}")

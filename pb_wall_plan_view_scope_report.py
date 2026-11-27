@@ -1,8 +1,9 @@
 """Report only (#4764 7209088255): page wall scopes against authenticated plan-view scopes, with and without non-wall paint.
 
-For each page it summarises the page wall scope the live composition reads; the F.07-owned physical plan-view scopes, or
-``no_plan_view``; and the same plan-view scopes keeping only source paths the repository's wall-ink rule admits (raster
-segments, whose paint is unknown, are kept). Each scope is reported as candidate counts, boundary taint, equivalence outcome,
+For each page it summarises the page wall scope the live composition reads; the authenticated floor-plan viewport scopes (the
+existing viewport builder) and the stricter source-owned proven physical plan-view scopes, each ``no_plan_view`` when there is
+none; and each of those keeping only source paths the repository's wall-ink rule admits (raster segments, whose paint is
+unknown, are kept). Each scope is reported as candidate counts, boundary taint, equivalence outcome,
 the walls the live canonical rule would resolve (host frames are not considered, so this is a lower bound) and the room faces
 whose every bounding wall is one of them. Nothing on a live path imports this; it changes, publishes and promotes nothing.
 """
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import fitz
 
+from pb_drawing_evidence_binding import DrawingViewType
 from pb_layered_wall_doorway_room_ring_shadow import _source_wall_ink_role
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
@@ -21,6 +23,9 @@ from pb_source_room_face_authority import _derive_scope
 from pb_source_visibility_authority import SourceVisibilityProducer
 
 NO_PLAN_VIEW = "no_plan_view"
+PLAN_VIEW_TYPES = (DrawingViewType.FLOOR_PLAN.value, DrawingViewType.FLOOR_FINISH_PLAN.value)
+VIEW_VARIANTS = ("authenticated_plan_views", "authenticated_plan_views_wall_ink", "proven_plan_views",
+                 "proven_plan_views_wall_ink")
 
 
 def resolved_wall_ids(scope) -> frozenset[str]:
@@ -81,10 +86,12 @@ def wall_plan_view_scope_report(source_producer: SourceVisibilityProducer, *, re
             return index is None or _source_wall_ink_role(rows[index]) == "wall_support"
 
         row = {"page_id": page_id, "page_scope": scope_summary(page_scope)}
-        for name, keep in (("plan_views", None), ("plan_views_wall_ink", wall_ink)):
+        for name in VIEW_VARIANTS:
             scopes = _build_authenticated_viewport_scope_results(
                 source_producer=source_producer, published=published, source_bytes=source_bytes, page_id=page_id,
-                physical_plan_view_shadow=True, source_segment_filter_shadow=keep)
-            row[name] = [scope_summary(scope) for scope in scopes] or NO_PLAN_VIEW
+                physical_plan_view_shadow=name.startswith("proven"),
+                source_segment_filter_shadow=wall_ink if name.endswith("wall_ink") else None)
+            row[name] = [scope_summary(scope) for scope in scopes
+                         if scope.viewport_view_type in PLAN_VIEW_TYPES] or NO_PLAN_VIEW
         pages.append(row)
     return {"source_sha256": published.revision.source_sha256, "revision_id": revision_id, "pages": pages}
