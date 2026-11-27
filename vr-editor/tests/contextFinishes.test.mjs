@@ -62,7 +62,9 @@ test("outdoor scene is lightweight, switchable and separate from design",()=>{
 });
 test("new quick home uses large rectangular buttons and keeps controls discoverable",()=>{
  const menu=buildMenuLayout(EMPTY_BUILD,"ground",EMPTY_ITEM_BROWSER,undefined,false,0,"","finished",false,undefined,undefined,options);
- assert.ok(!menu.radial);assert.ok(menu.buttons.length<=10);
+ assert.ok(!menu.radial);assert.ok(menu.buttons.length<=12);
+ assert.ok(menu.buttons.some(b=>b.label==="Resize footprint"));
+ assert.ok(menu.buttons.some(b=>b.action.area==="slab"));
  assert.ok(menu.buttons.every(b=>b.h>=65));
  assert.ok(menu.buttons.some(b=>b.label.includes("Grass & sky")));
 });

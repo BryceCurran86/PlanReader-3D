@@ -151,6 +151,10 @@ test("selected draft wall tools are hidden when footprint projection is active",
       {...quest,selectedWall:wall});
     assert.ok(!layout.buttons.some(b=>b.label==="Grab / Move"));
     assert.ok(!layout.buttons.some(b=>b.label==="Stretch end"));
-    assert.ok(layout.buttons.some(b=>b.label==="Wall"&&b.disabled));
+    if(footprint.enabled){
+      assert.ok(layout.buttons.some(b=>b.label==="Apply / done"));
+      assert.ok(!layout.buttons.some(b=>b.action.area==="build"&&!b.disabled));
+      assert.equal(layout.buttons.filter(b=>b.action.area==="footprint-size").length,4);
+    }else assert.ok(layout.buttons.some(b=>b.label==="Wall"&&b.disabled));
   }
 });

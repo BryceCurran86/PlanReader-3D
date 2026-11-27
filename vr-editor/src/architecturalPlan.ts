@@ -2,6 +2,8 @@ import type {SceneManifest} from "./types.ts";
 import type {BuildState,PlanPoint,WallVisual} from "./buildPlacement.ts";
 import {openingFits,planLength} from "./buildPlacement.ts";
 import {wallAssembly} from "./wallProfiles.ts";
+import {wallCornerJoins} from "./wallCornerJoin.ts";
+import type {DraftShell} from "./connectedDraftShell.ts";
 import {projectPlan,projectWall} from "./footprintResize.ts";
 import type {FootprintProjection} from "./footprintResize.ts";
 
@@ -11,7 +13,7 @@ export type PlanDrawing={lines:PlanLine[];labels:PlanText[];bounds:[number,numbe
 type Move={objectId:string;dx:number;dz:number};
 /** All geometry in model metres. Only editable draft walls have known physical thickness.
  * Source lines and positioned openings remain review evidence, never invented assemblies. */
-export function architecturalPlan(scene:SceneManifest,build:Pick<BuildState,"walls">,level:string,visible?:ReadonlySet<string>,projection:FootprintProjection|null=null,moves:readonly Move[]=[],extra:readonly WallVisual[]=[]):PlanDrawing{
+export function architecturalPlan(scene:SceneManifest,build:Pick<BuildState,"walls">,level:string,visible?:ReadonlySet<string>,projection:FootprintProjection|null=null,moves:readonly Move[]=[],extra:readonly WallVisual[]=[],shell:DraftShell|null=null):PlanDrawing{
  const lines:PlanLine[]=[],labels:PlanText[]=[];let unlocated=0;
  const moveMap=new Map(moves.map(m=>[m.objectId,m]));
  function line(a:PlanPoint,b:PlanPoint,kind:PlanLine["kind"],weight=1){
@@ -54,9 +56,17 @@ export function architecturalPlan(scene:SceneManifest,build:Pick<BuildState,"wal
   for(const e of edges.values())if(e.count===1)line(projection?projectPlan(e.a,projection):e.a,projection?projectPlan(e.b,projection):e.b,"floor",.75);
  }
  const unique=new Map<string,WallVisual>([...extra,...build.walls].map(w=>[w.proposalId,w]));
- for(const raw of unique.values()){
-  if(level!=="all"&&raw.levelId!==level)continue;
-  const w=projection?projectWall(raw,projection):raw;
+ const local=[...unique.values()].filter(w=>level==="all"||w.levelId===level).map(w=>projection?projectWall(w,projection):w);
+ const joins=wallCornerJoins(local);
+ if(shell&&(level==="all"||shell.levelId===level)){
+  const edges=new Map<string,{a:PlanPoint;b:PlanPoint;count:number}>();
+  for(const surface of shell.surfaces.filter(s=>s.kind==="floor"))for(let i=0;i<surface.vertices.length;i+=3){
+   const tri=surface.vertices.slice(i,i+3);if(tri.length!==3||!tri.every(v=>Math.abs(v[1]-.002)<1e-6))continue;
+   for(let j=0;j<3;j++){const a:PlanPoint=[tri[j][0],tri[j][2]],b:PlanPoint=[tri[(j+1)%3][0],tri[(j+1)%3][2]],k=[a.join(","),b.join(",")].sort().join("|");const old=edges.get(k);if(old)old.count++;else edges.set(k,{a,b,count:1});}
+  }
+  for(const e of edges.values())if(e.count===1)line(e.a,e.b,"floor",1.5);
+ }
+ for(const w of local){
   const length=planLength(w.start,w.end);
   if(!Number.isFinite(length)||length<.05)continue;
   const ux=(w.end[0]-w.start[0])/length,uz=(w.end[1]-w.start[1])/length,t=wallAssembly(w.assembly).thicknessMm/2000;
@@ -64,8 +74,10 @@ export function architecturalPlan(scene:SceneManifest,build:Pick<BuildState,"wal
   const openings=(w.openings??[]).filter(o=>openingFits(w,o)).sort((a,b)=>a.offsetM-b.offsetM);
   function solid(a:number,b:number){
    if(b-a<1e-7)return;
-   line(p(a,-t),p(b,-t),"wall",2);line(p(a,t),p(b,t),"wall",2);
-   line(p(a,-t),p(a,t),"wall");line(p(b,-t),p(b,t),"wall");
+   const join=joins.get(w.proposalId),start=a<1e-7?join?.start:undefined,end=Math.abs(b-length)<1e-7?join?.end:undefined;
+   const al=start?.left??p(a,t),ar=start?.right??p(a,-t),bl=end?.left??p(b,t),br=end?.right??p(b,-t);
+   line(ar,br,"wall",2);line(al,bl,"wall",2);
+   if(!start)line(ar,al,"wall");if(!end)line(br,bl,"wall");
   }
   let cursor=0;
   for(const o of openings){
