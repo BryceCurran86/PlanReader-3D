@@ -123,17 +123,14 @@ def test_g05_nonfirm_status_remains_blocked_even_when_source_digests_are_valid(s
 
 
 def test_g06_two_alternative_semantic_claims_on_same_physical_opening_hold():
-    raw = _synthetic(
-        _pair("one", "door_area:physical-a"),
-        _pair("two", "window_area:physical-a"),
-    )
-    got = inspect_ten_customer_release_gates(
-        raw, [], expected_project_id="project-a",
-        expected_source_sha256s=["a" * 64], original_producer_status="COMPLETED",
-    )
-    assert got["cross_semantic_physical_review_count"] == 1
-    assert not got["gates"]["G06_cross_semantic_physical_review"]["passed"]
-    assert got["customer_release_approved"] is False
+    # The restored source sealer now rejects this earlier than the
+    # downstream release inspector. No commercial run can be issued.
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+    with pytest.raises(SourceClosedRunConflictError, match="conflicting signed opening identity"):
+        _synthetic(
+            _pair("one", "door_area:physical-a"),
+            _pair("two", "window_area:physical-a"),
+        )
 
 
 @pytest.mark.parametrize("damage", ["missing", "duplicate", "foreign", "identity_stripped"])
