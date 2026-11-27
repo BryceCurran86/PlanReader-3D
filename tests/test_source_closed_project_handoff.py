@@ -1502,29 +1502,42 @@ def test_verify_family_only_floor_area_manifest_roundtrip_and_negatives(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """Consumer verifier accepts intact family-only output and rejects tampering."""
+    """Hardened verifier enforces trusted output_dir, context, symlinks, IDs, and family."""
     import hashlib
     import json
+    from pathlib import Path
+    import pb_source_closed_run_export as export_mod
     import tools.run_source_closed_project_handoff as handoff
 
+    out_dir = tmp_path / "trusted_out"
+    out_dir.mkdir(parents=True, exist_ok=True)
     src_sha = "a1b2c3d4" * 8
-    rows = [{"quantity_id": "floor_area_q1", "quantity_family": "floor_area", "value": 9.05}]
-    rows_path = tmp_path / "verified_floor_area_family_customer_rows.json"
+    rows = [
+        {
+            "quantity_id": "floor_area_q1",
+            "quantity_family": "floor_area",
+            "project_id": "proj-1",
+            "workspace_id": 7,
+            "revision_id": "rev-1",
+            "value": 9.05,
+        }
+    ]
+    rows_path = out_dir / "verified_floor_area_family_customer_rows.json"
     encoded = json.dumps(rows, indent=2, sort_keys=True) + "\n"
     handoff._write_text_atomic(rows_path, encoded)
     rows_sha = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     # Cross-platform LF check: bytes on disk must match UTF-8 LF digest even on Windows.
     assert hashlib.sha256(rows_path.read_bytes()).hexdigest() == rows_sha
 
-    run_path = tmp_path / "family_runs" / "floor_area.sealed.json"
+    run_path = out_dir / "family_runs" / "floor_area.sealed.json"
     run_path.parent.mkdir(parents=True, exist_ok=True)
     handoff._write_text_atomic(run_path, "{}\n")
-
-    import pb_source_closed_run_export as export_mod
 
     fake_run = SimpleNamespace(
         run_id="source_closed_run_test",
         source_sha256s=(src_sha,),
+        revision_id="rev-1",
+        quantities=(SimpleNamespace(quantity_id="floor_area_q1", family="floor_area"),),
     )
     monkeypatch.setattr(
         export_mod,
@@ -1542,6 +1555,9 @@ def test_verify_family_only_floor_area_manifest_roundtrip_and_negatives(
 
     valid_summary = {
         "status": "source_attempt_recorded_unsealed",
+        "project_id": "proj-1",
+        "workspace_id": 7,
+        "source_sha256": src_sha,
         "customer_rows_verified": False,
         "combined_run_file": None,
         "benchmark_score_granted": False,
@@ -1562,28 +1578,103 @@ def test_verify_family_only_floor_area_manifest_roundtrip_and_negatives(
             }
         },
     }
-
-    verified = handoff.verify_family_only_floor_area_manifest(
-        valid_summary, expected_source_sha256=src_sha,
+    ctx = dict(
+        output_dir=out_dir,
+        expected_source_sha256=src_sha,
+        expected_project_id="proj-1",
+        expected_workspace_id=7,
+        expected_revision_id="rev-1",
     )
+
+    verified = handoff.verify_family_only_floor_area_manifest(valid_summary, **ctx)
     assert len(verified) == 1
     assert verified[0]["quantity_id"] == "floor_area_q1"
 
     # Negative 1: whole-project verified flag flipped True must fail closed.
-    bad_whole = {**valid_summary, "customer_rows_verified": True}
     with pytest.raises(ValueError, match="customer_rows_verified"):
-        handoff.verify_family_only_floor_area_manifest(bad_whole)
-
-    # Negative 2: wrong expected_source_sha256 must fail closed.
-    with pytest.raises(ValueError, match="expected source"):
         handoff.verify_family_only_floor_area_manifest(
-            valid_summary, expected_source_sha256="f" * 64,
+            {**valid_summary, "customer_rows_verified": True}, **ctx,
         )
 
-    # Negative 3: tampered file bytes must fail SHA-256 check.
+    # Negative 2: cross-context substitution (wrong project/workspace/source/revision).
+    with pytest.raises(ValueError, match="expected_source_sha256"):
+        handoff.verify_family_only_floor_area_manifest(
+            valid_summary, **{**ctx, "expected_source_sha256": "f" * 64},
+        )
+    with pytest.raises(ValueError, match="project_id mismatch"):
+        handoff.verify_family_only_floor_area_manifest(
+            valid_summary, **{**ctx, "expected_project_id": "other-proj"},
+        )
+    with pytest.raises(ValueError, match="workspace_id mismatch"):
+        handoff.verify_family_only_floor_area_manifest(
+            valid_summary, **{**ctx, "expected_workspace_id": 99},
+        )
+    with pytest.raises(ValueError, match="revision_id mismatch"):
+        handoff.verify_family_only_floor_area_manifest(
+            valid_summary, **{**ctx, "expected_revision_id": "rev-other"},
+        )
+
+    # Negative 3: adversarial path outside trusted output_dir (cross-workspace traversal).
+    other_dir = tmp_path / "other_ws"
+    other_dir.mkdir(parents=True, exist_ok=True)
+    outside_rows = other_dir / "verified_floor_area_family_customer_rows.json"
+    handoff._write_text_atomic(outside_rows, encoded)
+    traversal_summary = {
+        **valid_summary,
+        "family_only_verified_outputs": {
+            "floor_area": {
+                **valid_summary["family_only_verified_outputs"]["floor_area"],
+                "customer_rows_file": str(outside_rows),
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="escapes trusted output_dir"):
+        handoff.verify_family_only_floor_area_manifest(traversal_summary, **ctx)
+
+    # Negative 4: ancestor symlink on family_runs directory must be rejected.
+    orig_is_symlink = Path.is_symlink
+    monkeypatch.setattr(
+        Path,
+        "is_symlink",
+        lambda self: True if self.name == "family_runs" else orig_is_symlink(self),
+    )
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        handoff.verify_family_only_floor_area_manifest(valid_summary, **ctx)
+    monkeypatch.setattr(Path, "is_symlink", orig_is_symlink)
+
+    # Negative 5: duplicate verified_quantity_ids must be rejected.
+    dup_summary = {
+        **valid_summary,
+        "family_only_verified_outputs": {
+            "floor_area": {
+                **valid_summary["family_only_verified_outputs"]["floor_area"],
+                "verified_quantity_ids": ["floor_area_q1", "floor_area_q1"],
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="duplicate IDs"):
+        handoff.verify_family_only_floor_area_manifest(dup_summary, **ctx)
+
+    # Negative 6: non-floor_area quantity inside sealed run must be rejected.
+    bad_family_run = SimpleNamespace(
+        run_id="source_closed_run_test",
+        source_sha256s=(src_sha,),
+        revision_id="rev-1",
+        quantities=(SimpleNamespace(quantity_id="floor_area_q1", family="ceiling_lining"),),
+    )
+    monkeypatch.setattr(
+        export_mod, "sealed_source_closed_run_from_dict", lambda payload: bad_family_run,
+    )
+    with pytest.raises(ValueError, match="non-floor_area quantity"):
+        handoff.verify_family_only_floor_area_manifest(valid_summary, **ctx)
+    monkeypatch.setattr(
+        export_mod, "sealed_source_closed_run_from_dict", lambda payload: fake_run,
+    )
+
+    # Negative 7: tampered file bytes must fail SHA-256 check.
     handoff._write_text_atomic(rows_path, encoded + " ")
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
-        handoff.verify_family_only_floor_area_manifest(valid_summary)
+        handoff.verify_family_only_floor_area_manifest(valid_summary, **ctx)
 
 
 def test_project_handoff_records_explicit_unemitted_families_and_completeness_status(

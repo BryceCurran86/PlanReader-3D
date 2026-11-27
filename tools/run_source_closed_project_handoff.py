@@ -542,19 +542,70 @@ _EXPECTED_FAMILIES_BY_GROUP: dict[str, tuple[str, ...]] = {
 }
 
 
+def _reject_symlink_ancestors(target: Path, *, trusted_root: Path) -> Path:
+    """Resolve ``target`` and require it to stay strictly inside ``trusted_root`` with zero symlinks."""
+    if trusted_root.is_symlink() or not trusted_root.is_dir():
+        raise ValueError("trusted output_dir must be an existing non-symlink directory")
+    resolved_root = trusted_root.resolve(strict=True)
+    # Walk from target up to trusted_root checking every intermediate component.
+    cur = target
+    while True:
+        if cur.is_symlink():
+            raise ValueError(f"unsafe symlink in artifact path: {cur}")
+        if cur == trusted_root:
+            break
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    if not target.is_file():
+        raise ValueError(f"required artifact file missing: {target}")
+    resolved_target = target.resolve(strict=True)
+    try:
+        resolved_target.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("artifact path escapes trusted output_dir") from exc
+    return resolved_target
+
+
 def verify_family_only_floor_area_manifest(
     summary: Mapping[str, Any],
     *,
-    expected_source_sha256: Optional[str] = None,
+    output_dir: Path,
+    expected_source_sha256: str,
+    expected_project_id: str,
+    expected_workspace_id: int,
+    expected_revision_id: Optional[str] = None,
 ) -> tuple[dict[str, Any], ...]:
     """Fail-closed consumer verifier for independent family-only ``floor_area`` handoff.
 
-    Designed for downstream app consumers displaying independently verified
-    ``floor_area`` rows from an incomplete whole-project handoff without ever
-    promoting them to whole-project verified or benchmark-scored status.
+    Requires a caller-owned trusted ``output_dir`` and mandatory authenticated
+    ``expected_source_sha256`` / ``expected_project_id`` / ``expected_workspace_id``
+    context. Resolves and constrains both artifact paths strictly to the
+    canonical filenames under ``output_dir``, rejects ancestor/leaf symlinks,
+    cross-workspace traversal, cross-context substitution, duplicate IDs, and
+    any non-``floor_area`` sealed quantity.
     """
     if not isinstance(summary, Mapping):
         raise TypeError("summary must be a mapping")
+    if not isinstance(output_dir, Path):
+        output_dir = Path(output_dir)
+    if output_dir.is_symlink() or not output_dir.is_dir():
+        raise ValueError("trusted output_dir must be an existing non-symlink directory")
+    clean_expected_sha = str(expected_source_sha256 or "").strip().lower()
+    if len(clean_expected_sha) != 64 or any(c not in "0123456789abcdef" for c in clean_expected_sha):
+        raise ValueError("expected_source_sha256 must be a valid 64-hex SHA-256")
+    clean_project_id = str(expected_project_id or "").strip()
+    if not clean_project_id:
+        raise ValueError("expected_project_id must be a non-empty string")
+    if isinstance(expected_workspace_id, bool) or not isinstance(expected_workspace_id, int) or expected_workspace_id <= 0:
+        raise ValueError("expected_workspace_id must be a positive integer")
+    clean_revision_id = (
+        str(expected_revision_id).strip() if expected_revision_id is not None else None
+    )
+    if expected_revision_id is not None and not clean_revision_id:
+        raise ValueError("expected_revision_id cannot be blank when provided")
+
     if summary.get("status") != "source_attempt_recorded_unsealed":
         raise ValueError("family-only verifier requires unsealed whole-project status")
     if summary.get("customer_rows_verified") is not False:
@@ -563,6 +614,13 @@ def verify_family_only_floor_area_manifest(
         raise ValueError("whole-project combined_run_file must be None")
     if summary.get("benchmark_score_granted") is not False:
         raise ValueError("benchmark_score_granted must be False")
+    if str(summary.get("project_id") or "").strip() != clean_project_id:
+        raise ValueError("summary project_id mismatch against expected_project_id")
+    if summary.get("workspace_id") != expected_workspace_id or isinstance(summary.get("workspace_id"), bool):
+        raise ValueError("summary workspace_id mismatch against expected_workspace_id")
+    summary_sha = str(summary.get("source_sha256") or "").strip().lower()
+    if summary_sha and summary_sha != clean_expected_sha:
+        raise ValueError("summary source_sha256 mismatch against expected_source_sha256")
 
     family_outputs = summary.get("family_only_verified_outputs")
     if not isinstance(family_outputs, Mapping):
@@ -583,10 +641,8 @@ def verify_family_only_floor_area_manifest(
         raise ValueError("manifest entry benchmark_score_granted must be False")
 
     source_sha = str(entry.get("source_sha256") or "").strip().lower()
-    if len(source_sha) != 64 or any(c not in "0123456789abcdef" for c in source_sha):
-        raise ValueError("manifest entry source_sha256 is invalid")
-    if expected_source_sha256 is not None and source_sha != expected_source_sha256.strip().lower():
-        raise ValueError("manifest entry source_sha256 does not match expected source")
+    if source_sha != clean_expected_sha:
+        raise ValueError("manifest entry source_sha256 does not match expected_source_sha256")
 
     rows_path_raw = entry.get("customer_rows_file")
     run_path_raw = entry.get("family_run_file")
@@ -595,14 +651,24 @@ def verify_family_only_floor_area_manifest(
     if not isinstance(run_path_raw, str) or not run_path_raw.strip():
         raise ValueError("manifest entry missing family_run_file")
 
-    rows_path = Path(rows_path_raw)
-    run_path = Path(run_path_raw)
-    if rows_path.is_symlink() or not rows_path.is_file():
-        raise ValueError("customer_rows_file missing or unsafe symlink")
-    if run_path.is_symlink() or not run_path.is_file():
-        raise ValueError("family_run_file missing or unsafe symlink")
+    # Constrain both artifacts strictly to canonical paths under trusted output_dir
+    # and reject any ancestor or leaf symlinks or cross-directory traversal.
+    canonical_rows_path = _reject_symlink_ancestors(
+        output_dir / "verified_floor_area_family_customer_rows.json",
+        trusted_root=output_dir,
+    )
+    canonical_run_path = _reject_symlink_ancestors(
+        output_dir / "family_runs" / "floor_area.sealed.json",
+        trusted_root=output_dir,
+    )
+    manifest_rows_path = _reject_symlink_ancestors(Path(rows_path_raw), trusted_root=output_dir)
+    manifest_run_path = _reject_symlink_ancestors(Path(run_path_raw), trusted_root=output_dir)
+    if manifest_rows_path != canonical_rows_path:
+        raise ValueError("manifest customer_rows_file does not match canonical artifact path")
+    if manifest_run_path != canonical_run_path:
+        raise ValueError("manifest family_run_file does not match canonical artifact path")
 
-    raw_rows_bytes = rows_path.read_bytes()
+    raw_rows_bytes = canonical_rows_path.read_bytes()
     actual_sha = hashlib.sha256(raw_rows_bytes).hexdigest()
     expected_rows_sha = str(entry.get("customer_rows_sha256") or "").strip().lower()
     if actual_sha != expected_rows_sha:
@@ -612,24 +678,58 @@ def verify_family_only_floor_area_manifest(
     if not isinstance(rows_loaded, list) or not rows_loaded:
         raise ValueError("customer_rows_file must contain a non-empty JSON list")
     rows = tuple(rows_loaded)
-    if any(
-        not isinstance(r, Mapping) or str(r.get("quantity_family", "")).strip() != "floor_area"
-        for r in rows
-    ):
-        raise ValueError("customer_rows_file contains non-floor_area row")
+    seen_row_qids: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping) or str(row.get("quantity_family", "")).strip() != "floor_area":
+            raise ValueError("customer_rows_file contains non-floor_area row")
+        row_qid = str(row.get("quantity_id", "")).strip()
+        if not row_qid or row_qid in seen_row_qids:
+            raise ValueError("customer_rows_file contains missing or duplicate quantity_id")
+        seen_row_qids.add(row_qid)
+        if "project_id" in row and str(row.get("project_id") or "").strip() != clean_project_id:
+            raise ValueError("customer row project_id mismatch against expected_project_id")
+        if "workspace_id" in row and (
+            row.get("workspace_id") != expected_workspace_id
+            or isinstance(row.get("workspace_id"), bool)
+        ):
+            raise ValueError("customer row workspace_id mismatch against expected_workspace_id")
+        if clean_revision_id is not None and "revision_id" in row:
+            if str(row.get("revision_id") or "").strip() != clean_revision_id:
+                raise ValueError("customer row revision_id mismatch against expected_revision_id")
 
     from pb_source_closed_run_export import sealed_source_closed_run_from_dict
 
     floor_run = sealed_source_closed_run_from_dict(
-        json.loads(run_path.read_text(encoding="utf-8"))
+        json.loads(canonical_run_path.read_text(encoding="utf-8"))
     )
     if floor_run.run_id != entry.get("family_run_id"):
         raise ValueError("family_run_id mismatch against sealed family run")
     if set(floor_run.source_sha256s) != {source_sha}:
         raise ValueError("sealed family run source_sha256 envelope mismatch")
+    run_quantities = tuple(getattr(floor_run, "quantities", ()) or ())
+    if not run_quantities:
+        raise ValueError("sealed family run contains no quantities")
+    seen_run_qids: set[str] = set()
+    for q in run_quantities:
+        if str(getattr(q, "family", "")).strip() != "floor_area":
+            raise ValueError("sealed family run contains non-floor_area quantity")
+        qid = str(getattr(q, "quantity_id", "")).strip()
+        if not qid or qid in seen_run_qids:
+            raise ValueError("sealed family run contains missing or duplicate quantity_id")
+        seen_run_qids.add(qid)
+    if clean_revision_id is not None:
+        run_rev = str(getattr(floor_run, "revision_id", "") or "").strip()
+        if run_rev and run_rev != clean_revision_id:
+            raise ValueError("sealed family run revision_id mismatch against expected_revision_id")
+
+    raw_qids = list(entry.get("verified_quantity_ids") or ())
+    if len(raw_qids) != len(set(raw_qids)):
+        raise ValueError("manifest verified_quantity_ids contains duplicate IDs")
+    expected_qids = tuple(sorted(str(q) for q in raw_qids))
+    if tuple(sorted(seen_run_qids)) != expected_qids:
+        raise ValueError("sealed family run quantity IDs do not match manifest verified_quantity_ids")
 
     verified = verify_sealed_customer_output(floor_run, rows)
-    expected_qids = tuple(sorted(str(q) for q in (entry.get("verified_quantity_ids") or ())))
     if (
         len(rows) != int(entry.get("customer_row_count", -1))
         or verified.customer_row_count != len(expected_qids)
