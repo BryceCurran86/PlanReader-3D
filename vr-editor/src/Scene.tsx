@@ -711,7 +711,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         }
         if(choice.action==="clear-group"){selectedGroup.clear();deleteArmed=false;return;}
         if (choice.action === "grid") snapGrid = nextStep(snapGrid);
-        if(choice.action==="drag-gain"){dragGain=dragGain===.25?1:dragGain===1?3:dragGain===3?5:.25;reportTool("Drag sensitivity · "+dragGain+"×");}
+        if(choice.action==="drag-gain"){dragGain=dragGain===.25?1:dragGain===1?3:dragGain===3?5:.25;reportTool("Drag sensitivity · "+dragGain+"×");return;}
         if (choice.action === "nudge-size") nudgeStep = nextStep(nudgeStep);
         if (choice.action === "axis") {
           const axes: WallAxis[] = ["auto","free","horizontal","vertical"];
@@ -1589,7 +1589,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
     function beginXrGesture(index: number) {
       menuConsumed[index]=false;
       aimController(controllers[index]);
-      if(toolsOpen&&automaticContext&&displayedMenuLayout&&!buildOverlay.menuHit(raycaster,displayedMenuLayout)&&!menuStickFocus)closeTools();
+      if(toolsOpen&&automaticContext&&displayedMenuLayout&&!buildOverlay.menuHit(raycaster,displayedMenuLayout)&&!menuStickFocus){closeTools();menuConsumed[index]=true;return;}
       if(toolsOpen){
         const layout = menuLayout("");
         menuConsumed[index]=true;
