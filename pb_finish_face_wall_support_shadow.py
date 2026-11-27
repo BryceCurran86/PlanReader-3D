@@ -74,35 +74,38 @@ def _ink_near(drawings: Sequence[Any], region: tuple[float, float, float, float]
     return dict(sorted(inks.items())), fills
 
 
-def _faces(lines, horizontal: bool, line: float, outward: float, behind_limit: float = _STROKE_PAIR_THICK_MAX):
-    """Faces on or behind an edge: (offset of the room-side line, its runs). Lines closer than the thinnest wall are one
-    face; their collinear pieces are joined and runs shorter than the builder's minimum are dropped."""
-    offsets = sorted(((perp - line) * outward, lo, hi) for is_horizontal, perp, lo, hi in lines
-                     if is_horizontal == horizontal
-                     and -NOISE_PT * 2 <= (perp - line) * outward <= _STROKE_PAIR_CLUSTER_PT + behind_limit)
-    groups: list[list[tuple[float, float, float]]] = []
-    for item in offsets:
-        if groups and item[0] - groups[-1][-1][0] < _STROKE_PAIR_THICK_MIN:
-            groups[-1].append(item)
+def _faces(lines, horizontal: bool, line: float, outward: float, start: float, end: float,
+           behind_limit: float = _STROKE_PAIR_THICK_MAX):
+    """Faces on or behind an edge: (offset of the room-side line, its runs).
+
+    Only lines running beside the edge say which faces there are (lines closer than the thinnest wall are one face);
+    other pieces at a face's offsets only extend its runs. So drawing elsewhere on the page changes nothing. Runs shorter
+    than the builder's minimum are dropped."""
+    band = [((perp - line) * outward, lo, hi) for is_horizontal, perp, lo, hi in lines if is_horizontal == horizontal
+            and -NOISE_PT * 2 <= (perp - line) * outward <= _STROKE_PAIR_CLUSTER_PT + behind_limit]
+    groups: list[list[float]] = []
+    for offset in sorted(offset for offset, lo, hi in band if min(hi, end) > max(lo, start)):
+        if groups and offset - groups[-1][-1] < _STROKE_PAIR_THICK_MIN:
+            groups[-1].append(offset)
         else:
-            groups.append([item])
+            groups.append([offset])
     faces = []
     for group in groups:
         runs: list[list[float]] = []
-        for lo, hi in sorted((lo, hi) for _offset, lo, hi in group):
+        for lo, hi in sorted((lo, hi) for offset, lo, hi in band if group[0] <= offset <= group[-1]):
             if runs and lo <= runs[-1][1] + _STROKE_PAIR_CLUSTER_PT:
                 runs[-1][1] = max(runs[-1][1], hi)
             else:
                 runs.append([lo, hi])
         runs = [(lo, hi) for lo, hi in runs if hi - lo >= _STROKE_PAIR_MIN_SPAN]
         if runs:
-            faces.append((group[0][0], runs))
+            faces.append((group[0], runs))
     return faces
 
 
 def _paired_stretches(lines, horizontal: bool, line: float, outward: float, start: float, end: float):
     """Stretches of an edge with a face of one ink on it and exactly one same-ink face a wall's thickness behind it."""
-    faces = _faces(lines, horizontal, line, outward)
+    faces = _faces(lines, horizontal, line, outward, start, end)
     near = next(((offset, runs) for offset, runs in faces if offset <= _STROKE_PAIR_CLUSTER_PT), None)
     if near is None:
         return []
@@ -122,7 +125,7 @@ def _paired_stretches(lines, horizontal: bool, line: float, outward: float, star
 
 def _wide_stretches(lines, horizontal: bool, line: float, outward: float, start: float, end: float):
     """Stretches paired only 8 to 14 pt apart, long enough, not hatch, and with a drawn wall return near an end."""
-    faces = _faces(lines, horizontal, line, outward, behind_limit=3.0 * _DARK_FILL_THICK_MAX)
+    faces = _faces(lines, horizontal, line, outward, start, end, behind_limit=3.0 * _DARK_FILL_THICK_MAX)
     near = next(((offset, runs) for offset, runs in faces if offset <= _STROKE_PAIR_CLUSTER_PT), None)
     if near is None or any(_STROKE_PAIR_THICK_MIN <= offset - near[0] <= _STROKE_PAIR_THICK_MAX for offset, _ in faces):
         return []

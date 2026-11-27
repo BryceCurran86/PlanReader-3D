@@ -316,6 +316,15 @@ def test_a_drawn_end_cap_is_a_wall_return():
     assert _support(face, _draw_mixed([(capped, BLACK)]))["edges"][0]["wide_candidate"] > 119
 
 
+def test_lines_that_never_run_beside_an_edge_change_nothing():
+    # short lines past the end of the right wall, stepping from its face to its outer line
+    ladder = [((x, 172), (x, 188)) for x in (165, 166, 167, 168, 169)]
+    plain = _support(FACE, _draw_mixed([(DOUBLE, BLACK)]))
+    crowded = _support(FACE, _draw_mixed([(DOUBLE + ladder, BLACK)]))
+    assert crowded["status"] is plain["status"] is CANDIDATE
+    assert crowded["edges"] == plain["edges"]
+
+
 def _door_lines():
     lines = [line for line in DOUBLE if line not in (((170, 44), (170, 170)), ((164, 50), (164, 164)))]
     return lines + [((170, 44), (170, 90)), ((170, 120), (170, 170)), ((164, 50), (164, 90)),
