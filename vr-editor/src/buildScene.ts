@@ -361,12 +361,13 @@ export function directDraftGesture(state:BuildState,levelId:string|null,ray:THRE
 }
 
 export function draftGesturePreview(gesture: DraftGesture, sizes: BuildSizes, ray: THREE.Ray,
-  state?: BuildState, controllerPosition?: PlanPoint, options: WallSnapOptions = {}, connected=false) {
+  state?: BuildState, controllerPosition?: PlanPoint, options: WallSnapOptions = {}, connected=false, dragGain=1) {
+  const gain=Number.isFinite(dragGain)?Math.max(.25,Math.min(5,dragGain)):1;
   // With Quest controllers, manipulation should follow the hand in X/Z, not
   // require aiming at an imaginary ground plane throughout the drag.
   const current = "previous" in gesture && gesture.fromController && controllerPosition
-    ? snappedPoint([gesture.from[0] + controllerPosition[0] - gesture.fromController[0],
-        gesture.from[1] + controllerPosition[1] - gesture.fromController[1]])
+    ? snappedPoint([gesture.from[0] + (controllerPosition[0] - gesture.fromController[0])*gain,
+        gesture.from[1] + (controllerPosition[1] - gesture.fromController[1])*gain])
     : planPoint(ray);
   if (!current) return null;
   const floor = ray.intersectPlane(PLAN, new THREE.Vector3());
