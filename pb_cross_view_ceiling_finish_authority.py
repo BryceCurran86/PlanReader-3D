@@ -1372,7 +1372,11 @@ class CrossViewCeilingFinishProducer:
             zones=rcp_zones,
             bubbles=rcp_bubbles,
         )
-        if getattr(report, "commercial_quantity_authority", False) is not False:
+        if (
+            getattr(report, "commercial_quantity_authority", False) is not False
+            or getattr(report, "commercial_authority_granted", False) is not False
+            or getattr(report, "shadow_only", True) is not True
+        ):
             raise RuntimeError("RCP bubble shadow consumer must never grant commercial authority")
         return report
 

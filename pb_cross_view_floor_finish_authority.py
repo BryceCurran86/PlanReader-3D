@@ -1702,7 +1702,13 @@ def build_green_exclusion_epoxy_linkage_consumer_shadow(
         label_observations=label_observations,
         finish_legend_definitions=finish_legend_definitions,
     )
-    if getattr(report, "commercial_quantity_authority", False) is not False:
+    if (
+        getattr(report, "commercial_quantity_authority", False) is not False
+        or getattr(report, "commercial_authority_granted", False) is not False
+        or getattr(report, "commercial_quantity_allowed", False) is not False
+        or getattr(report, "customer_write_allowed", False) is not False
+        or getattr(report, "specialty_authority_granted", False) is not False
+    ):
         raise RuntimeError("green-exclusion/epoxy shadow consumer must never grant commercial authority")
     return report
 
@@ -1728,7 +1734,11 @@ def build_room_legend_linkage_consumer_shadow(
         room_faces=room_faces,
         number_callouts=number_callouts,
     )
-    if getattr(report, "commercial_quantity_authority", False) is not False:
+    if (
+        getattr(report, "commercial_quantity_authority", False) is not False
+        or getattr(report, "commercial_authority_granted", False) is not False
+        or getattr(report, "floor_area_authority_granted", False) is not False
+    ):
         raise RuntimeError("room-legend shadow consumer must never grant commercial authority")
     return report
 
@@ -1769,7 +1779,11 @@ def build_room_finish_rcp_handoff_consumer_shadow(
         rcp_bubbles=rcp_bubbles,
         rcp_zone_label_by_id=rcp_zone_label_by_id,
     )
-    if getattr(packet, "commercial_quantity_authority", False) is not False:
+    if (
+        getattr(packet, "commercial_quantity_authority", False) is not False
+        or getattr(packet, "commercial_authority_granted", False) is not False
+        or getattr(packet, "shadow_only", True) is not True
+    ):
         raise RuntimeError("room-finish/RCP handoff consumer must never grant commercial authority")
     return packet
 
