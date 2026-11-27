@@ -108,6 +108,50 @@ class SourceFloorPlanPageDecision:
 
 
 @dataclass(frozen=True)
+class SourceSetAdmissionPacket:
+    """Generic multi-sheet drawing-set admission summary (A25).
+
+    Summarizes authenticated sheet roles across floor, section, elevation,
+    setout/detail, schedule, RCP, floor-finish, specification, and register
+    sheets, and explicitly abstains on finish specifications when no finish
+    specification / finish plan / RCP source sheet exists in the set.
+    """
+
+    floor_plan_pages: tuple[int, ...]
+    section_pages: tuple[int, ...]
+    elevation_pages: tuple[int, ...]
+    setout_or_detail_pages: tuple[int, ...]
+    schedule_pages: tuple[int, ...]
+    rcp_pages: tuple[int, ...]
+    floor_finish_plan_pages: tuple[int, ...]
+    specification_pages: tuple[int, ...]
+    register_pages: tuple[int, ...]
+    unproven_pages: tuple[int, ...]
+    has_finish_specification_source: bool
+    finish_specification_status: str
+    commercial_quantity_authority: bool = False
+    schema_version: str = SOURCE_FLOOR_PLAN_PAGE_SCOPE_SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "floor_plan_pages": list(self.floor_plan_pages),
+            "section_pages": list(self.section_pages),
+            "elevation_pages": list(self.elevation_pages),
+            "setout_or_detail_pages": list(self.setout_or_detail_pages),
+            "schedule_pages": list(self.schedule_pages),
+            "rcp_pages": list(self.rcp_pages),
+            "floor_finish_plan_pages": list(self.floor_finish_plan_pages),
+            "specification_pages": list(self.specification_pages),
+            "register_pages": list(self.register_pages),
+            "unproven_pages": list(self.unproven_pages),
+            "has_finish_specification_source": self.has_finish_specification_source,
+            "finish_specification_status": self.finish_specification_status,
+            "commercial_quantity_authority": False,
+        }
+
+
+@dataclass(frozen=True)
 class SourceFloorPlanPageScope:
     decisions: tuple[SourceFloorPlanPageDecision, ...]
     selected_page_indices: tuple[int, ...]
@@ -156,6 +200,67 @@ class SourceFloorPlanPageScope:
             return None
         other = set(self.other_drawing_page_indices)
         return tuple(index for index in self.selected_page_indices if index not in other)
+
+    def build_source_set_admission_packet(self) -> SourceSetAdmissionPacket:
+        """Assemble a fail-closed generic multi-sheet admission packet (A25)."""
+        floor_pages = tuple(
+            d.page_index for d in self.decisions if d.classification == FLOOR_PLAN
+        )
+        section_pages = tuple(
+            d.page_index for d in self.decisions if d.sheet_role == DrawingViewType.SECTION.value
+        )
+        elevation_pages = tuple(
+            d.page_index for d in self.decisions if d.sheet_role == DrawingViewType.ELEVATION.value
+        )
+        setout_or_detail_pages = tuple(
+            d.page_index
+            for d in self.decisions
+            if d.sheet_role in (DrawingViewType.DETAIL.value, "setout")
+        )
+        schedule_pages = tuple(
+            d.page_index for d in self.decisions if d.sheet_role == DrawingViewType.SCHEDULE.value
+        )
+        rcp_pages = tuple(
+            d.page_index
+            for d in self.decisions
+            if d.sheet_role == DrawingViewType.REFLECTED_CEILING_PLAN.value
+        )
+        floor_finish_pages = tuple(
+            d.page_index
+            for d in self.decisions
+            if d.sheet_role == DrawingViewType.FLOOR_FINISH_PLAN.value
+        )
+        specification_pages = tuple(
+            d.page_index
+            for d in self.decisions
+            if d.sheet_role == DrawingViewType.SPECIFICATION.value
+        )
+        register_pages = tuple(
+            d.page_index for d in self.decisions if d.sheet_role == "register"
+        )
+        unproven_pages = tuple(
+            d.page_index for d in self.decisions if d.classification == UNPROVEN
+        )
+        has_finish_spec = bool(floor_finish_pages or specification_pages or rcp_pages)
+        status = (
+            "finish_specification_source_present"
+            if has_finish_spec
+            else "abstained_no_finish_specification_source"
+        )
+        return SourceSetAdmissionPacket(
+            floor_plan_pages=floor_pages,
+            section_pages=section_pages,
+            elevation_pages=elevation_pages,
+            setout_or_detail_pages=setout_or_detail_pages,
+            schedule_pages=schedule_pages,
+            rcp_pages=rcp_pages,
+            floor_finish_plan_pages=floor_finish_pages,
+            specification_pages=specification_pages,
+            register_pages=register_pages,
+            unproven_pages=unproven_pages,
+            has_finish_specification_source=has_finish_spec,
+            finish_specification_status=status,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -296,6 +401,7 @@ def _infer_sheet_role(
     view_types: tuple[str, ...],
     *,
     is_mixed: bool,
+    title: Optional[str] = None,
 ) -> str:
     if classification == UNPROVEN:
         return UNPROVEN
@@ -316,6 +422,8 @@ def _infer_sheet_role(
             return candidate
     if "register" in view_types:
         return "register"
+    if title and re.search(r"\bset[\s-]?out\b", str(title), re.IGNORECASE):
+        return "setout"
     return "other_drawing"
 
 
@@ -360,7 +468,9 @@ def _classify_page(page: Any, page_index: int) -> SourceFloorPlanPageDecision:
             NOT_FLOOR_PLAN_PAGE_BOUND_TITLE,
             title,
             types,
-            sheet_role=_infer_sheet_role(NOT_FLOOR_PLAN, types, is_mixed=is_mixed),
+            sheet_role=_infer_sheet_role(
+                NOT_FLOOR_PLAN, types, is_mixed=is_mixed, title=title
+            ),
             is_mixed_sheet=is_mixed,
         )
     try:
@@ -469,6 +579,7 @@ __all__ = [
     "SOURCE_FLOOR_PLAN_PAGE_SCOPE_SCHEMA_VERSION",
     "SourceFloorPlanPageDecision",
     "SourceFloorPlanPageScope",
+    "SourceSetAdmissionPacket",
     "UNPROVEN",
     "UNPROVEN_FLOOR_PLAN_PAGE",
     "UNREADABLE_FLOOR_PLAN_PAGE",
