@@ -27,7 +27,7 @@ export type FixtureShape =
   | "socket" | "switch" | "port" | "isolator" | "alarm"
   | "downlight" | "batten" | "pendant" | "sconce" | "fan"
   | "basin" | "toilet" | "bath" | "vanity" | "cabinet" | "bench" | "rail" | "service-box"
-  | "sofa" | "bed" | "coffee-table";
+  | "sofa" | "bed" | "coffee-table" | "shower-screen" | "oven" | "fridge" | "cooktop" | "dishwasher";
 
 type SurfaceVisual = { kind: "surface"; slot: "finish" | "lining"; pattern: Pattern;
   color: number; roughness: number; repeatM?: readonly [number, number] };
@@ -234,6 +234,8 @@ const bathrooms: FixtureFamily[] = [
   ["Freestanding bath 1700 mm", "floor", "bath", [1.7, 0.60, 0.76]],
   ["Single towel rail", "wall", "rail", [0.6, 0.08, 0.08]],
   ["Double towel rail", "wall", "rail", [0.75, 0.12, 0.11], 2],
+  ["Walk-in shower screen 900 mm", "floor", "shower-screen", [.9,2,.045]],
+  ["Walk-in shower screen 1200 mm", "floor", "shower-screen", [1.2,2,.045]],
 ];
 const cabinets: FixtureFamily[] = [
   ["Vanity 600 mm", "floor", "vanity", [0.6, 0.84, 0.46]],
@@ -265,6 +267,7 @@ export const ITEM_CATALOGUE: readonly CatalogueItem[] = [
   ...fixtureItems("furniture", [["Three-seat sofa","floor","sofa",[2.1,.82,.86]],["Queen bed","floor","bed",[1.6,.85,2.1]],["Single bed","floor","bed",[.96,.82,1.98]],["Round coffee table","floor","coffee-table",[.8,.42,.8]]], [["Linen",0xc5bba9],["Oak",0xad8965],["Charcoal",0x606365]],"editable furniture sofa bed coffee table"),
   ...fixtureItems("cabinets", cabinets, [["Polar white", 0xe3dfd4], ["Pale oak", 0xad8965],
     ["Walnut", 0x705240], ["Graphite", 0x4e5154]], "cabinet kitchen vanity joinery benchtop worktop"),
+  ...fixtureItems("cabinets", [["Freestanding oven 600 mm","floor","oven",[.6,.9,.6]],["Freestanding fridge 700 mm","floor","fridge",[.7,1.75,.68]],["Dishwasher 600 mm","floor","dishwasher",[.6,.85,.59]],["Induction cooktop 600 mm","worktop","cooktop",[.6,.045,.52]]], [["Stainless steel",0xa7a9a7,.65],["Matte black",0x333638,.12]], "kitchen appliance oven refrigerator fridge cooktop dishwasher"),
   ...doorFinishes.map(([label, color, pattern]) => surface("doors", label, ["opening"], color,
     pattern, 0.55, [0.22, 1.3], "finish", "door leaf opening door finish")),
   ...EXTERIOR_CATALOGUE, ...ROOF_COMPONENTS, ...ROUGH_IN_CATALOGUE, ...EXTENSION_CATALOGUE,
