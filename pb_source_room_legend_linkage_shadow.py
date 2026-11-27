@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import re
+import unicodedata
 from typing import Sequence
 
 from pb_migration_contracts import EvidenceResolutionStatus, stable_contract_id
@@ -37,9 +38,23 @@ _ROOM_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 _ROOM_LEGEND_TITLE_RE = re.compile(
-    r"^(?:room|space|accommodation|area)\s+(?:legend|schedule|key|index|register)$",
+    r"^(?:(?:room|space|accommodation|area)(?:\s+numbering)?\s+(?:legend|schedule|key|index|register|list)|"
+    r"(?:schedule|legend|list|index)\s+of\s+(?:rooms|spaces|areas))$",
     re.IGNORECASE,
 )
+_UNICODE_ROOM_NUM_TRANSLATION = str.maketrans({
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2012": "-",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2212": "-",
+    "\u00a0": " ",
+    "\u2009": " ",
+    "\u202f": " ",
+    "\u200b": "",
+    "\ufeff": "",
+})
 _ROOM_NO_COL_RE = re.compile(
     r"^(?:(?:room|space)\s+(?:no\.?|number|num|id|code|ref)|no\.?|number|ref|id)$",
     re.IGNORECASE,
@@ -85,7 +100,9 @@ def canonical_room_number_key(raw: object) -> tuple[str, int] | None:
     """Return canonical (prefix, positive_int) for a room number, rejecting opening/finish codes."""
     if type(raw) is not str:
         return None
-    clean = _norm_space(raw).upper()
+    clean = _norm_space(
+        unicodedata.normalize("NFKC", raw).translate(_UNICODE_ROOM_NUM_TRANSLATION)
+    ).upper()
     if not clean:
         return None
     if _EXCLUDED_NON_ROOM_CODE_RE.fullmatch(clean):

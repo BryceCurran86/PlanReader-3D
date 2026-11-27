@@ -37,14 +37,19 @@ CLASS_UNLINKED = "no_green_hatch_or_specialty_label"
 CLASS_CONFLICT = "green_exclusion_epoxy_linkage_conflict"
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_FINISH_CODE_RE = re.compile(r"^(?:FT|FL|EP|EX|RF|CR)\d{1,3}[A-Z]?$", re.IGNORECASE)
+_FINISH_CODE_RE = re.compile(
+    r"^(?:FT|FL|EP|EX|RF|CR|VF|CT|CP|TL)[- ]?\d{1,3}[A-Z]?$",
+    re.IGNORECASE,
+)
 _EPOXY_PHRASE_RE = re.compile(
     r"\b(?:epoxy|polyurethane\s+screed|resin\s+floor(?:ing)?|seamless\s+resin|trowelled\s+resin)\b",
     re.IGNORECASE,
 )
 _EXCLUSION_PHRASE_RE = re.compile(
     r"\b(?:cold\s*room|cool\s*room|freezer|refrigerat(?:ed|ion)|chiller|walk[- ]?in\s+cool|"
-    r"aisle\s+excl\w*|by\s+(?:others|lessee|tenant|specialist|contractor)|not\s+in\s+contract|n\.?i\.?c\.?)\b",
+    r"aisle\s+excl\w*|equipment\s+(?:zone|area|bay|pad)|future\s+tenancy|"
+    r"excl(?:uded|\.)?\s+from\s+contract|"
+    r"by\s+(?:others|lessee|tenant|specialist|contractor)|not\s+in\s+contract|n\.?i\.?c\.?)\b",
     re.IGNORECASE,
 )
 
@@ -78,6 +83,10 @@ def _req_pt(value: object, name: str) -> Point:
 
 def _norm_space(value: object) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _canonical_finish_code(value: str) -> str:
+    return re.sub(r"[\s\u2010\u2011\u2012\u2013\u2014\u2212-]+", "", _norm_space(value).upper())
 
 
 @dataclass(frozen=True)
@@ -134,7 +143,7 @@ class FinishLegendDefinitionInput:
         for field in ("definition_id", "document_id", "revision_id", "legend_page_id", "finish_code", "description"):
             object.__setattr__(self, field, _req_str(getattr(self, field), field))
         object.__setattr__(self, "source_sha256", _req_sha256(self.source_sha256, "source_sha256"))
-        object.__setattr__(self, "finish_code", self.finish_code.upper())
+        object.__setattr__(self, "finish_code", _canonical_finish_code(self.finish_code))
 
 
 @dataclass(frozen=True)
@@ -325,8 +334,8 @@ def link_green_exclusions_and_epoxy_labels(
                 epoxy_obs_ids.append(obs.observation_id)
             if _EXCLUSION_PHRASE_RE.search(text):
                 excl_obs_ids.append(obs.observation_id)
-            if _FINISH_CODE_RE.fullmatch(text):
-                code = text.upper()
+            if _FINISH_CODE_RE.fullmatch(re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2212]", "-", text)):
+                code = _canonical_finish_code(text)
                 finish_codes.add(code)
                 lkey = (room.document_id, room.revision_id, room.source_sha256, code)
                 defs = legend_by_key.get(lkey, [])
