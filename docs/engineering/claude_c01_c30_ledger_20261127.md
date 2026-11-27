@@ -18,7 +18,7 @@ drawings only). Nothing here is merged; MAX owns merge, pins and official scorin
 | C11 dual dwellings / party walls | NOT STARTED | | |
 | C12 junctions and corners | PARTIAL | synthetic | doors near T/corner/close pairs fine; a straight-through cross junction reads as a door |
 | C13 door-gap closures | NOT STARTED | | |
-| C14 doors at any angle and scale | PARTIAL | synthetic | found: no opening at non-right angles (precision tolerance 1e-9/1e-6 below float32) |
+| C14 doors at any angle and scale | PARTIAL | opt-in | `angled_opening_precision_shadow`: angled openings found and hosted (synthetic); originals purely additive (2 abstained openings); signed-row check pending |
 | C15 cavity sliders | NOT STARTED | | |
 | C16 external window hosts | NOT STARTED | | |
 | C17 door/stacker corners | NOT STARTED | | donor #4751 identified |
