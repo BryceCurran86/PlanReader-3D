@@ -25,7 +25,11 @@ jobs:
         run: |
           python -m pytest -q tests/test_gpt2_external_schedule_frame_provenance.py
           python -m pytest -q tests/benchmarks/test_mutation_viewport_segmentation.py
+      - name: Original replay NOT RUN - local validation required
+        run: |
+          echo 'NOT RUN_LOCAL_REQUIRED: private original replay is not a passing source verification. Execute the preserved replay steps locally against pinned base/head.' >> "$GITHUB_STEP_SUMMARY"
       - name: Original Maryborough source SHA page11 physical plan vs schedule
+        if: ${{ false }}
         env:
           PYTHONPATH: .
         run: |
