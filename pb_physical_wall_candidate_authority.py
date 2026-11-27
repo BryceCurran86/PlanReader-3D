@@ -3649,6 +3649,7 @@ def _build_authenticated_viewport_scope_results(
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
     physical_plan_view_shadow: bool = False,
     filter_typed_negative_non_wall_ink_shadow: bool = False,
+    source_segment_filter_shadow=None,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
     # A viewport scope is page-local authority. A scoped native ingestion still
@@ -3683,6 +3684,9 @@ def _build_authenticated_viewport_scope_results(
         )
     except WallPageFrameUnresolved:
         return ()
+    if source_segment_filter_shadow is not None:
+        # Report-only comparisons (pb_wall_plan_view_scope_report); no live caller passes it.
+        page_segments = [segment for segment in page_segments if source_segment_filter_shadow(segment)]
     if physical_plan_view_shadow:
         # Opt-in only: source-owned F.07 viewports are generated from actual
         # immutable producer bytes. Never accept caller-supplied geometry,
