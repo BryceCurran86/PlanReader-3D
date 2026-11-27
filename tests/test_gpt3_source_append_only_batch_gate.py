@@ -136,8 +136,10 @@ def test_deleted_predecessor_cannot_be_replaced_by_same_quantity_value():
 
 
 def test_same_family_claiming_same_opening_twice_cannot_append():
-    report = _check(_fixture(duplicate_area=True))
-    assert report["first_failing_gate"] == "DUPLICATE_OPENING_AREA_PHYSICAL_IDENTITY"
+    # A duplicate physical area must fail before an append candidate is sealed.
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+    with pytest.raises(SourceClosedRunConflictError, match="conflicting signed opening identity"):
+        _fixture(duplicate_area=True)
 
 
 def test_abstention_is_not_a_new_firm_customer_approved_quantity():
