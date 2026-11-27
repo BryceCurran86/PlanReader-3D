@@ -29,5 +29,10 @@ page with native visible vectors and images, an image-region raster segment is k
 render. Default off: segments, identities and receipts unchanged. Pages without vectors (scans) or without images are not
 affected. Segment indices (so raster ids) differ when on.
 
+Measured (one plan sheet per original, off to on): Lot16 candidates 2,094 to 320, published 59 to 24 (33 of today's 59 are
+letter strokes; no published native wall lost, 3 more publish), ambiguous 2,035 to 296; Maryborough candidates 3,737 to
+3,598, published 442 to 439 (its one picture covers 0.5% of the page); 3Laurel and Q5446 identical. Openings, rooms,
+quantities, other sheets and a signed-row replay are not checked.
+
 ## Must not influence
 Any wall count or quantity expectation. Originals: counts only, before any use.
