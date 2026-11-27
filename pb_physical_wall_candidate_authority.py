@@ -3180,6 +3180,57 @@ def _assemble_source_owned_w4_identities_or_unavailable(
     return walls, rekeyed_junctions, identities
 
 
+# Typed negative ink is evidence against PROMOTION only (AGENTS.md): such walls stay in the graph and still compete,
+# but cannot publish as physical walls. Default off; modes are the repository's own wall-ink roles.
+TYPED_NEGATIVE_INK_GUARDS = ("owner_green_ink", "unfilled_non_wall_ink")
+TYPED_NEGATIVE_NON_WALL_INK = "typed_negative_non_wall_ink"
+
+
+def _typed_negative_ink_guard(value):
+    if value is not None and value not in TYPED_NEGATIVE_INK_GUARDS:
+        raise ValueError(f"typed negative ink guard must be None or one of {TYPED_NEGATIVE_INK_GUARDS}")
+    return value
+
+
+def _typed_negative_primitive_ids(source_bytes: bytes, page_id: str, segments: Sequence[Mapping[str, object]],
+                                  guard: str) -> frozenset[str]:
+    """Segment ids whose exact source path is green (owner rule), or also an unfilled non-wall stroke."""
+    from pb_layered_wall_doorway_room_ring_shadow import _ROLE_EVIDENCE, _ROLE_GREEN, _source_wall_ink_role
+
+    roles = {_ROLE_GREEN} if guard == "owner_green_ink" else {_ROLE_GREEN, _ROLE_EVIDENCE}
+    with fitz.open(stream=source_bytes, filetype="pdf") as document:
+        drawings = document[int(page_id) - 1].get_drawings()
+    negative = set()
+    for segment in segments:
+        index = segment.get("path_index")
+        if index is not None and _source_wall_ink_role(drawings[int(index)]) in roles:  # raster paint is unknown
+            negative.add(str(segment.get("id")))
+    return frozenset(negative)
+
+
+def _withhold_typed_negative_ink(equivalence: PhysicalWallEquivalenceResolution,
+                                 identities: Sequence[PhysicalWallIdentity],
+                                 negative: frozenset[str]) -> PhysicalWallEquivalenceResolution:
+    """Demote publication of walls drawn only with negative ink; relations and competition are unchanged."""
+    walls = {identity.wall_candidate_id for identity in identities
+             if identity.source_primitive_ids and {str(p) for p in identity.source_primitive_ids} <= negative}
+    published = set(equivalence.representative_wall_ids)
+    published.update(wall_id for group in equivalence.equivalence_groups if published & set(group) for wall_id in group)
+    withheld = walls & published
+    if not withheld:
+        return equivalence
+    reasons = dict(equivalence.blocking_reasons_by_wall_id)
+    for wall_id in withheld:
+        reasons[wall_id] = tuple(dict.fromkeys((*reasons.get(wall_id, ()), TYPED_NEGATIVE_NON_WALL_INK)))
+    return replace(
+        equivalence,
+        representative_wall_ids=tuple(w for w in equivalence.representative_wall_ids if w not in withheld),
+        equivalence_groups=tuple(g for g in equivalence.equivalence_groups if not withheld & set(g)),
+        abstained_wall_ids=tuple(sorted(set(equivalence.abstained_wall_ids) | withheld)),
+        blocking_reasons_by_wall_id=reasons,
+    )
+
+
 def _assemble_scope_result(
     *,
     source_producer: SourceVisibilityProducer,
@@ -3203,7 +3254,9 @@ def _assemble_scope_result(
     authenticated_frame_edge_primitive_count: int = 0,
     opening_local_exact_source_endpoints_shadow: bool = False,
     filter_typed_negative_non_wall_ink_shadow: bool = False,
+    typed_negative_ink_promotion_guard: Optional[str] = None,
 ) -> PhysicalWallCandidateScopeResult:
+    _typed_negative_ink_guard(typed_negative_ink_promotion_guard)
     if type(opening_local_exact_source_endpoints_shadow) is not bool:
         raise TypeError("exact opening-local W2 policy requires an explicit boolean")
     if type(filter_typed_negative_non_wall_ink_shadow) is not bool:
@@ -3360,6 +3413,10 @@ def _assemble_scope_result(
         equivalence,
         trusted_overrides,
     )
+    if typed_negative_ink_promotion_guard is not None:
+        equivalence = _withhold_typed_negative_ink(
+            equivalence, tuple(ordered_identities),
+            _typed_negative_primitive_ids(source_bytes, page_id, segments, typed_negative_ink_promotion_guard))
 
     boundary_reasons: list[str] = list(pre_boundary_reasons)
     wall_boundary_reasons: dict[str, str] = {}
@@ -3484,6 +3541,7 @@ def _build_scope_result(
     physical_opening_authority: Optional[PhysicalOpeningAuthority] = None,
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
     filter_typed_negative_non_wall_ink_shadow: bool = False,
+    typed_negative_ink_promotion_guard: Optional[str] = None,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = _decision_scope_id(page_id)
     selector = PhysicalWallCandidateSelector(
@@ -3544,6 +3602,7 @@ def _build_scope_result(
         resolved_visible_observations=resolved_visible_observations,
         physical_opening_authority=physical_opening_authority,
         filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
+        typed_negative_ink_promotion_guard=typed_negative_ink_promotion_guard,
     )
 
 
@@ -3650,6 +3709,7 @@ def _build_authenticated_viewport_scope_results(
     physical_plan_view_shadow: bool = False,
     filter_typed_negative_non_wall_ink_shadow: bool = False,
     source_segment_filter_shadow=None,
+    typed_negative_ink_promotion_guard: Optional[str] = None,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
     # A viewport scope is page-local authority. A scoped native ingestion still
@@ -3885,6 +3945,7 @@ def _build_authenticated_viewport_scope_results(
                 excluded_boundary_primitives=tuple(excluded_primitives),
                 authenticated_frame_edge_primitive_count=frame_edge_count,
                 filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
+                typed_negative_ink_promotion_guard=typed_negative_ink_promotion_guard,
             )
         )
     return tuple(results)
@@ -4016,6 +4077,17 @@ class PhysicalWallCandidateProducer:
         )
 
     @classmethod
+    def from_source_visibility_typed_negative_ink_guard_shadow(cls, source_visibility_producer, *, guard,
+                                                               page_ids: Optional[Sequence[str]] = None):
+        """Opt-in (C05): walls drawn only with typed negative ink stay candidates but cannot publish."""
+        if guard is None:
+            raise ValueError("typed negative ink guard mode required")
+        return cls._from_source_visibility_producer(
+            source_visibility_producer, page_ids=page_ids, include_authenticated_viewports=False,
+            include_page_scopes=True, supplemental_only=False,
+            typed_negative_ink_promotion_guard=_typed_negative_ink_guard(guard))
+
+    @classmethod
     def from_source_revision_shadow(cls,source_visibility_producer,*,revision_id,page_ids=None):
         """Address one current source root without visiting unrelated revisions."""
         return cls._from_source_visibility_producer(source_visibility_producer,
@@ -4084,6 +4156,7 @@ class PhysicalWallCandidateProducer:
         opening_local_exact_source_endpoints_shadow: bool = False,
         filter_typed_negative_non_wall_ink_shadow: bool = False,
         selected_revision_id: Optional[str] = None,
+        typed_negative_ink_promotion_guard: Optional[str] = None,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -4236,6 +4309,8 @@ class PhysicalWallCandidateProducer:
                         resolved_text_receipts=text_receipts_by_page.get(page_id, ()),
                         physical_opening_authority=physical_opening_authority,
                         physical_scale_producer=physical_scale_producer,
+                        **({"typed_negative_ink_promotion_guard": _typed_negative_ink_guard(typed_negative_ink_promotion_guard)}
+                           if typed_negative_ink_promotion_guard is not None and not supplemental_only else {}),
                         **(
                             {"opening_local_exact_source_endpoints_shadow": True}
                             if supplemental_only and opening_local_exact_source_endpoints_shadow
@@ -4264,6 +4339,7 @@ class PhysicalWallCandidateProducer:
                         physical_scale_producer=physical_scale_producer,
                         physical_plan_view_shadow=physical_plan_view_shadow,
                         filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
+                        typed_negative_ink_promotion_guard=_typed_negative_ink_guard(typed_negative_ink_promotion_guard),
                     ):
                         viewport_key = _ScopeKey(
                             document_id=viewport_result.document_id,

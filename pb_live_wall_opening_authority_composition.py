@@ -162,6 +162,7 @@ def compose_live_wall_opening_authority(
     source_fragment_roles_shadow: bool = False,
     source_revision_scope_shadow: bool = False,
     require_plan_view_host_ownership_shadow: bool = False,
+    typed_negative_ink_promotion_guard: Optional[str] = None,
 ) -> LiveWallOpeningAuthorityComposition:
     """Compose exact source-owned wall/opening host authority for source pages.
 
@@ -183,6 +184,8 @@ def compose_live_wall_opening_authority(
         raise TypeError("source revision scope shadow must be an explicit boolean")
     if type(require_plan_view_host_ownership_shadow) is not bool:
         raise TypeError("plan view host ownership shadow must be an explicit boolean")
+    if typed_negative_ink_promotion_guard is not None and source_revision_scope_shadow:
+        raise ValueError("typed negative ink guard is not combined with the revision scope shadow")
     if source_fragment_roles_shadow and not include_unmeasured_ink_closed_flanks_shadow:
         raise ValueError("source fragment roles require isolated G17 source capture")
     revision_id = str(revision_id or "").strip()
@@ -227,6 +230,11 @@ def compose_live_wall_opening_authority(
     if source_revision_scope_shadow:
         wall_producer = PhysicalWallCandidateProducer.from_source_revision_shadow(
             source_visibility_producer,revision_id=revision_id,
+            page_ids=_clean_page_ids((*selected_pages, *evidence_pages)))
+    elif typed_negative_ink_promotion_guard is not None:
+        # Default off. Walls drawn only with typed negative ink stay candidates but cannot publish (C05).
+        wall_producer = PhysicalWallCandidateProducer.from_source_visibility_typed_negative_ink_guard_shadow(
+            source_visibility_producer, guard=typed_negative_ink_promotion_guard,
             page_ids=_clean_page_ids((*selected_pages, *evidence_pages)))
     else:
         wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
