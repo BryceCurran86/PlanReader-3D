@@ -303,7 +303,8 @@ export function beginDraftGesture(state: BuildState, levelId: string | null, ray
   const directWall = state.tool === "move" || state.tool === "stretch" ||
     state.tool === "opening-move"
     ? openingHost(state.walls.filter(wall => wall.levelId === levelId), ray, null,options) : null;
-  const from = planPoint(ray) ?? (directWall && snappedPoint(directWall.point));
+  const directCeiling = state.tool === "move" || state.tool === "stretch" ? ceilingHost(state.ceilings,ray,levelId) : null;
+  const from = planPoint(ray) ?? (directWall && snappedPoint(directWall.point)) ?? (directCeiling && snappedPoint([directCeiling.hit.x,directCeiling.hit.z]));
   if (!from) return null;
   const mode = state.tool;
   if (mode === "wall" || mode === "ceiling") {
@@ -354,7 +355,7 @@ export function directDraftGesture(state:BuildState,levelId:string|null,ray:THRE
  const move={...state,tool:"move" as const};
  const wall=()=>beginDraftGesture({...move,ceilings:[]},levelId,ray,options);
  const ceiling=()=>beginDraftGesture({...move,walls:[]},levelId,ray,options);
- const gesture=kind==="walls"||top&&kind==="auto"?wall():kind==="ceilings"?ceiling():
+ const gesture=kind==="walls"?wall():top&&kind==="auto"?wall()??ceiling():kind==="ceilings"?ceiling():
    beginDraftGesture(move,levelId,ray,options);
  return gesture?{...gesture,direct:true}:null;
 }
