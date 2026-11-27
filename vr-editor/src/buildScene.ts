@@ -21,6 +21,8 @@ import {nominalTrimMesh} from "./constructionTrimVisual.ts";
 import type {WallCornerJoins} from "./wallCornerJoin.ts";
 import {MENU_ATLAS_SIZE,menuAtlasScale} from "./menuAtlas.ts";
 import {openingFrameVisual,nominalDoorSlab,windowDetailVisual} from "./openingFinishVisual.ts";
+import {doorJunctionDetails} from "./doorJunctionDetails.ts";
+import {RoundedBoxGeometry} from "three/addons/geometries/RoundedBoxGeometry.js";
 import {physicalUV} from "./materialDetail.ts";
 import type {MaterialDetailLibrary} from "./materialDetail.ts";
 
@@ -170,6 +172,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
         (Array.isArray(slab.material)?slab.material:[slab.material]).forEach(m=>m.dispose());door.userData.nominalDoorSlab=true;
         if(door.material instanceof THREE.MeshStandardMaterial){door.material.roughness=.52;door.castShadow=true;door.receiveShadow=true;}
       }
+      for(const detail of doorJunctionDetails(wall,opening))group.add(detail);
       door.userData.doorHinge=atOffset(wall,opening.offsetM,opening.sillHeightM);
       door.userData.localDoorMotion=localDoorMotion(wall,opening,wallAssembly(wall.assembly).thicknessMm/2000);
       if(opening.doorMechanism!=="garage"&&opening.widthM>=.4&&opening.heightM>=1.2){
@@ -178,9 +181,9 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
         const angle=-Math.atan2(wall.end[1]-wall.start[1],wall.end[0]-wall.start[0]);
         for(const side of [-1,1]){
           const position=atOffset(wall,opening.offsetM+opening.widthM-.10,opening.sillHeightM+Math.min(1.02,opening.heightM*.6)).addScaledVector(normal,side*.04);
-          const plate=new THREE.Mesh(new THREE.BoxGeometry(.035,.095,.018),material);
+          const plate=new THREE.Mesh(new RoundedBoxGeometry(.045,.095,.018,2,.005),material);plate.name="Door hardware backplate";
           plate.position.copy(position);plate.rotation.y=angle;door.add(plate);
-          const lever=new THREE.Mesh(new THREE.BoxGeometry(.105,.024,.035),material);
+          const lever=new THREE.Mesh(new RoundedBoxGeometry(.105,.024,.035,2,.008),material);lever.name="Radiused door lever";
           lever.position.copy(position).addScaledVector(normal,side*.025);lever.rotation.y=angle;door.add(lever);
         }
       }

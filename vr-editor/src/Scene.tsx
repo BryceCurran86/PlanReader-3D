@@ -1,4 +1,4 @@
-import {DesktopRenderGovernor} from "./visualRealism";
+import {DesktopRenderGovernor,DesktopFrameDemand} from "./visualRealism";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -10,7 +10,7 @@ import type { DraftHistory, WallDraft } from "./reviewDraft";
 import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget,adaptiveRenderQuality,architecturalShadowExtent } from "./visualRealism";
 import {createMaterialDetailLibrary,physicalUV} from "./materialDetail";
 import {createPresentationGarden} from "./presentationGarden";
-import {RoomEnvironment} from "three/addons/environments/RoomEnvironment.js";
+import {neutralStudioTexture} from "./neutralStudioTexture";
 import {RGBELoader} from "three/addons/loaders/RGBELoader.js";
 import {architecturalAssetUrl} from "./architecturalAssets";
 import type { LightingMood, RenderQuality } from "./visualRealism";
@@ -370,11 +370,11 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
     // Static architectural lighting: refresh a shadow map on actual changes,
     // never every frame in a stationary scene.
     renderer.shadowMap.autoUpdate=false;
-    const pmrem=new THREE.PMREMGenerator(renderer);
-    const lightingRoom=new RoomEnvironment();
-    const environmentMap=pmrem.fromScene(lightingRoom,.04);
-    lightingRoom.dispose();pmrem.dispose();
-    scene.environment=environmentMap.texture;scene.environmentIntensity=.65;
+    // Small local HDR studio fallback; Three builds its filtered environment
+    // lazily on the first render. No synchronous offscreen room render during
+    // source switching. The photographic daylight HDR remains unchanged.
+    const environmentMap=neutralStudioTexture();
+    scene.environment=environmentMap;scene.environmentIntensity=.65;
     let outdoorHdr:THREE.DataTexture|null=null,disposedScene=false;
     const fallbackSky=new THREE.Color(initialPreset.background);
     // A source/example inspection scene uses the inexpensive neutral studio map.
@@ -1969,11 +1969,18 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
     let adaptiveCap=2,qualityPreference:RenderQuality|null=null;
     let sourceAppearanceKey: readonly unknown[] = [];
     let surfaceVisibilityKey: readonly unknown[] = [];
-    const desktopGovernor=new DesktopRenderGovernor();
+    const desktopGovernor=new DesktopRenderGovernor(),desktopDemand=new DesktopFrameDemand();
     renderer.setAnimationLoop((now) => {
       const presenting=renderer.xr.isPresenting;
-      if(!presenting&&!desktopGovernor.allow(now,visualSettings.current.quality,document.hidden||sceneLoading.current()))return;
-      if(presenting)desktopGovernor.reset();
+      if(!presenting){
+        const paused=document.hidden||sceneLoading.current();
+        if(paused){desktopDemand.reset();desktopGovernor.idle();return;}
+        if(!desktopGovernor.allow(now,visualSettings.current.quality,false))return;
+        controls.update();
+        const state=[interaction.current,visualSettings.current,construction.current,build.current,resize.current,itemControls.current,moveSettings.current,directSelection.current,picked.current,draftMap.current,addedWallRef.current,addedWallsRef.current,openDoors,selectedDraftId,outdoorHdr,hoveringCanvas,mouse.x,mouse.y,camera.position.x,camera.position.y,camera.position.z,camera.quaternion.x,camera.quaternion.y,camera.quaternion.z,camera.quaternion.w,renderer.domElement.width,renderer.domElement.height];
+        const pendingLining=sourceLiningCursor<sourceLiningPending.length&&sourceLiningCache.size<120&&sourceLiningVertices<1_000_000;
+        if(!desktopDemand.shouldDraw(now,state,!!startPointer||pendingLining)){desktopGovernor.idle();return;}
+      }else{desktopGovernor.reset();desktopDemand.reset();}
       const renderStarted=performance.now();
       stationaryNavigation(now);
       const { mood: activeMood, quality: requestedQuality, detail: activeDetail,
@@ -2304,7 +2311,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
       const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
       garden.update(gardenBounds,outdoor&&budget.landscape);
       if(gardenBounds&&shadowHouseBounds!==gardenBounds){shadowHouseBounds=gardenBounds;lightCenter.set((gardenBounds.minX+gardenBounds.maxX)/2,1.2,(gardenBounds.minZ+gardenBounds.maxZ)/2);const extent=architecturalShadowExtent(gardenBounds.maxX-gardenBounds.minX,gardenBounds.maxZ-gardenBounds.minZ);const sc=sunlight.shadow.camera;sc.left=sc.bottom=-extent;sc.right=sc.top=extent;sc.near=.5;sc.far=80;sc.updateProjectionMatrix();sunlight.target.position.copy(lightCenter);scene.add(sunlight.target);sunlight.position.set(...VISUAL_PRESETS[activeMood].sunPosition).add(lightCenter);shadowKey=[];}
-      const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items,renderer.xr.isPresenting];
+      const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items,currentStage,construction.current.layers,renderer.xr.isPresenting];
       if(!nextMaterialKey.every((v,i)=>v===materialBudgetKey[i])){
         materialBudgetKey=nextMaterialKey;
         for(const layer of [wallAdditionLayer,shellGroup])applyMaterialDetailBudget(layer,budget.detail);
@@ -2349,7 +2356,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         lastDetail = activeDetail;
       }
       scene.background=photographicSky?outdoorHdr:fallbackSky;
-      const desiredEnvironment=budget.detail?(activeMood==="daylight"&&outdoorHdr?outdoorHdr:environmentMap.texture):null;
+      const desiredEnvironment=budget.detail?(activeMood==="daylight"&&outdoorHdr?outdoorHdr:environmentMap):null;
       if(scene.environment!==desiredEnvironment)scene.environment=desiredEnvironment;
       scene.environmentIntensity=budget.environmentIntensity*(activeMood==="daylight"&&outdoorHdr?0.6:1);
       if (lastQuality !== activeQuality||lastPresenting!==renderer.xr.isPresenting) {
@@ -2358,6 +2365,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         if (sunlight.shadow.map) {
           sunlight.shadow.map.dispose();
           sunlight.shadow.map = null;
+          renderer.shadowMap.needsUpdate=true;
         }
         if(!renderer.xr.isPresenting){
           renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,
@@ -2470,7 +2478,6 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
           }
         }
       }
-      if(!renderer.xr.isPresenting)controls.update();
       renderer.render(scene, camera);
       if(!presenting)desktopGovernor.complete(now,performance.now()-renderStarted);
       // Frame callback cadence is diagnostic, not a compositor/GPU time measurement.

@@ -113,5 +113,19 @@ export class DesktopRenderGovernor {
   const interval=this.requested==="performance"||this.cap===0?1000/30:1000/45;
   this.nextAt=now+Math.max(interval,elapsed+Math.min(100,Math.max(8,elapsed*.65)))-1;
  }
+ idle(){this.previous=-Infinity;}
  reset(){this.cap=2;this.nextAt=this.previous=-Infinity;this.slow=this.fast=0;}
+}
+
+/** Demand rendering in desktop mode only. A bounded heartbeat presents async
+ * texture updates and delayed shadows even when input references are stable. */
+export class DesktopFrameDemand {
+ private last:readonly unknown[]=[];
+ private lastDraw=-Infinity;
+ shouldDraw(now:number,key:readonly unknown[],continuous=false){
+  const changed=key.length!==this.last.length||key.some((v,i)=>!Object.is(v,this.last[i]));
+  if(!continuous&&!changed&&now-this.lastDraw<500)return false;
+  this.last=[...key];this.lastDraw=now;return true;
+ }
+ reset(){this.last=[];this.lastDraw=-Infinity;}
 }
