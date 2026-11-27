@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 
+import fitz
 import pytest
 
 import pb_new_source_trace_preview as canonical
@@ -78,6 +79,38 @@ def test_applied_chord_notes_do_not_change_what_the_second_trace_is_keyed_on(tmp
     for _ in range(2):
         assert _preview(path, [CLOSE_GAP], source_owned_doorway_chord_closures=True, piece_cache=cache) == expected
     assert len(calls) == 1 and len(cache) == 1
+
+
+def _rotated(path, rows, degrees):
+    _pdf(path, rows)
+    with fitz.open(path) as doc:
+        doc[0].set_rotation(degrees)
+        doc.saveIncr()
+    return path
+
+
+def test_a_rotated_copy_and_changed_options_match_runs_without_the_cache(tmp_path):
+    upright = _pdf(tmp_path / "upright.pdf", _two_rooms_missing_partition())
+    turned = _rotated(tmp_path / "turned.pdf", _two_rooms_missing_partition(), 90)
+    cases = [(upright, {}), (turned, {}), (upright, {"admit_wall_joint_paint": False}),
+             (upright, {"source_owned_doorway_chord_closures": True}), (turned, {}), (upright, {})]
+    expected = [_preview(path, [CLOSE_GAP] if path == upright else None, **options) for path, options in cases]
+    cache = LayeredPieceCache()
+    for (path, options), wanted in zip(cases, expected):
+        got = _preview(path, [CLOSE_GAP] if path == upright else None, piece_cache=cache, **options)
+        assert got == wanted, (path.name, options)
+
+
+def test_a_tiled_page_with_a_one_entry_cache_matches_runs_without_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(tracer, "_PRIMITIVE_CAP", 3)  # every tile builds on its own
+    first = _pdf(tmp_path / "a.pdf", _two_rooms_missing_partition())
+    second = _pdf(tmp_path / "b.pdf", _missing_wall_room())
+    sequence = [first, second, first, second]
+    expected = [_preview(path, [CLOSE_GAP]) for path in sequence]
+    cache = LayeredPieceCache(max_entries=1)
+    for path, wanted in zip(sequence, expected):
+        assert _preview(path, [CLOSE_GAP], piece_cache=cache) == wanted
+        assert len(cache) == 1
 
 
 @pytest.mark.parametrize("bad", [{}, True, "cache"])
