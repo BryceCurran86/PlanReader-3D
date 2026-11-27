@@ -22,6 +22,7 @@ import {itemLayerVisible,itemLayer} from "./constructionLayers";
 import { activeControl, EMPTY_RESIZE_HISTORY, historyShortcut, historyTarget, recordResize, stepResize } from "./editorControls";
 import type { ControlMode, HistoryAction, HistoryTarget, ResizeHistory } from "./editorControls";
 import { FootprintTools } from "./FootprintTools";
+import {commitLocalFootprint} from "./localFootprintEdit";
 import { footprintBounds, footprintDepth, footprintWidth, originalPlacement, previewFootprint, sameFootprint, projectWall, projectCeiling } from "./footprintResize";
 import type { FootprintBounds } from "./footprintResize";
 import { CataloguePricingPanel } from "./CataloguePricingPanel";
@@ -29,7 +30,7 @@ import { isRoughIn } from "./constructionStages";
 import type { ConstructionStage } from "./constructionStages";
 import { ItemCataloguePanel } from "./ItemCataloguePanel";
 import { getCatalogueItem, itemCanRotate } from "./itemCatalogue";
-import { currentItemPlacements, emptyItemDraft, itemGuide, placeItem, replaceItemFinish, redoItem, removeItem, undoItem } from "./itemPlacement";
+import { currentItemPlacements, emptyItemDraft, itemGuide, placeItem, replaceItemFinish, editLocalFloorFixture, redoItem, removeItem, undoItem } from "./itemPlacement";
 import type { ItemDraft, ItemHit, PlacedItem } from "./itemPlacement";
 import type { ItemAction } from "./catalogueMenu";
 import { activeStart, buildGuide, EMPTY_BUILD, newPlacementId, STARTING_SIZES, updateBuild } from "./buildPlacement";
@@ -71,6 +72,7 @@ export function App() {
   const [addedWallSketch, setAddedWallSketch] = useState<WallVisual | null>(null);
   const [addedWallBatchSketches, setAddedWallBatchSketches] = useState<WallVisual[]>([]);
   const [placed, setPlaced] = useState<{ scene: SceneManifest; build: BuildState } | null>(null);
+  const resizeJournal=useRef(new WeakMap<BuildState["walls"],WeakMap<BuildState["walls"],{items:ItemDraft;otherItems:ItemDraft}>>());
   const [buildSizes, setBuildSizes] = useState(STARTING_SIZES);
   const [buildHint, setBuildHint] = useState("");
   const [vrRate,setVrRate]=useState("");
@@ -423,6 +425,7 @@ export function App() {
 
   function cancelTool() {
     if (mode === "inspect") handleSelect(null);
+    else if(mode==="resize")toggleFootprint();
     else enterMode("inspect");
   }
 
@@ -432,6 +435,22 @@ export function App() {
   }
 
   function onItemAction(action: ItemAction) {
+    if(action.kind==="remove-context-item"){
+      if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect"||!catalogue.draft.items.some(p=>p.id===action.id)){setToolMessage("Selected placement is no longer editable.");return;}
+      changeCatalogue(current=>({...current,draft:removeItem(current.draft,action.id)}));setLastEdit("place");setToolMessage("Placement removed. Undo restores it and attached items.");return;
+    }
+    if(action.kind==="edit-fixture"){
+      if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect"){setToolMessage("Finish the active edit first.");return;}
+      const key=scopeKey(manifest),walls=[...activeBatchSketches,...buildState.walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])];
+      const newId=newPlacementId("item");
+      const apply=(draft:ItemDraft)=>editLocalFloorFixture(draft,key,action.id,action.edit,walls,newId,action.move);
+      const result=apply(catalogue.draft);
+      if(result.draft===catalogue.draft){setToolMessage(result.reason);return;}
+      const before=currentItemPlacements(catalogue.draft.items,manifest,walls,isDemo,buildState.ceilings);
+      const after=currentItemPlacements(result.draft.items,manifest,walls,isDemo,buildState.ceilings);
+      if(after.length<before.length||!after.some(p=>p.id===(action.edit==="duplicate"?newId:action.id))||before.some(p=>!after.some(q=>q.id===p.id))){setToolMessage("Edit would invalidate a hosted item.");return;}
+      setLastEdit("place");changeCatalogue(current=>({...current,draft:apply(current.draft).draft}));setToolMessage(result.reason+" · local design only.");return;
+    }
     if(action.kind==="apply-finish"){
       if(!manifest||!catalogue||projection||resizeEnabled||mode!=="inspect"){setToolMessage("Finish or cancel the active edit before changing a finish.");return;}
       const item=getCatalogueItem(action.itemId);
@@ -492,7 +511,22 @@ export function App() {
   }
 
   function onBuildAction(action: BuildAction) {
-    if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) return;
+    if (!manifest || ((projection || resizeEnabled) && action.kind !== "done" && action.kind !== "saved")) {setToolMessage("Apply or reset the footprint preview before editing walls.");return;}
+    if(action.kind==="undo"||action.kind==="redo"){
+      const next=updateBuild(buildState,action,scopeKey(manifest),buildLevel,buildSizes);
+      const record=resizeJournal.current.get(buildState.walls)?.get(next.walls);
+      if(record){
+        if(catalogue?.draft.items!==record.items.items){setToolMessage("Undo later fitting edits before undoing or redoing the footprint.");return;}
+        setPlaced({scene:manifest,build:next});changeCatalogue(current=>({...current,draft:record.otherItems}));return;
+      }
+    }
+    if(action.kind==="adjust"||action.kind==="adjust-ceiling"){
+      const next=updateBuild(buildState,action,scopeKey(manifest),buildLevel,buildSizes);
+      if(next===buildState){setToolMessage("Edit rejected: check wall connections, opening sizes or ceiling dimensions.");return;}
+      const collect=(geometry:BuildState)=>currentItemPlacements(catalogue?.draft.items??[],manifest,[...activeBatchSketches,...geometry.walls,...(activeAddedWallSketch?[activeAddedWallSketch]:[])],isDemo,geometry.ceilings);
+      const ids=new Set(collect(next).map(p=>p.id));if(collect(buildState).some(p=>!ids.has(p.id))){setToolMessage("Edit would invalidate a hosted fitting. Move it first or use footprint resizing.");return;}
+      setPlaced({scene:manifest,build:next});setLastEdit("draw");setToolMessage("Building and plan updated.");return;
+    }
     if(action.kind==="edit-local-outline" && (catalogue?.draft.items.length || catalogue?.draft.history.length || catalogue?.draft.future?.length)) return;
     if(action.kind==="rotate-local-wall"){
       const next=updateBuild(buildState,action,scopeKey(manifest),buildLevel,buildSizes);
@@ -526,10 +560,19 @@ export function App() {
   function toggleFootprint() {
     if (!manifest || !baseFootprint) return;
     if (resizeEnabled) {
+      if(isStarter&&projection){
+        const before=catalogue?.draft??emptyItemDraft(scopeKey(manifest));
+        const next=commitLocalFootprint(manifest,buildState,before,projection);
+        if(!next){setToolMessage("Cannot apply resize: a wall, opening or hosted item would be invalid.");return;}
+        const beforeMap=resizeJournal.current.get(buildState.walls)??new WeakMap();beforeMap.set(next.build.walls,{items:before,otherItems:next.items});resizeJournal.current.set(buildState.walls,beforeMap);
+        const afterMap=resizeJournal.current.get(next.build.walls)??new WeakMap();afterMap.set(buildState.walls,{items:next.items,otherItems:before});resizeJournal.current.set(next.build.walls,afterMap);
+        setPlaced({scene:manifest,build:next.build});changeCatalogue(current=>({...current,draft:next.items}));
+        setResize(null);setLastEdit("draw");setToolMessage("Footprint applied to local building and plan. Continue editing walls.");return;
+      }
       enterMode("inspect");
       return;
     }
-    enterMode("resize");
+    setPlanPreview(false);enterMode("resize");
     requestCamera("plan");
     setLastEdit("resize");
     setResize(current => ({ ...(current?.scene === manifest ? current : EMPTY_RESIZE_HISTORY),
@@ -555,6 +598,12 @@ export function App() {
     setResize(previous => previous?.scene === manifest ? { ...recordResize(previous, null), hint: "" } : previous);
   }
 
+  function changeSlab(thickness:number){
+    if(!manifest||!Number.isFinite(thickness)||thickness!==0&&(thickness<50||thickness>600))return;
+    if(thickness===0&&catalogue?.draft.items.some(p=>p.hostId.startsWith("draft-floor:"))){setToolMessage("Remove or relocate hosted floor items before removing their slab.");return;}
+    setShellStore({scene:manifest,settings:{...shellSettings,slabEnabled:thickness!==0,slabMm:thickness||shellSettings.slabMm}});
+    setToolMessage(thickness?"Concrete slab · "+thickness+" mm · local design only.":"Concrete slab hidden from local design.");
+  }
   function onStage(next: ConstructionStage) {
     if (next === stage) return;
     if ((activeItem && !itemLayerVisible(next,activeItem,layers)) || next === "slab" ||
@@ -766,12 +815,13 @@ export function App() {
             blocked={!!(projection||resizeEnabled||catalogue?.draft.items.length||catalogue?.draft.history.length||catalogue?.draft.future?.length)}
             onEdit={(expected,edit)=>{enterMode("inspect");onBuildAction({kind:"edit-local-outline",expected,edit});}} />}
           {buildLevel&&<details className="footprint-tools"><summary>Connected draft building shell</summary>
-            <p>Preview only. Uses one closed, equal-height local wall ring. Flat and two-plane pitched roofs follow valid irregular rings. Set a fixed ridge angle to keep its direction while editing. No existing local ceilings on the level. Does not replace source surfaces or save roof settings in draft exports.</p>
+            <p>Preview only. Uses one closed, equal-height local wall ring. Flat and two-plane pitched roofs follow valid irregular rings. Set a fixed ridge angle to keep its direction while editing. Concrete slab can be enabled independently of roof generation. Does not replace source surfaces or save shell settings in draft exports.</p>
             <label>Shell roof <select value={shellSettings.roof} onChange={e=>setShellStore({scene:manifest,settings:{...shellSettings,roof:e.currentTarget.value as ShellSettings["roof"]}})}><option value="off">Off</option><option value="flat">Flat</option><option value="gable">Two-plane pitched roof</option></select></label>
             <label>Roof pitch (degrees) <input type="number" min="5" max="60" step=".5" value={shellSettings.pitchDeg} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=5&&n<=60)setShellStore({scene:manifest,settings:{...shellSettings,pitchDeg:n}});}}/></label>
             {shellSettings.roof==="gable"&&<><label>Fixed ridge direction<input type="checkbox" checked={shellSettings.ridgeDeg!==undefined} onChange={e=>setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:e.currentTarget.checked?0:undefined}})}/></label>
             {shellSettings.ridgeDeg!==undefined&&<label>Ridge angle (degrees, +X toward +Z)<input type="number" min="0" max="360" step="1" value={shellSettings.ridgeDeg} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=0&&n<=360)setShellStore({scene:manifest,settings:{...shellSettings,ridgeDeg:n}});}}/></label>}</>}
-            <label>Slab thickness (mm) <input type="number" min="50" max="600" step="10" value={shellSettings.slabMm} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=50&&n<=600)setShellStore({scene:manifest,settings:{...shellSettings,slabMm:n}});}}/></label>
+            <label>Concrete slab <input type="checkbox" checked={shellSettings.slabEnabled??shellSettings.roof!=="off"} onChange={e=>changeSlab(e.currentTarget.checked?shellSettings.slabMm:0)}/></label>
+            <label>Slab thickness (mm) <input type="number" min="50" max="600" step="10" value={shellSettings.slabMm} onChange={e=>{const n=e.currentTarget.valueAsNumber;if(n>=50&&n<=600)changeSlab(n);}}/></label>
             {shell?<p>{shell.floorM2.toFixed(2)} m² slab/ceiling · {shell.roofM2.toFixed(2)} m² roof · {shell.slabM3.toFixed(2)} m³ nominal slab. Excludes structural design and overhangs.</p>:shellSettings.roof!=="off"?<p>Shell unavailable: resolve the exterior outline and wall heights.</p>:null}
           </details>}
           <PreciseCommandPanel key={scopeKey(manifest)} state={buildState} level={buildLevel} blocked={!!projection||resizeEnabled||mode!=="inspect"} onAction={onBuildAction}/>
@@ -792,8 +842,8 @@ export function App() {
           {toolMessage && <span className="sr-only" role="status">{toolMessage}</span>}
 
           <div className="viewport">
-            {planPreview?<ArchitecturalPlan scene={manifest} build={buildState} level={level} visible={visibleIds} projection={projection} moves={activeWallMoves?safeWallMoves(activeWallMoves,manifest):[]} extra={[...activeBatchSketches,...(activeAddedWallSketch?[activeAddedWallSketch]:[])]}/>:<Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
-              <SceneView manifest={manifest} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
+            {planPreview?<ArchitecturalPlan scene={manifest} build={buildState} level={level} visible={visibleIds} projection={projection} moves={activeWallMoves?safeWallMoves(activeWallMoves,manifest):[]} extra={[...activeBatchSketches,...(activeAddedWallSketch?[activeAddedWallSketch]:[])]} shell={shell}/>:<Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
+              <SceneView manifest={manifest} isSceneLoading={()=>pendingLoad.current!==null} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
                 outdoor={outdoor} onOutdoor={setOutdoor} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
@@ -801,7 +851,7 @@ export function App() {
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
                 addedWallSketch={activeAddedWallSketch} addedWallSketches={activeBatchSketches}
-                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} liningBoard={liningBoard} onLiningBoard={setLiningBoard} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell}
+                buildState={buildState} buildLevel={buildLevel} buildSizes={buildSizes} stage={stage} onStage={onStage} liningBoard={liningBoard} onLiningBoard={setLiningBoard} layers={layers} onLayers={setLayers} allDimensions={allDimensions} onAllDimensions={setAllDimensions} shell={shell} slabMm={(shellSettings.slabEnabled??shellSettings.roof!=="off")?shellSettings.slabMm:0} onSlab={changeSlab}
                 footprint={{ box: activeFootprint, projection, enabled: resizeEnabled, hint: scopedResize?.hint ?? "",
                   onToggle: toggleFootprint, onResize: resizeFootprint, onReset: resetFootprint }}
                 onBuildAction={onBuildAction} onBuildHint={setBuildHint} onBuildSizes={setBuildSizes} toolFeedback={toolMessage} onToolMessage={setToolMessage}
@@ -863,6 +913,7 @@ export function App() {
               onCancel={() => onItemAction({ kind: "done" })}
               onRotate={() => onItemAction({ kind: "rotate" })}
               onUndo={() => onItemAction({ kind: "undo" })}
+              onEdit={(id,edit)=>onItemAction({kind:"edit-fixture",id,edit})}
               onRemove={id => { setLastEdit("place"); changeCatalogue(current => ({ ...current, draft: removeItem(current.draft, id) })); }} />
           </div>
           <div className="section-block">

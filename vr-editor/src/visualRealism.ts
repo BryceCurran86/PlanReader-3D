@@ -79,3 +79,39 @@ export function architecturalShadowExtent(width:number,depth:number):number{
  if(!Number.isFinite(width)||!Number.isFinite(depth)||width<=0||depth<=0)return 12;
  return Math.min(150,Math.max(6,Math.hypot(width,depth)*.68+2));
 }
+
+/** Desktop frame pacing leaves time for DOM input, source loading and layout.
+ * XR remains completely under the headset compositor's native frame schedule. */
+export function shouldRenderDesktopFrame(now:number,last:number,quality:RenderQuality,isXR:boolean){
+ if(isXR||!Number.isFinite(last)||now<last)return true;
+ return now-last>= (quality==="performance"?1000/30:1000/45)-1;
+}
+
+/** Desktop-only render governor. Slow rendering must leave a real idle window
+ * for UI events and loading, not merely request another frame at 60 Hz.
+ * Hysteresis prevents oscillation and never exceeds the selected quality. */
+export class DesktopRenderGovernor {
+ cap=2;
+ private nextAt=-Infinity;
+ private previous=-Infinity;
+ private slow=0;
+ private fast=0;
+ private requested:RenderQuality|null=null;
+ allow(now:number,requested:RenderQuality,paused:boolean){
+  if(paused){this.previous=-Infinity;this.nextAt=-Infinity;return false;}
+  if(this.requested!==requested){this.requested=requested;this.reset();}
+  return now>=this.nextAt;
+ }
+ complete(now:number,elapsed:number){
+  if(!Number.isFinite(now)||!Number.isFinite(elapsed)||elapsed<0)return;
+  const gap=now-this.previous;this.previous=now;
+  const overloaded=elapsed>36||Number.isFinite(gap)&&gap>110;
+  const healthy=elapsed<15&&gap<65;
+  this.slow=overloaded?this.slow+1:0;this.fast=healthy?this.fast+1:0;
+  if(this.slow>=3){this.cap=Math.max(0,this.cap-1);this.slow=0;this.fast=0;}
+  else if(this.fast>=90){this.cap=Math.min(2,this.cap+1);this.fast=0;}
+  const interval=this.requested==="performance"||this.cap===0?1000/30:1000/45;
+  this.nextAt=now+Math.max(interval,elapsed+Math.min(100,Math.max(8,elapsed*.65)))-1;
+ }
+ reset(){this.cap=2;this.nextAt=this.previous=-Infinity;this.slow=this.fast=0;}
+}

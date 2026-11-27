@@ -2,7 +2,7 @@ import {ShapeUtils,Vector2} from "three";
 import {localOutline} from "./localOutline.ts";
 import {profileDetails} from "./wallProfiles.ts";
 import type {PlacedWall,PlanPoint,CeilingDraft} from "./buildPlacement.ts";
-export type ShellSettings={roof:"off"|"flat"|"gable";pitchDeg:number;slabMm:number;ridgeDeg?:number};
+export type ShellSettings={roof:"off"|"flat"|"gable";pitchDeg:number;slabMm:number;ridgeDeg?:number;slabEnabled?:boolean};
 export const DEFAULT_SHELL:ShellSettings={roof:"off",pitchDeg:22.5,slabMm:100};
 type Vertex=[number,number,number];
 export type ShellSurface={kind:"floor"|"ceiling"|"roof";vertices:Vertex[]};
@@ -24,7 +24,7 @@ function projectedTriangleArea(a:PlanPoint,b:PlanPoint,c:PlanPoint){
  return Math.abs((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]))/2;
 }
 export function connectedDraftShell(walls:readonly PlacedWall[],settings:ShellSettings):DraftShell|null{
- if(settings.roof==="off"||!["flat","gable"].includes(settings.roof)||!Number.isFinite(settings.pitchDeg)||settings.pitchDeg<5||settings.pitchDeg>60||!Number.isFinite(settings.slabMm)||settings.slabMm<50||settings.slabMm>600)return null;
+ if(!["off","flat","gable"].includes(settings.roof)||(settings.roof==="off"&&!settings.slabEnabled)||!Number.isFinite(settings.pitchDeg)||settings.pitchDeg<5||settings.pitchDeg>60||!Number.isFinite(settings.slabMm)||settings.slabMm<50||settings.slabMm>600)return null;
  const ring=localOutline(walls);
  if(!ring)return null;
  const height=walls[0].heightM;
@@ -43,8 +43,9 @@ export function connectedDraftShell(walls:readonly PlacedWall[],settings:ShellSe
   floor.push(...quad(at(a,.002),at(b,.002),at(b,bottom),at(a,bottom)));
  }
  const ceiling=plane(height-.012);
- let roof:Vertex[],roofM2=ring.areaM2;
- if(settings.roof==="flat"){roof=plane(height+.08);}
+ let roof:Vertex[],roofM2=settings.roof==="off"?0:ring.areaM2;
+ if(settings.roof==="off"){roof=[];}
+ else if(settings.roof==="flat"){roof=plane(height+.08);}
  else{
   // Auto ridge follows the longest perimeter edge. An explicit plan bearing
   // fixes the ridge direction across further connected footprint changes.
@@ -90,7 +91,11 @@ export function connectedDraftShell(walls:readonly PlacedWall[],settings:ShellSe
   }
   roofM2=ring.areaM2/Math.cos(settings.pitchDeg*Math.PI/180);
  }
- return {surfaces:[{kind:"floor",vertices:floor},{kind:"ceiling",vertices:ceiling},{kind:"roof",vertices:roof}],floorM2:ring.areaM2,roofM2,slabM3:ring.areaM2*settings.slabMm/1000,heightM:height,levelId:walls[0].levelId};
+ const slab=settings.slabEnabled??settings.roof!=="off";
+ const surfaces:ShellSurface[]=[];
+ if(slab)surfaces.push({kind:"floor",vertices:floor});
+ if(settings.roof!=="off")surfaces.push({kind:"ceiling",vertices:ceiling},{kind:"roof",vertices:roof});
+ return {surfaces,floorM2:slab?ring.areaM2:0,roofM2,slabM3:slab?ring.areaM2*settings.slabMm/1000:0,heightM:height,levelId:walls[0].levelId};
 }
 
 /** Local design only: an explicitly marked exterior ring takes precedence.
