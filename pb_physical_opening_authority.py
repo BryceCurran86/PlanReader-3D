@@ -1849,6 +1849,8 @@ class PhysicalOpeningAuthority:
             _source_visibility_producer, "_raster_corner_framed_opening_shadow", False)
         self._angled_opening_precision_shadow = getattr(
             _source_visibility_producer, "_angled_opening_precision_shadow", False) is True
+        self._crossing_wall_negative_shadow = getattr(
+            _source_visibility_producer, "_crossing_wall_negative_shadow", False) is True
         if _raster_paired_outer_faces_shadow_override is not None and type(_raster_paired_outer_faces_shadow_override) is not bool:
             raise ValueError("raster paired outer faces override must be explicit boolean")
         self._raster_paired_outer_faces_shadow = (self._raster_source_policy_at_creation
@@ -3447,6 +3449,7 @@ class PhysicalOpeningAuthority:
         seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
         precision: bool = False,
+        crossing_wall_negative: bool = False,
     ) -> tuple[CandidateSemanticOpening, ...]:
         """Discover exact structural openings without quadratic rescans of breaks.
 
@@ -3607,6 +3610,29 @@ class PhysicalOpeningAuthority:
             tuple[SourceObservationRecord, ...],
         ] = {}
 
+        def continues_outward(jamb: SourceObservationRecord) -> bool:
+            """Collinear source segments leave BOTH ends of this jamb away from the wall (C12, opt-in)."""
+            line = _line_geometry(jamb)
+            ends = ((line[0], line[1]), (line[2], line[3]))
+            for here, other_end in (ends, ends[::-1]):
+                outward = (here[0] - other_end[0], here[1] - other_end[1])
+                first_bin = point_bin(here)
+                neighbours = {item.observation_id: item for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                              for item in endpoint_point_index.get((first_bin[0] + dx, first_bin[1] + dy), ())}
+                if not any(
+                    item.observation_id != jamb.observation_id
+                    and _collinear(line, _line_geometry(item), tolerance)
+                    and any(
+                        _point_close(start, here, tolerance)
+                        and (far[0] - here[0]) * outward[0] + (far[1] - here[1]) * outward[1] > 0.0
+                        for start, far in ((_line_geometry(item)[:2], _line_geometry(item)[2:]),
+                                           (_line_geometry(item)[2:], _line_geometry(item)[:2]))
+                    )
+                    for item in neighbours.values()
+                ):
+                    return False
+            return True
+
         def indexed_segment_matches(
             first: tuple[float, float],
             second: tuple[float, float],
@@ -3692,6 +3718,9 @@ class PhysicalOpeningAuthority:
                                 break
                             parent_ids.append(item.derivation_parent_ids[0])
                         if not lineage_ok or len(set(parent_ids)) != 6:
+                            continue
+                        # Both "jambs" carrying on past both faces are a wall passing through (C12, opt-in removal).
+                        if crossing_wall_negative and continues_outward(left_jamb) and continues_outward(right_jamb):
                             continue
                         geometry_key = tuple(
                             sorted(
@@ -4068,9 +4097,11 @@ class PhysicalOpeningAuthority:
         seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
         precision: bool = False,
+        crossing_wall_negative: bool = False,
     ) -> tuple[CandidateSemanticOpening, ...]:
-        strong = (cls._visible_structural_candidates(seed, records, precision=True) if precision
-                  else cls._visible_structural_candidates(seed, records))
+        options = {**({"precision": True} if precision else {}),
+                   **({"crossing_wall_negative": True} if crossing_wall_negative else {})}
+        strong = cls._visible_structural_candidates(seed, records, **options)
         generic = cls._visible_generic_correlated_candidates(seed, records)
         strong_sets = [set(item.source_observation_ids) for item in strong]
         retained = [
@@ -4149,6 +4180,11 @@ class PhysicalOpeningAuthority:
                 )
         return raw_membership, scoped_membership
 
+    def _structural_detector_options(self) -> dict[str, bool]:
+        """Only the options that are on, so a default detector call is exactly the historical one."""
+        return {**({"precision": True} if self._angled_opening_precision_shadow else {}),
+                **({"crossing_wall_negative": True} if self._crossing_wall_negative_shadow else {})}
+
     def _visible_candidates_for(
         self,
         seed: SourceObservationRecord,
@@ -4160,9 +4196,7 @@ class PhysicalOpeningAuthority:
         cached = self._visible_candidate_cache.get(key)
         if cached is not None:
             return cached
-        candidates = (self._visible_all_structural_candidates(seed, records, precision=True)
-                      if self._angled_opening_precision_shadow
-                      else self._visible_all_structural_candidates(seed, records))
+        candidates = self._visible_all_structural_candidates(seed, records, **self._structural_detector_options())
         self._visible_candidate_cache[key] = candidates
         self._visible_candidate_membership_cache[key] = (
             self._candidate_membership_index(candidates)
@@ -4846,7 +4880,7 @@ class PhysicalOpeningAuthority:
         failure, source_result, _records, by_id, restricted = self._seeded_universe(selector, member_observation_ids)
         if failure is not None:
             return failure
-        found = self._visible_structural_candidates(source_result.observation, restricted, **({"precision": True} if self._angled_opening_precision_shadow else {}))
+        found = self._visible_structural_candidates(source_result.observation, restricted, **self._structural_detector_options())
         return PhysicalOpeningCandidateStructureResult(
             status=EvidenceResolutionStatus.CANDIDATE,
             page_id=str(source_result.observation.page_id),
@@ -4874,7 +4908,7 @@ class PhysicalOpeningAuthority:
         if failure is not None:
             return SeededFaceInkInventory(
                 status=failure.status, reason_codes=tuple(failure.reason_codes), page_id=failure.page_id, structures=())
-        found = self._visible_structural_candidates(source_result.observation, restricted, **({"precision": True} if self._angled_opening_precision_shadow else {}))
+        found = self._visible_structural_candidates(source_result.observation, restricted, **self._structural_detector_options())
         used = collections.Counter(i for structure in found for i in set(structure.source_observation_ids))
         structures = []
         for structure in sorted(found, key=lambda c: c.candidate_id):
@@ -4947,7 +4981,7 @@ class PhysicalOpeningAuthority:
         if any(value not in by_id for value in accounted):
             return unresolved(source_result, (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,))
         observation = source_result.observation
-        found = self._visible_structural_candidates(observation, restricted, **({"precision": True} if self._angled_opening_precision_shadow else {}))
+        found = self._visible_structural_candidates(observation, restricted, **self._structural_detector_options())
         survivors = []
         rivals = []
         for structure in found:

@@ -1097,7 +1097,11 @@ class SourceVisibilityProducer:
                  raster_double_face_negative_shadow: bool = False,
                  source_glyph_ledger_text_trust: bool = False,
                  raster_corner_framed_opening_shadow: bool = False,
-                 angled_opening_precision_shadow: bool = False) -> None:
+                 angled_opening_precision_shadow: bool = False,
+                 crossing_wall_negative_shadow: bool = False) -> None:
+        if type(crossing_wall_negative_shadow) is not bool:
+            raise ValueError("crossing wall negative shadow must be explicit boolean")
+        self._crossing_wall_negative_shadow = crossing_wall_negative_shadow
         if type(angled_opening_precision_shadow) is not bool:
             raise ValueError("angled opening precision shadow must be explicit boolean")
         self._angled_opening_precision_shadow = angled_opening_precision_shadow
