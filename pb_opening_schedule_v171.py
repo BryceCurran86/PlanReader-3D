@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -343,7 +344,9 @@ def _parse_strict_schedule_dims_cell(text: str) -> Tuple[Optional[int], Optional
     """Parse one strictly formatted combined WxH dimension cell (no prose rescue)."""
     if not text or not text.strip():
         return None, None
-    t = text.strip()
+    t = _normalize_unicode_dimension_text(text)
+    if not t:
+        return None, None
     if _SCHEDULE_DIM_EXCLUSION_RE.search(t) or _has_rating_keywords(t):
         return None, None
     match = _STRICT_COMBINED_DIM_CELL_RE.fullmatch(t)
@@ -467,11 +470,41 @@ def _has_rating_keywords(text: str) -> bool:
     return bool(_RATING_KEYWORDS.search(text))
 
 
+_UNICODE_DIM_TRANSLATION = str.maketrans({
+    "\u2715": "×",  # multiplication X
+    "\u2716": "×",  # heavy multiplication X
+    "\u2217": "×",  # asterisk operator
+    "\u22c5": "×",  # dot operator
+    "\u2044": "/",  # fraction slash
+    "\u2215": "/",  # division slash
+    "\u2010": "-",  # hyphen
+    "\u2011": "-",  # non-breaking hyphen
+    "\u2012": "-",  # figure dash
+    "\u2013": "-",  # en dash
+    "\u2014": "-",  # em dash
+    "\u2212": "-",  # minus sign
+    "\u00a0": " ",  # nbsp
+    "\u2009": " ",  # thin space
+    "\u202f": " ",  # narrow nbsp
+    "\u200b": "",   # zero-width space
+    "\ufeff": "",   # BOM
+})
+_THOUSANDS_COMMA_RE = re.compile(r"(?<!\d)(\d{1,2}),(\d{3})(?!\d)")
+
+
+def _normalize_unicode_dimension_text(text: str) -> str:
+    """Normalize Unicode dimension operators, spaces, fullwidth digits, and thousands commas."""
+    normalized = unicodedata.normalize("NFKC", text).translate(_UNICODE_DIM_TRANSLATION)
+    return _THOUSANDS_COMMA_RE.sub(r"\1\2", normalized).strip()
+
+
 def parse_single_dimension(text: str) -> Optional[int]:
     """Return one plausible length. Two different lengths abstain."""
     if not text or not text.strip():
         return None
-    t = text.strip()
+    t = _normalize_unicode_dimension_text(text)
+    if not t:
+        return None
     values: List[int] = []
     for match in _MM_RE.finditer(t):
         values.append(int(match.group(1)))
@@ -511,7 +544,9 @@ def parse_dimension(text: str, allow_slash: bool = True) -> Tuple[Optional[int],
     """
     if not text or not text.strip():
         return None, None
-    t = text.strip()
+    t = _normalize_unicode_dimension_text(text)
+    if not t:
+        return None, None
     pairs = _plausible_pairs(_DIMENSION_PATTERNS_X, t)
     if len(pairs) > 1:
         return None, None

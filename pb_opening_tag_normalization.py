@@ -11,8 +11,27 @@ strip geometry.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Optional
+
+_UNICODE_DASH_TRANSLATION = str.maketrans({
+    "\u2010": "-",  # hyphen
+    "\u2011": "-",  # non-breaking hyphen
+    "\u2012": "-",  # figure dash
+    "\u2013": "-",  # en dash
+    "\u2014": "-",  # em dash
+    "\u2212": "-",  # minus sign
+    "\u00a0": " ",  # nbsp
+    "\u2009": " ",  # thin space
+    "\u202f": " ",  # narrow nbsp
+    "\u200b": "",   # zero-width space
+    "\ufeff": "",   # BOM
+})
+
+
+def _normalize_unicode_tag_text(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).translate(_UNICODE_DASH_TRANSLATION)
 
 
 @dataclass(frozen=True)
@@ -46,8 +65,9 @@ def normalize_opening_tag(text: str) -> Optional[NormalizedOpeningTag]:
     """
     if not text:
         return None
+    normalized_text = _normalize_unicode_tag_text(text)
     found: list[tuple[str, str, str]] = []
-    for match in _TAG_RE.finditer(text):
+    for match in _TAG_RE.finditer(normalized_text):
         prefix = match.group("prefix").upper()
         number = int(match.group("number"))
         if number <= 0:
@@ -69,8 +89,9 @@ def find_explicit_opening_tags(text: str) -> list[NormalizedOpeningTag]:
     """Return explicit documented opening identities in textual order."""
     if not text:
         return []
+    normalized_text = _normalize_unicode_tag_text(text)
     out: list[NormalizedOpeningTag] = []
-    for m in _TAG_RE.finditer(text):
+    for m in _TAG_RE.finditer(normalized_text):
         norm = normalize_opening_tag(m.group(0))
         if norm is not None:
             out.append(norm)
