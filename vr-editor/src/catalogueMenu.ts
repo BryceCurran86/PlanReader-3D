@@ -187,7 +187,6 @@ export function buildMenuLayout(
       {label:"Budget",action:questAction("budget")},
       {label:"Resize footprint",action:{area:"footprint"},disabled:!footprint.available},
       {label:quest.slabMm?"Concrete slab · "+quest.slabMm+" mm":"Concrete slabs",action:{area:"slab"}},
-      {label:"Drag speed: "+(quest.dragGain??1)+"×",action:questAction("drag-gain")},
     ];
     entries.forEach((e,i)=>add(e.label,24+(i%2)*460,88+Math.floor(i/2)*86,440,76,e.action,{disabled:e.disabled}));
     const footer=98+Math.ceil(entries.length/2)*86;
@@ -478,6 +477,9 @@ export function buildMenuLayout(
   if (quest?.compact) {
     const compact: {label:string;action:MenuAction;disabled?:boolean}[]=[
       {label:"Build tools",action:questAction("compact")},
+      {label:"Drag speed: "+(quest.dragGain??1)+"×",action:questAction("drag-gain")},
+      {label:"Home",action:questAction("home")},
+      {label:"Recenter",action:questAction("recenter")},
       {label:"Wall construction",action:questAction("wall-profiles")},
       {label:quest.dimensions===false?"Show dimensions":"Hide dimensions",action:questAction("dimensions")},
       ...(quest.budget?[{label:"Live budget",action:questAction("budget")}]:[]),
@@ -510,6 +512,8 @@ export function buildMenuLayout(
   if (quest) {
     actions.push(
       {label:"Compact",target:questAction("compact")},
+      {label:"Drag speed: "+(quest.dragGain??1)+"×",target:questAction("drag-gain")},
+      {label:"Home",target:questAction("home")},
       {label:"Wall construction",target:questAction("wall-profiles")},
       {label:"Layers",target:questAction("layers")},
       {label:quest.dimensions===false?"Show dimensions":"Hide dimensions",target:questAction("dimensions")},
