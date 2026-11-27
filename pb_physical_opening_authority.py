@@ -32,7 +32,7 @@ from pb_plan_opening_detection_indexed_v172 import (
     detect_door_candidates_indexed,
     detect_gap_candidates_indexed,
 )
-from pb_source_coordinate_precision import source_coordinate_tolerance
+from pb_source_coordinate_precision import near_axis, source_coordinate_tolerance
 from pb_source_observation_authority import (
     NativePageImagePlacement,
     ObservationSelector,
@@ -494,6 +494,8 @@ def _segment_matches(
     line = _line_geometry(record)
     if line is None:
         return False
+    if tolerance is not None and near_axis(line, tolerance):
+        tolerance = None
     start = (line[0], line[1])
     end = (line[2], line[3])
     return (
@@ -508,6 +510,8 @@ def _parallel(
     right: tuple[float, float, float, float],
     tolerance: Optional[float] = None,
 ) -> bool:
+    if tolerance is not None and near_axis(left, tolerance) and near_axis(right, tolerance):
+        tolerance = None  # axis-aligned pairs keep the historical test
     ldx, ldy = left[2] - left[0], left[3] - left[1]
     rdx, rdy = right[2] - right[0], right[3] - right[1]
     llen = math.hypot(ldx, ldy)
@@ -543,6 +547,8 @@ def _collinear(
     right: tuple[float, float, float, float],
     tolerance: Optional[float] = None,
 ) -> bool:
+    if tolerance is not None and near_axis(left, tolerance) and near_axis(right, tolerance):
+        tolerance = None
     if not _parallel(left, right, tolerance):
         return False
     direction = _canonical_direction(left)
@@ -670,6 +676,9 @@ def _face_break(
         first_line = _line_geometry(first)
     if second_line is None:
         second_line = _line_geometry(second)
+    if (tolerance is not None and first_line is not None and second_line is not None
+            and near_axis(first_line, tolerance) and near_axis(second_line, tolerance)):
+        tolerance = None
     if first_line is None or second_line is None or not _collinear(first_line, second_line, tolerance):
         return None
     direction = _canonical_direction(first_line)
@@ -707,6 +716,8 @@ def _face_break(
 
 
 def _same_gap(left: _FaceBreak, right: _FaceBreak, tolerance: Optional[float] = None) -> bool:
+    if tolerance is not None and all(min(abs(a), abs(b)) <= _COORD_EQ_ABS_TOL for a, b in (left.direction, right.direction)):
+        tolerance = None
     limit = _COORD_EQ_ABS_TOL if tolerance is None else 4.0 * tolerance  # projections on two slightly different axes
     if abs(left.gap_start - right.gap_start) > limit:
         return False
@@ -3538,11 +3549,12 @@ class PhysicalOpeningAuthority:
                 # opposition/integrity checks (which can only ABSTAIN).
                 # A positive source-visible stub strictly INSIDE the proposed
                 # gap does prove these are not adjacent wall faces.
+                limit = _COORD_EQ_ABS_TOL if min(map(abs, found.direction)) <= _COORD_EQ_ABS_TOL else edge
                 interior_stub = (
-                    values[0] > found.gap_start + edge
-                    and values[1] < found.gap_end - edge
+                    values[0] > found.gap_start + limit
+                    and values[1] < found.gap_end - limit
                 )
-                if interior_stub and overlap > edge:
+                if interior_stub and overlap > limit:
                     continuation = True
                     break
             if not continuation:

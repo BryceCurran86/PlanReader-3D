@@ -54,7 +54,7 @@ from pb_physical_wall_identity import (
     PhysicalWallEquivalenceResolution,
     resolve_physical_wall_equivalence,
 )
-from pb_source_coordinate_precision import source_coordinate_tolerance
+from pb_source_coordinate_precision import near_axis, source_coordinate_tolerance
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import (
     RASTER_OPENING_PRIMITIVE_RENDER_DPI,
@@ -2360,6 +2360,8 @@ def _opening_geometry(
     precise = getattr(authority, "_angled_opening_precision_shadow", False) is True
     tolerance = (source_coordinate_tolerance([line for line in map(_line, records) if line is not None], floor=_COORD_TOL)
                  if precise else None)
+    if tolerance is not None and all(line is not None and near_axis(line, tolerance) for line in map(_line, records)):
+        tolerance = None  # axis-aligned openings keep the historical geometry
     gap_limit = _COORD_TOL if tolerance is None else 4.0 * tolerance
 
     breaks: list[tuple[Point, Point, Point]] = []

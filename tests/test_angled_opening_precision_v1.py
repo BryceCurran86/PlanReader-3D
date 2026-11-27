@@ -103,3 +103,9 @@ def test_the_tolerance_is_representation_error_not_a_drawing_tolerance():
     assert source_coordinate_tolerance([(0.0, 0.0, 5000.0, 0.0)], floor=1e-6) < 0.01
     with pytest.raises(ValueError):
         SourceVisibilityProducer(producer_method="m", producer_version="1", angled_opening_precision_shadow=1)
+
+
+@pytest.mark.parametrize("offset", [2e-5, 1e-4])
+def test_axis_aligned_geometry_is_judged_exactly_as_before(offset):
+    noisy = (OPENING[0], ((160.0, 80.0 + offset), (280.0, 80.0 + offset)), *OPENING[2:])  # within representation error
+    assert _found(_pdf(noisy)) == _found(_pdf(noisy), precise=False)
