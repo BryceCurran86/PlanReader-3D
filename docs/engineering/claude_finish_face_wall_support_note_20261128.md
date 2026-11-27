@@ -19,8 +19,9 @@ visible. The owner's existing green-ink exclusion for wall geometry stays; no ot
 `pb_finish_face_wall_support_shadow.face_wall_support(polygon, drawings, closures=())`:
 - ink near the face only, paper white and owner-excluded green ignored, one group per stroke colour; lines on the room side
   are ignored;
-- lines closer together than the builder's 1.2 pt thinnest wall are one face drawn more than once; collinear pieces are
-  joined and runs under the builder's 8 pt minimum dropped;
+- only lines running beside an edge say which faces it has (lines closer than the builder's 1.2 pt thinnest wall are one
+  face); other pieces at a face's offsets only extend its runs; runs under the builder's 8 pt minimum are dropped. An
+  earlier version let lines elsewhere chain two faces into one, so the answer depended on the search distance;
 - along each horizontal or vertical edge, a stretch is supported when a face of one ink lies on the edge (within the
   builder's 0.8 pt face tolerance) with exactly one same-ink face 1.2 to 8 pt behind it (two or more is hatch), or a
   builder filled bar lies behind it, or a doorway closure given by the caller covers it;
@@ -39,8 +40,8 @@ It promotes, closes, removes and publishes nothing, and no live path imports it.
 
 ## Measured (originals, local, counts only)
 - Maryborough sheet 7, the two floor-finish faces (Food Prep, Office): every edge unsupported, ABSTAINED.
-- Same sheet, the builder's 171 candidate rings: 8 fully supported, 3 under 10% unsupported, 5 from 10 to 50%, 155 over
-  (many are rows of identical fixture-sized outlines bounded by single lines).
+- Same sheet, the builder's 171 candidate rings: 7 fully supported, 3 under 10% unsupported, 5 from 10 to 50%, 156 over
+  (many are rows of identical fixture-sized outlines bounded by single lines); identical at 16, 28.8 and 200 pt search.
 - Real Office: the builder's existing default-off `door_jamb_returns` gives it its own ring (source-stroke doorway closure);
   every long edge is supported, the 5.2 pt jamb stub counts as a wall end, and a 2.2 pt step with no drawn geometry does not
   (0.6 pt is within tolerance), so it still abstains. WSH/DRY (without the option): 1% unsupported.
@@ -49,7 +50,8 @@ It promotes, closes, removes and publishes nothing, and no live path imports it.
   were over 50% unsupported. Not a safe global switch.
 - Known misses on real rooms: Cold Room passes three sides, its fourth is a panel wall about 8.6 pt thick, above the
   builder's 8 pt pair limit; the Freezer has 8.4 to 8.6 pt sides (73% unsupported). Raising the limit to the builder's
-  14 pt filled-wall limit, and counting jogs no longer than a wall as part of it, are separate decisions, not made.
+  14 pt filled-wall limit was refused (MAX 7226267598). The separate wide candidate flags the Cold Room's thick side (31%)
+  and 30% of the Freezer, and nothing on the two false faces.
 
 ## Required checks before any use
 Synthetic: black and grey double-line rooms and filled-wall rooms supported; single crossing lines, white masks, green

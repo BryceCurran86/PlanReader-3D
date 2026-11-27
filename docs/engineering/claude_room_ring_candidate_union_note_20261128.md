@@ -17,5 +17,9 @@ not an overlap), in which case every ring involved is ABSTAINED; each ring lists
 run, and a closure edge without source paths abstains its ring; runs from different sources or pages abstain everything.
 Nothing is chosen by size, score or run, nothing is promoted, and no live path imports it.
 
+## Measured (originals, local, counts only)
+Maryborough sheet 7: 179 entries, 177 candidates, 2 conflicts; the Office is gained, WSH/DRY retained (1% unsupported),
+PWD gained; LAUNDRY and AIRLOCK have no candidate ring in either run.
+
 ## Must not influence
 Any expected area or room list. Originals: counts only, before any wiring.
