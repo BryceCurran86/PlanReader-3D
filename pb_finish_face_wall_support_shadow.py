@@ -1,8 +1,9 @@
 """Report only (#4764 7225222738, C06/C08): is every edge of a finish-bearing room face on wall evidence?
 
 See docs/engineering/claude_finish_face_wall_support_note_20261128.md. Wall evidence along an edge stretch is either a
-second line of the SAME ink running 1.2 to 8 pt behind the line on that edge, with exactly one such position (three lines
-are hatch, not a wall), or one of the layered builder's filled wall bars behind the edge. Ink that is paper white or the
+second face of the SAME ink running 1.2 to 8 pt behind the face on that edge, with exactly one such face (three faces are
+hatch, not a wall), or one of the layered builder's filled wall bars behind the edge. Lines closer together than the
+builder's 1.2 pt thinnest wall are one face drawn more than once; lines on the room side are ignored. Ink that is paper white or the
 owner's excluded green never counts; no other colour is excluded. A doorway closure given by the caller also covers its
 stretch. Thicknesses, minimum length and tolerances are the layered builder's own. Nothing is promoted, closed, removed or
 published, and no live path imports this.
@@ -16,7 +17,7 @@ from typing import Any
 from shapely.geometry import Point, Polygon
 
 from pb_layered_wall_doorway_room_ring_shadow import (
-    NOISE_PT, _STROKE_PAIR_CLUSTER_PT, _STROKE_PAIR_THICK_MAX, _STROKE_PAIR_THICK_MIN, _axis_strokes,
+    NOISE_PT, _STROKE_PAIR_CLUSTER_PT, _STROKE_PAIR_MIN_SPAN, _STROKE_PAIR_THICK_MAX, _STROKE_PAIR_THICK_MIN,
     _collect_dark_painted_source_wall_strips, _opaque, _owner_excluded_green_ink, _visible_source_stroke_paint,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -40,11 +41,10 @@ def _near(row: Mapping[str, Any], region: tuple[float, float, float, float]) -> 
 
 
 def _ink_near(drawings: Sequence[Any], region: tuple[float, float, float, float]):
-    """Visible wall-eligible paint near the face: stroke runs per ink colour, and the fills for the builder's bars.
+    """Visible wall-eligible paint near the face: horizontal and vertical lines per ink colour, and the fills.
 
-    Lines are merged by the builder's own collinear rule (runs shorter than its 8 pt minimum are dropped). Rows are
-    recoloured black only so the builder's collectors accept them; positions in the list are kept."""
-    inks: dict[tuple[float, ...], list[dict | None]] = {}
+    Fills are recoloured black only so the builder's bar collector accepts them; list positions are kept."""
+    inks: dict[tuple[float, ...], list[tuple[bool, float, float, float]]] = {}
     fills: list[dict | None] = [None] * len(drawings)
     for index, row in enumerate(drawings):
         if not (isinstance(row, Mapping) and row.get("items") and _near(row, region)):
@@ -55,30 +55,58 @@ def _ink_near(drawings: Sequence[Any], region: tuple[float, float, float, float]
                 fills[index] = {**row, "color": None, "fill": _BLACK, "layer": ""}
         elif (stroke is not None and not _paper_white(stroke) and not _owner_excluded_green_ink(stroke)
               and _visible_source_stroke_paint(row)):
-            ink = tuple(round(float(v), 3) for v in stroke)
-            inks.setdefault(ink, [None] * len(drawings))[index] = {**row, "color": _BLACK, "fill": None, "layer": ""}
-    return {ink: _axis_strokes(rows) for ink, rows in sorted(inks.items())}, fills
+            lines = inks.setdefault(tuple(round(float(v), 3) for v in stroke), [])
+            for item in row["items"]:
+                if item[0] != "l":
+                    continue
+                (ax, ay), (bx, by) = tuple(item[1]), tuple(item[2])
+                if abs(ay - by) <= 1e-3 and abs(bx - ax) > NOISE_PT:
+                    lines.append((True, (ay + by) / 2.0, min(ax, bx), max(ax, bx)))
+                elif abs(ax - bx) <= 1e-3 and abs(by - ay) > NOISE_PT:
+                    lines.append((False, (ax + bx) / 2.0, min(ay, by), max(ay, by)))
+    return dict(sorted(inks.items())), fills
 
 
-def _paired_stretches(runs, horizontal: bool, line: float, outward: float, start: float, end: float):
-    """Stretches of an edge with a line of one ink on it and exactly one same-ink partner position behind it."""
-    along = [(perp, lo, hi) for _index, is_horizontal, perp, lo, hi in runs if is_horizontal == horizontal
-             and min(hi, end) > max(lo, start)]
-    near = [(perp, lo, hi) for perp, lo, hi in along
-            if -NOISE_PT * 2 <= (perp - line) * outward <= _STROKE_PAIR_CLUSTER_PT]
-    if not near:
+def _faces(lines, horizontal: bool, line: float, outward: float):
+    """Faces on or behind an edge: (offset of the room-side line, its runs). Lines closer than the thinnest wall are one
+    face; their collinear pieces are joined and runs shorter than the builder's minimum are dropped."""
+    offsets = sorted(((perp - line) * outward, lo, hi) for is_horizontal, perp, lo, hi in lines
+                     if is_horizontal == horizontal
+                     and -NOISE_PT * 2 <= (perp - line) * outward <= _STROKE_PAIR_CLUSTER_PT + _STROKE_PAIR_THICK_MAX)
+    groups: list[list[tuple[float, float, float]]] = []
+    for item in offsets:
+        if groups and item[0] - groups[-1][-1][0] < _STROKE_PAIR_THICK_MIN:
+            groups[-1].append(item)
+        else:
+            groups.append([item])
+    faces = []
+    for group in groups:
+        runs: list[list[float]] = []
+        for lo, hi in sorted((lo, hi) for _offset, lo, hi in group):
+            if runs and lo <= runs[-1][1] + _STROKE_PAIR_CLUSTER_PT:
+                runs[-1][1] = max(runs[-1][1], hi)
+            else:
+                runs.append([lo, hi])
+        runs = [(lo, hi) for lo, hi in runs if hi - lo >= _STROKE_PAIR_MIN_SPAN]
+        if runs:
+            faces.append((group[0][0], runs))
+    return faces
+
+
+def _paired_stretches(lines, horizontal: bool, line: float, outward: float, start: float, end: float):
+    """Stretches of an edge with a face of one ink on it and exactly one same-ink face a wall's thickness behind it."""
+    faces = _faces(lines, horizontal, line, outward)
+    near = next(((offset, runs) for offset, runs in faces if offset <= _STROKE_PAIR_CLUSTER_PT), None)
+    if near is None:
         return []
-    face = max((perp - line) * outward for perp, _lo, _hi in near)
-    behind = [(perp, lo, hi) for perp, lo, hi in along
-              if _STROKE_PAIR_THICK_MIN <= (perp - line) * outward - face <= _STROKE_PAIR_THICK_MAX]
-    cuts = sorted({start, end, *(v for _p, lo, hi in near + behind for v in (lo, hi) if start < v < end)})
+    behind = [runs for offset, runs in faces
+              if _STROKE_PAIR_THICK_MIN <= offset - near[0] <= _STROKE_PAIR_THICK_MAX]
+    cuts = sorted({start, end, *(v for runs in [near[1], *behind] for run in runs for v in run if start < v < end)})
     found = []
     for lo, hi in zip(cuts, cuts[1:]):
         middle = (lo + hi) / 2.0
-        if not any(a <= middle <= b for _p, a, b in near):
-            continue
-        positions = sorted((perp - line) * outward for perp, a, b in behind if a <= middle <= b)
-        if positions and positions[-1] - positions[0] <= _STROKE_PAIR_CLUSTER_PT:
+        covers = lambda runs: any(a <= middle <= b for a, b in runs)
+        if covers(near[1]) and sum(covers(runs) for runs in behind) == 1:
             found.append((lo - start, hi - start))
     return found
 

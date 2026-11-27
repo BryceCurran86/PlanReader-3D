@@ -17,11 +17,13 @@ visible. The owner's existing green-ink exclusion for wall geometry stays; no ot
 
 ## Built (shadow)
 `pb_finish_face_wall_support_shadow.face_wall_support(polygon, drawings, closures=())`:
-- ink near the face only, paper white and owner-excluded green ignored, one group per stroke colour, collinear runs merged
-  by the builder's own rule;
-- along each horizontal or vertical edge, a stretch is supported when a line of one ink lies on the edge (within the
-  builder's 0.8 pt face tolerance) with exactly one same-ink partner position 1.2 to 8 pt behind it (two or more positions
-  there is hatch), or a builder filled bar lies behind it, or a doorway closure given by the caller covers it;
+- ink near the face only, paper white and owner-excluded green ignored, one group per stroke colour; lines on the room side
+  are ignored;
+- lines closer together than the builder's 1.2 pt thinnest wall are one face drawn more than once; collinear pieces are
+  joined and runs under the builder's 8 pt minimum dropped;
+- along each horizontal or vertical edge, a stretch is supported when a face of one ink lies on the edge (within the
+  builder's 0.8 pt face tolerance) with exactly one same-ink face 1.2 to 8 pt behind it (two or more is hatch), or a
+  builder filled bar lies behind it, or a doorway closure given by the caller covers it;
 - the first version reused the builder's whole-line pairing: it refused a whole long wall for one short line or equipment
   line nearby, so no stretch of the Freezer was supported;
 - CANDIDATE only when no edge has an unsupported stretch longer than 0.8 pt, else ABSTAINED. Never CORROBORATED.
@@ -30,15 +32,17 @@ It promotes, closes, removes and publishes nothing, and no live path imports it.
 
 ## Measured (originals, local, counts only)
 - Maryborough sheet 7, the two floor-finish faces (Food Prep, Office): every edge unsupported, ABSTAINED.
-- Same sheet, the builder's 171 candidate rings: 9 fully supported, 3 under 50% unsupported, 159 over (many are rows of
-  identical fixture-sized outlines bounded by single lines).
+- Same sheet, the builder's 171 candidate rings: 8 fully supported, 3 under 10% unsupported, 5 from 10 to 50%, 155 over
+  (many are rows of identical fixture-sized outlines bounded by single lines).
+- Real Office: the builder's existing default-off `door_jamb_returns` gives it its own ring (source-stroke doorway closure);
+  every long edge is supported, three jogs of 0.6, 5.2 and 2.2 pt are not (about 1%), so it still abstains. WSH/DRY: 1%.
 - Known misses on real rooms: Cold Room passes three sides, its fourth is a panel wall about 8.6 pt thick, above the
   builder's 8 pt pair limit; the Freezer has 8.4 to 8.6 pt sides (73% unsupported). Raising the limit to the builder's
-  14 pt filled-wall limit is a separate decision, not made.
+  14 pt filled-wall limit, and counting jogs no longer than a wall as part of it, are separate decisions, not made.
 
 ## Required checks before any use
 Synthetic: black and grey double-line rooms and filled-wall rooms supported; single crossing lines, white masks, green
-double lines, three-line hatch, a mixed-ink pair, a band on the room side and a single open side are not; doorway closure; translation,
+double lines, three-line hatch, a mixed-ink pair, short ticks, a band on the room side and a single open side are not; doorway closure; translation,
 quarter turn, drawing order and segment splitting; determinism and no mutation. Originals: counts only, before any wiring.
 
 ## Must not influence

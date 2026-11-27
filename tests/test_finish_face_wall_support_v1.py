@@ -165,6 +165,38 @@ def test_a_second_partner_position_makes_only_its_stretch_ambiguous():
     assert [edge["unsupported"] < 0.5 for edge in result["edges"]] == [True, False, True, True]
 
 
+def test_a_face_drawn_two_or_three_times_a_little_apart_is_one_face():
+    extra = _loop([(49.5, 49.5), (164.5, 49.5), (164.5, 164.5), (49.5, 164.5)])  # the inner face drawn twice
+    outer = (_loop([(43.6, 43.6), (170.4, 43.6), (170.4, 170.4), (43.6, 170.4)])
+             + _loop([(42.7, 42.7), (171.3, 42.7), (171.3, 171.3), (42.7, 171.3)]))  # the outer face three times
+    drawings = _draw_mixed([(DOUBLE + extra + outer, BLACK)])
+    assert _support(FACE, drawings)["status"] is CANDIDATE
+
+
+def test_a_line_just_inside_the_room_does_not_break_the_wall_behind():
+    inside = _loop([(50.9, 50.9), (163.1, 50.9), (163.1, 163.1), (50.9, 163.1)])
+    thick = _loop([(42.5, 42.5), (171.5, 42.5), (171.5, 171.5), (42.5, 171.5)])  # a 7.5 pt wall
+    for outer in (_loop(list(OUTER)), thick):
+        drawings = _draw_mixed([(_loop(list(FACE)) + outer + inside, BLACK)])
+        assert _support(FACE, drawings)["status"] is CANDIDATE
+
+
+def _cut(lines, piece):
+    out = []
+    for a, b in lines:
+        steps = max(1, int(max(abs(b[0] - a[0]), abs(b[1] - a[1])) // piece))
+        points = [(a[0] + (b[0] - a[0]) * i / steps, a[1] + (b[1] - a[1]) * i / steps) for i in range(steps + 1)]
+        out += list(zip(points, points[1:]))
+    return out
+
+
+def test_walls_drawn_as_short_pieces_still_pair_but_short_ticks_do_not():
+    assert _support(FACE, _draw_mixed([(_cut(DOUBLE, 5.0), BLACK)]))["status"] is CANDIDATE
+    ticks = [((170, y), (170, y + 4)) for y in range(50, 164, 12)]  # 4 pt marks where a second face would be
+    drawings = _draw_mixed([(_loop(list(FACE)) + ticks, BLACK)])
+    assert _support(FACE, drawings)["edges"][1]["paired"] == 0
+
+
 def _door_lines():
     lines = [line for line in DOUBLE if line not in (((170, 44), (170, 170)), ((164, 50), (164, 164)))]
     return lines + [((170, 44), (170, 90)), ((170, 120), (170, 170)), ((164, 50), (164, 90)),
