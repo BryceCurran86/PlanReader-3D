@@ -40,7 +40,9 @@ SOURCE_FLOOR_PLAN_PAGE_SCOPE_SCHEMA_VERSION = "1.1.0"
 
 FLOOR_PLAN_PAGE_BOUND_TITLE = "floor_plan_bound_title"
 FLOOR_PLAN_PAGE_F07_VIEWPORT = "floor_plan_f07_viewport"
+FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE = "floor_plan_corroborated_ocr_title"
 NOT_FLOOR_PLAN_PAGE_BOUND_TITLE = "not_floor_plan_bound_title"
+NOT_FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE = "not_floor_plan_corroborated_ocr_title"
 NOT_FLOOR_PLAN_PAGE_DOCUMENT_HEADER = "not_floor_plan_document_header"
 NOT_FLOOR_PLAN_PAGE_SCHEDULE_VIEWPORT = "not_floor_plan_schedule_viewport"
 UNPROVEN_FLOOR_PLAN_PAGE = "floor_plan_page_unproven"
@@ -532,15 +534,97 @@ def _classify_page(page: Any, page_index: int) -> SourceFloorPlanPageDecision:
     )
 
 
+def _apply_corroborated_ocr_title_fallback(
+    doc: Any,
+    selected: tuple[int, ...],
+    decisions: tuple[SourceFloorPlanPageDecision, ...],
+) -> tuple[SourceFloorPlanPageDecision, ...]:
+    """Use pb_page_title_authority's corroborated OCR title-block reader on outlined-text sets.
+
+    Only accepts titles bound to an explicit title-block field label
+    (``source == "label"``) with confidence >= ``_MIN_TITLE_SCORE``. Never
+    accepts bare OCR headings and never mutates already-classified pages.
+    """
+    try:
+        analyses = [
+            title_authority.analyse_page(doc[index], index + 1)
+            for index in selected
+        ]
+        resolved = title_authority.resolve_document(analyses)
+    except Exception:  # noqa: BLE001
+        return decisions
+    by_page_no = {int(pt.page_no): pt for pt in resolved}
+    updated: list[SourceFloorPlanPageDecision] = []
+    for decision in decisions:
+        if decision.classification != UNPROVEN:
+            updated.append(decision)
+            continue
+        pt = by_page_no.get(decision.page_index + 1)
+        if (
+            pt is None
+            or not pt.title
+            or pt.source != "label"
+            or float(pt.confidence) < _MIN_TITLE_SCORE
+        ):
+            updated.append(decision)
+            continue
+        types = tuple(sorted(_title_view_types(pt.title)))
+        if DrawingViewType.FLOOR_PLAN.value in types:
+            is_mixed = len(set(types) | set(decision.viewport_types)) > 1
+            updated.append(
+                SourceFloorPlanPageDecision(
+                    decision.page_index,
+                    FLOOR_PLAN,
+                    FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE,
+                    title=str(pt.title),
+                    view_types=types,
+                    sheet_role=_infer_sheet_role(
+                        FLOOR_PLAN, types, is_mixed=is_mixed, title=str(pt.title)
+                    ),
+                    authenticated_floor_plan_viewport_count=decision.authenticated_floor_plan_viewport_count,
+                    viewport_types=decision.viewport_types,
+                    is_mixed_sheet=is_mixed,
+                )
+            )
+        else:
+            is_mixed = len(types) > 1
+            updated.append(
+                SourceFloorPlanPageDecision(
+                    decision.page_index,
+                    NOT_FLOOR_PLAN,
+                    NOT_FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE,
+                    title=str(pt.title),
+                    view_types=types,
+                    sheet_role=_infer_sheet_role(
+                        NOT_FLOOR_PLAN, types, is_mixed=is_mixed, title=str(pt.title)
+                    ),
+                    authenticated_floor_plan_viewport_count=decision.authenticated_floor_plan_viewport_count,
+                    viewport_types=decision.viewport_types,
+                    is_mixed_sheet=is_mixed,
+                )
+            )
+    return tuple(updated)
+
+
 def classify_source_floor_plan_pages(
     doc: Any,
     page_indices: Iterable[int],
+    *,
+    allow_corroborated_ocr_titles: bool = False,
 ) -> SourceFloorPlanPageScope:
     """Classify the selected pages of one open PDF from source evidence only."""
+    if type(allow_corroborated_ocr_titles) is not bool:
+        raise TypeError("allow_corroborated_ocr_titles must be a bool")
     selected = tuple(
         sorted({int(i) for i in page_indices if isinstance(i, int) and 0 <= int(i) < len(doc)})
     )
     decisions = tuple(_classify_page(doc[index], index) for index in selected)
+    if (
+        allow_corroborated_ocr_titles
+        and decisions
+        and all(d.classification == UNPROVEN for d in decisions)
+    ):
+        decisions = _apply_corroborated_ocr_title_fallback(doc, selected, decisions)
     floor = tuple(d.page_index for d in decisions if d.classification == FLOOR_PLAN)
     other = tuple(d.page_index for d in decisions if d.classification == NOT_FLOOR_PLAN)
     return SourceFloorPlanPageScope(
@@ -554,6 +638,8 @@ def classify_source_floor_plan_pages(
 def source_floor_plan_topology_scope(
     pdf_path: Any,
     page_indices: Sequence[int],
+    *,
+    allow_corroborated_ocr_titles: bool = False,
 ) -> Optional[SourceFloorPlanPageScope]:
     """Classify a PDF on disk; ``None`` when it cannot be read (no restriction)."""
     import fitz
@@ -563,7 +649,11 @@ def source_floor_plan_topology_scope(
     except Exception:  # noqa: BLE001
         return None
     try:
-        return classify_source_floor_plan_pages(doc, page_indices)
+        return classify_source_floor_plan_pages(
+            doc,
+            page_indices,
+            allow_corroborated_ocr_titles=allow_corroborated_ocr_titles,
+        )
     finally:
         doc.close()
 
@@ -571,9 +661,11 @@ def source_floor_plan_topology_scope(
 __all__ = [
     "FLOOR_PLAN",
     "FLOOR_PLAN_PAGE_BOUND_TITLE",
+    "FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE",
     "FLOOR_PLAN_PAGE_F07_VIEWPORT",
     "NOT_FLOOR_PLAN",
     "NOT_FLOOR_PLAN_PAGE_BOUND_TITLE",
+    "NOT_FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE",
     "NOT_FLOOR_PLAN_PAGE_DOCUMENT_HEADER",
     "NOT_FLOOR_PLAN_PAGE_SCHEDULE_VIEWPORT",
     "SOURCE_FLOOR_PLAN_PAGE_SCOPE_SCHEMA_VERSION",

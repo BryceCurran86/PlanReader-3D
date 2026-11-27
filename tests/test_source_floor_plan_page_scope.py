@@ -24,9 +24,11 @@ from pb_physical_wall_candidate_authority import PhysicalWallCandidateSelector
 from pb_source_floor_plan_page_scope import (
     FLOOR_PLAN,
     FLOOR_PLAN_PAGE_BOUND_TITLE,
+    FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE,
     FLOOR_PLAN_PAGE_F07_VIEWPORT,
     NOT_FLOOR_PLAN,
     NOT_FLOOR_PLAN_PAGE_BOUND_TITLE,
+    NOT_FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE,
     NOT_FLOOR_PLAN_PAGE_DOCUMENT_HEADER,
     NOT_FLOOR_PLAN_PAGE_SCHEDULE_VIEWPORT,
     UNPROVEN,
@@ -593,5 +595,42 @@ def test_mixed_floor_plan_sheet_reports_mixed_role_and_stays_in_topology() -> No
         assert scope.decisions[0].is_mixed_sheet is True
         assert scope.decisions[0].sheet_role == "mixed_floor_plan"
         assert scope.decisions[1].sheet_role == "elevation"
+    finally:
+        doc.close()
+
+
+def test_corroborated_ocr_title_fallback_is_opt_in_and_separates_outlined_plan_from_roof() -> None:
+    # All pages lack native titles (simulating outlined-vector PDFs like Q5446/Acacia)
+    doc = _doc(None, None, None)
+    fake_resolved = [
+        SimpleNamespace(page_no=1, title="GROUND FLOOR PLAN", source="label", confidence=90),
+        SimpleNamespace(page_no=2, title="ROOF PLAN", source="label", confidence=88),
+        # Bare heading (not bound to an explicit title-block label) MUST be rejected -> stays UNPROVEN
+        SimpleNamespace(page_no=3, title="ELEVATIONS", source="sheet_heading", confidence=92),
+    ]
+    try:
+        # Default-off: never invokes OCR fallback
+        with patch.object(scope_module.title_authority, "resolve_document") as mock_resolve:
+            default_scope = classify_source_floor_plan_pages(doc, range(3))
+        assert mock_resolve.call_count == 0
+        assert default_scope.restricts is False
+        assert default_scope.topology_page_indices() is None
+
+        # Opt-in: separates corroborated label-bound floor plan from roof plan, keeping unproven p3
+        with (
+            patch.object(scope_module.title_authority, "analyse_page", side_effect=lambda _p, n: SimpleNamespace(page_no=n)),
+            patch.object(scope_module.title_authority, "resolve_document", return_value=fake_resolved),
+        ):
+            ocr_scope = classify_source_floor_plan_pages(
+                doc, range(3), allow_corroborated_ocr_titles=True
+            )
+        assert ocr_scope.restricts is True
+        assert ocr_scope.decisions[0].classification == FLOOR_PLAN
+        assert ocr_scope.decisions[0].reason_code == FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE
+        assert ocr_scope.decisions[1].classification == NOT_FLOOR_PLAN
+        assert ocr_scope.decisions[1].reason_code == NOT_FLOOR_PLAN_PAGE_CORROBORATED_OCR_TITLE
+        assert ocr_scope.decisions[1].sheet_role == "roof_plan"
+        assert ocr_scope.decisions[2].classification == UNPROVEN
+        assert ocr_scope.topology_page_indices() == (0, 2)
     finally:
         doc.close()
