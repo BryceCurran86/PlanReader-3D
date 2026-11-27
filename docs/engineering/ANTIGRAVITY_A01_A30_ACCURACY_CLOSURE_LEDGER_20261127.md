@@ -51,4 +51,25 @@
 - **PARTIAL**: **7 / 30** (`A04, A06, A12, A13, A17, A18, A19`)
 - **BLOCKED**: **0 / 30**
 - **New Verified Customer Matches vs `main`**: `+0` new / `0` lost / `0` extras (`65/65` retained bit-exact; Maryborough `0` sealed pending `C08` + `A12`/`A13` + MAX issuer wiring).
-- **Merge-Tree Status**: Clean (`rc=0`) against Claude `#4810` (`48aec8cae`) and MAX `#4806` (`784179ebbe`).
+- **Merge-Tree Status**: Clean (`rc=0`) against Claude `#4810` and MAX `#4806`.
+
+---
+
+## 28 Nov 2026 Live Local-Source Verification Receipts (`#4807` Head `55155deb1` = `94/94` ALL-GREEN CI)
+
+### A. Maryborough Independent Family-Only `floor_area` Retention & 3-Row Authentic Lineage (`#7228007774`, `#7228661580`)
+- **Pinned Original**: `Arch_Combined_Maryborough_Service_Station.pdf` (SHA-256 prefix `b1be53531412005f`, 31 pages, `topology_pages=[7]`).
+- **3/3 Authentic `physical_room_floor_surface_*` Entity + `documented_dimension` Lineage** (not drafting cells, not value-matching alone):
+  1. `physical_room_floor_surface_4bca8579c101670bbfa0853cbbfc6f87` (`view_p7_2`, `documented_dimension`, `25.37875 m2`): historical `db4d6a02...` → current `8fcc9375...` (3p `floor_area`) / `92ad60d8...` (31p default `all`) / `9e0f557b...` (31p `finish_shadow=True`).
+  2. `physical_room_floor_surface_980b1ad9cbaebb3cc41351623718270e` (`view_p7_2`, `documented_dimension`, `9.05352 m2`): historical `de0a7ed7...` → current `14cdd6d0...` (3p) / `e41b3fb1...` (31p default) / `5a88dc2e...` (31p `finish_shadow=True`).
+  3. `physical_room_floor_surface_10d0d5ddf8103483397512c5a74584f7` (`view_p7_2`, `documented_dimension`, `13.270425 m2`): historical `e56c0138...` → current `7103c272...` (3p) / `002b1396...` (31p default) / `f9c08506...` (31p `finish_shadow=True`).
+- **Incomplete-Project Abstention Acceptance (`family_group="all", source_native_finish_text_shadow=True`, `#7228661580`)**:
+  - Whole-project flags strictly unsealed: `status="source_attempt_recorded_unsealed"`, `customer_rows_verified=False`, `combined_run_file=None`, `benchmark_score_granted=False`, `verified_customer_rows.json` absent.
+  - Family-only output verified: `verified_floor_area_family_customer_rows.json` (`3` rows) + `summary["family_only_verified_outputs"]["floor_area"]` (`verified=True`, `whole_project_verified=False`, `benchmark_score_granted=False`, `scope="family_only_incomplete_project"`).
+- **Runtime & Memory Profile Comparison (`55155deb1`, 31 pages, `K32GetProcessMemoryInfo`)**:
+  - `finish_shadow=False`: `2,169.616s`, peak WS `9,553.1 MB`, peak pagefile `26,655.0 MB`, `9,687` clipped OCR renders (`36` pre-allocation display-list evictions, `0` OOM fallbacks).
+  - `finish_shadow=True`: `922.769s` (2.35× faster), peak WS `3,995.6 MB` (2.39× lower), peak pagefile `4,182.7 MB` (6.37× lower), `0` clipped OCR renders.
+- **Consumer Verifier Contract for MAX**: `tools/run_source_closed_project_handoff.py:verify_family_only_floor_area_manifest(summary, expected_source_sha256=...)` enforces all whole-project unsealed flags, LF-normalized exact raw-byte SHA-256 verification of `verified_floor_area_family_customer_rows.json`, `sealed_source_closed_run_from_dict` envelope check, and 1:1 `verify_sealed_customer_output` bijection. `production_summary.json` also now explicitly emits `emitted_families`, `unemitted_families`, `all_expected_families_emitted`, and `completeness_status`.
+
+### B. `A05` Sheet-7 Cap/Token Association Diagnosis (`#7224267927`)
+- Sheet 7 (`107,402` line segments, `559` native spans / `1,545` words, rotated 90°) has `8` linear-dimension spans (`21` words: `13` edge/title strip, `8` interior) and `2` scale-ratio tokens. All `8/8` match `18` parallel axes (`17/18` have `>=2` perpendicular junctions, `9/18` have `>=2` crossing diagonal slashes), but `0/18` pass `compile_native_dimension_cap_components`'s split-half-tick endpoint check and `0/18` have coincident crossing slash+cap — fails closed honestly (`dimension_witnesses_unavailable`, `requires_typed_negative_ink_guard=True`). Never used to unblock non-wall lines.

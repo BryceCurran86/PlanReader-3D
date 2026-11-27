@@ -508,7 +508,7 @@ def _write_text_atomic(path: Path, encoded: str) -> None:
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=path.parent,
+            mode="w", encoding="utf-8", newline="\n", dir=path.parent,
             prefix=f".{path.name}.", suffix=".tmp", delete=False,
         ) as writer:
             temporary_path = Path(writer.name)
@@ -524,6 +524,119 @@ def _write_text_atomic(path: Path, encoded: str) -> None:
 def _write_json(path: Path, payload: Any) -> None:
     """Persist an unsealed source-attempt summary without a torn replacement."""
     _write_text_atomic(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+_EXPECTED_FAMILIES_BY_GROUP: dict[str, tuple[str, ...]] = {
+    "floor_area": ("floor_area",),
+    "core": ("wall_net_area", "opening_count", "opening_area", "opening_linear"),
+    "surfaces": ("floor_area", "floor_finish_area", "ceiling_lining"),
+    "all": (
+        "wall_net_area",
+        "opening_count",
+        "opening_area",
+        "opening_linear",
+        "floor_area",
+        "floor_finish_area",
+        "ceiling_lining",
+    ),
+}
+
+
+def verify_family_only_floor_area_manifest(
+    summary: Mapping[str, Any],
+    *,
+    expected_source_sha256: Optional[str] = None,
+) -> tuple[dict[str, Any], ...]:
+    """Fail-closed consumer verifier for independent family-only ``floor_area`` handoff.
+
+    Designed for downstream app consumers displaying independently verified
+    ``floor_area`` rows from an incomplete whole-project handoff without ever
+    promoting them to whole-project verified or benchmark-scored status.
+    """
+    if not isinstance(summary, Mapping):
+        raise TypeError("summary must be a mapping")
+    if summary.get("status") != "source_attempt_recorded_unsealed":
+        raise ValueError("family-only verifier requires unsealed whole-project status")
+    if summary.get("customer_rows_verified") is not False:
+        raise ValueError("whole-project customer_rows_verified must be False")
+    if summary.get("combined_run_file") is not None:
+        raise ValueError("whole-project combined_run_file must be None")
+    if summary.get("benchmark_score_granted") is not False:
+        raise ValueError("benchmark_score_granted must be False")
+
+    family_outputs = summary.get("family_only_verified_outputs")
+    if not isinstance(family_outputs, Mapping):
+        raise ValueError("missing family_only_verified_outputs manifest block")
+    entry = family_outputs.get("floor_area")
+    if not isinstance(entry, Mapping):
+        raise ValueError("missing family_only_verified_outputs['floor_area'] entry")
+
+    if entry.get("family") != "floor_area":
+        raise ValueError("manifest entry family must be 'floor_area'")
+    if entry.get("scope") != "family_only_incomplete_project":
+        raise ValueError("manifest entry scope must be 'family_only_incomplete_project'")
+    if entry.get("verified") is not True:
+        raise ValueError("manifest entry verified must be True")
+    if entry.get("whole_project_verified") is not False:
+        raise ValueError("manifest entry whole_project_verified must be False")
+    if entry.get("benchmark_score_granted") is not False:
+        raise ValueError("manifest entry benchmark_score_granted must be False")
+
+    source_sha = str(entry.get("source_sha256") or "").strip().lower()
+    if len(source_sha) != 64 or any(c not in "0123456789abcdef" for c in source_sha):
+        raise ValueError("manifest entry source_sha256 is invalid")
+    if expected_source_sha256 is not None and source_sha != expected_source_sha256.strip().lower():
+        raise ValueError("manifest entry source_sha256 does not match expected source")
+
+    rows_path_raw = entry.get("customer_rows_file")
+    run_path_raw = entry.get("family_run_file")
+    if not isinstance(rows_path_raw, str) or not rows_path_raw.strip():
+        raise ValueError("manifest entry missing customer_rows_file")
+    if not isinstance(run_path_raw, str) or not run_path_raw.strip():
+        raise ValueError("manifest entry missing family_run_file")
+
+    rows_path = Path(rows_path_raw)
+    run_path = Path(run_path_raw)
+    if rows_path.is_symlink() or not rows_path.is_file():
+        raise ValueError("customer_rows_file missing or unsafe symlink")
+    if run_path.is_symlink() or not run_path.is_file():
+        raise ValueError("family_run_file missing or unsafe symlink")
+
+    raw_rows_bytes = rows_path.read_bytes()
+    actual_sha = hashlib.sha256(raw_rows_bytes).hexdigest()
+    expected_rows_sha = str(entry.get("customer_rows_sha256") or "").strip().lower()
+    if actual_sha != expected_rows_sha:
+        raise ValueError("customer_rows_file SHA-256 mismatch against manifest")
+
+    rows_loaded = json.loads(raw_rows_bytes.decode("utf-8"))
+    if not isinstance(rows_loaded, list) or not rows_loaded:
+        raise ValueError("customer_rows_file must contain a non-empty JSON list")
+    rows = tuple(rows_loaded)
+    if any(
+        not isinstance(r, Mapping) or str(r.get("quantity_family", "")).strip() != "floor_area"
+        for r in rows
+    ):
+        raise ValueError("customer_rows_file contains non-floor_area row")
+
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+    floor_run = sealed_source_closed_run_from_dict(
+        json.loads(run_path.read_text(encoding="utf-8"))
+    )
+    if floor_run.run_id != entry.get("family_run_id"):
+        raise ValueError("family_run_id mismatch against sealed family run")
+    if set(floor_run.source_sha256s) != {source_sha}:
+        raise ValueError("sealed family run source_sha256 envelope mismatch")
+
+    verified = verify_sealed_customer_output(floor_run, rows)
+    expected_qids = tuple(sorted(str(q) for q in (entry.get("verified_quantity_ids") or ())))
+    if (
+        len(rows) != int(entry.get("customer_row_count", -1))
+        or verified.customer_row_count != len(expected_qids)
+        or tuple(sorted(verified.verified_quantity_ids)) != expected_qids
+    ):
+        raise ValueError("family-only floor_area customer row bijection mismatch")
+    return rows
 
 
 def _verify_independent_floor_area_family_customer_projection(
@@ -1901,6 +2014,21 @@ def _generate_project_handoff_locked(
         summary["verified_customer_row_count"] = len(verified_partial_customer_rows)
         summary["customer_rows_verified"] = True
         summary["customer_rows_file"] = str(customer_path)
+
+    emitted_families = sorted({family for family, _run in family_runs})
+    expected_families = _EXPECTED_FAMILIES_BY_GROUP.get(clean_family_group, ())
+    unemitted_families = sorted(set(expected_families) - set(emitted_families))
+    all_expected_emitted = (
+        len(unemitted_families) == 0 and not floor_finish_family_abstained
+    )
+    summary["emitted_families"] = emitted_families
+    summary["unemitted_families"] = unemitted_families
+    summary["all_expected_families_emitted"] = all_expected_emitted
+    summary["completeness_status"] = (
+        "complete_requested_families"
+        if all_expected_emitted
+        else "incomplete_unemitted_or_abstained_families"
+    )
     if owner_door_height_approvals is not None:
         # Additive estimator-review lane: runs only after every other output is
         # final, writes only below owner_door_review/, and cannot change any
