@@ -41,7 +41,7 @@ export type MenuAction =
   | { area: "level"; id: string }
   | { area: "done" }
   | { area: "quest"; action: "grid" | "axis" | "nudge-size" | "pin" | "recenter" | "help" | "back" |
-      "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
+      "drag-gain" | "compact" | "next-stage" | "next-floor" | "openings" | "next-opening" |
       "teleport" | "save" | "review" | "overview" | "elevated-view" | "walk-speed" | "multi-select" | "magnetic" | "clear-group" | "budget" | "budget-baseline" | "budget-clear" | "budget-page" | "wall-profiles" | "dimensions" | "layers" | "reset-layers" | "more-tools" | "hide-tools" | "ghost" | "lighting-night" | "lighting-on" | "all-dimensions" | "environment" | "home" | "quality" }
   | {area:"layer";layer:ConstructionLayer}
   | {area:"lining";action:"board"|"inspect"}
@@ -71,7 +71,7 @@ export type QuestMenuState = {
   pinned: boolean; help: boolean; deleteArmed: boolean;
   compact?: boolean; openingTools?: boolean; openingIndex?: number;
   canTeleport?:boolean; teleport?:boolean; overview?:boolean;
-  elevatedView?:boolean; walkSpeed?:number; ghost?:boolean; night?:boolean; previewLights?:boolean;
+  elevatedView?:boolean; walkSpeed?:number; dragGain?:number; ghost?:boolean; night?:boolean; previewLights?:boolean;
   multiSelect?:boolean; selectedCount?:number; magnetic?:boolean;
   wallProfilesOpen?:boolean; nextWallAssembly?:WallAssembly; dimensions?:boolean; allDimensions?:boolean;
   layers?:LayerOverrides; layersOpen?:boolean; radial?:boolean;
@@ -177,6 +177,7 @@ export function buildMenuLayout(
       {label:"Doors / windows",action:questAction("openings"),disabled:!quest.selectedWall?.openings.length},
       {label:"Angle",action:{area:"wall-angle",action:"panel"}},
       {label:"More tools",action:questAction("more-tools")},
+      {label:"Drag speed: "+(quest.dragGain??1)+"×",action:questAction("drag-gain")},
     ]:[
       {label:"Build / edit",action:questAction("more-tools")},
       {label:"Materials & fixtures",action:browse({kind:"groups"})},
@@ -185,15 +186,16 @@ export function buildMenuLayout(
       {label:"Construction stages",action:{area:"view"}},
       {label:"Budget",action:questAction("budget")},
       {label:"Resize footprint",action:{area:"footprint"},disabled:!footprint.available},
-      {label:quest.slabMm?"Slab · "+quest.slabMm+" mm":"Add concrete slab",action:{area:"slab"}},
+      {label:quest.slabMm?"Concrete slab · "+quest.slabMm+" mm":"Concrete slabs",action:{area:"slab"}},
+      {label:"Drag speed: "+(quest.dragGain??1)+"×",action:questAction("drag-gain")},
     ];
     entries.forEach((e,i)=>add(e.label,24+(i%2)*460,88+Math.floor(i/2)*86,440,76,e.action,{disabled:e.disabled}));
-    const footer=selected?358:446;
+    const footer=98+Math.ceil(entries.length/2)*86;
     add("Undo",24,footer,210,70,{area:"history",action:"undo"},{disabled:!interaction?.canUndo});
     add("Redo",250,footer,210,70,{area:"history",action:"redo"},{disabled:!interaction?.canRedo});
     add(selected?"Home":quest.quality==="performance"?"Performance":quest.quality==="high"?"Ultra":"Realistic",476,footer,210,70,questAction(selected?"home":"quality"));
     add("Close",702,footer,210,70,questAction("hide-tools"));
-    return {buttons,title:selected?"WALL WORKBENCH":"PLANREADER · TOOL TRAY",width:936,height:selected?480:568,note:"Left grip: tools · Right grip on an object: finishes · Trigger: choose"};
+    return {buttons,title:selected?"WALL WORKBENCH":"PLANREADER · TOOL TRAY",width:936,height:footer+122,note:"Left grip: tools · Right grip on an object: finishes · Trigger: choose"};
   }
   if(quest?.layersOpen){
     CONSTRUCTION_LAYERS.forEach(([id,label],i)=>add(label+" · "+(quest.layers?.[id]??"auto").toUpperCase(),20+(i%2)*475,85+Math.floor(i/2)*67,455,58,{area:"layer",layer:id},{active:quest.layers?.[id]==="show"}));
