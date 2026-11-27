@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {RoundedBoxGeometry} from "three/addons/geometries/RoundedBoxGeometry.js";
+import {applyFixtureFabric} from "./fixtureFabric.ts";
 import type { ItemTarget, ItemVisual } from "./itemCatalogue";
 
 type FixtureSpec = Extract<ItemVisual, { kind: "fixture" }>;
@@ -260,6 +261,7 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
       if (h >= 1.3) worktop = undefined;
       break;
   }
+  if(shape==="sofa"||shape==="bed")applyFixtureFabric(group,shape==="bed"?[body,white]:[body]);
   const used = new Set(group.children.flatMap(part => part instanceof THREE.Mesh ? [part.material] : []));
   for (const material of [body, detail, white, lens]) if (!used.has(material)) material.dispose();
   return { group, worktop };
