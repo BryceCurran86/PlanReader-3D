@@ -58,6 +58,7 @@ def scope_summary(scope) -> dict:
         "equivalence_ambiguous": len(equivalence.ambiguous_wall_ids) if equivalence is not None else None,
         "resolved_walls": len(resolved),
         "room_faces_status": faces.status.value,
+        "room_faces_reasons": list(faces.reason_codes),
         "room_faces": len(faces.records),
         "room_faces_withheld": len(faces.abstained_faces),
         "room_faces_with_all_walls_resolved": sum(
