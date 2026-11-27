@@ -29,7 +29,10 @@ visible. The owner's existing green-ink exclusion for wall geometry stays; no ot
 - wall ends (MAX 7226267598): a stretch at a corner of the outline, still unsupported, counts only when a line of the
   same ink is drawn along ALL of it, it touches a supported wall or doorway closure, and it is no longer than that wall is
   thick there. A break in the middle of an edge, a dashed or half-drawn end, or an end in other ink does not count;
-- the 8 pt pair limit stays; a wider 8 to 14 pt route would only ever be a separate candidate (not built);
+- the 8 pt pair limit stays. `wide_candidate` (MAX 7226267598) is a SEPARATE field that never counts as support: a bare
+  stretch whose only same-ink partner is 8 to 14 pt behind, running with it along at least 70% of the edge, no further face
+  one thickness on (hatch), and a drawn same-ink line across the whole band near an end (cap or corner return). Same-ink
+  equipment drawn as a capped double outline would look the same, which is why it is only a candidate;
 - CANDIDATE only when no edge has an unsupported stretch longer than 0.8 pt, else ABSTAINED. Never CORROBORATED.
 
 It promotes, closes, removes and publishes nothing, and no live path imports it.

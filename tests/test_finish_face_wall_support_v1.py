@@ -257,6 +257,65 @@ def test_a_drawn_end_in_another_ink_is_not_the_same_wall():
     assert _support(NOTCHED, drawings)["edges"][2]["wall_end"] == 0
 
 
+def _thick_room(gap, extra=(), *, colour=BLACK):
+    """A room in walls ``gap`` pt thick drawn as two closed outlines (the corners give each pair its returns)."""
+    outer = [(50 - gap, 50 - gap), (164 + gap, 50 - gap), (164 + gap, 164 + gap), (50 - gap, 164 + gap)]
+    return _draw_mixed([(_loop(list(FACE)) + _loop(outer) + list(extra), colour)])
+
+
+def test_a_thick_wall_is_only_a_separate_candidate():
+    result = _support(FACE, _thick_room(11.0))
+    assert result["status"] is ABSTAINED and result["unsupported_share"] > 0.99
+    assert result["wide_candidate_share"] > 0.99
+    assert all(edge["wide_candidate"] > 0.99 * edge["length"] for edge in result["edges"])
+
+
+@pytest.mark.parametrize("case", ["too-thick", "normal", "hatch", "no-returns", "other-ink", "short-partner"])
+def test_thick_wall_look_alikes_are_not_candidates(case):
+    if case == "too-thick":
+        drawings = _thick_room(15.0)
+    elif case == "normal":
+        drawings = _thick_room(6.0)
+    elif case == "hatch":
+        steps = [_loop([(50 - g, 50 - g), (164 + g, 50 - g), (164 + g, 164 + g), (50 - g, 164 + g)]) for g in (22.0,)]
+        drawings = _thick_room(11.0, [line for loop in steps for line in loop])
+    elif case == "no-returns":
+        drawings = _draw_mixed([([((20, 50), (200, 50)), ((20, 39), (200, 39))], BLACK)])
+        assert _support(((50, 50), (164, 50), (164, 100), (50, 100)), drawings)["wide_candidate_share"] == 0
+        return
+    elif case == "other-ink":
+        drawings = _draw_mixed([(_loop(list(FACE)), BLACK),
+                                (_loop([(39, 39), (175, 39), (175, 175), (39, 175)]), GREY)])
+    else:
+        ticks = [((175, 60), (175, 90)), ((164, 60), (175, 60)), ((164, 90), (175, 90))]
+        drawings = _draw_mixed([(_loop(list(FACE)) + ticks, BLACK)])
+        assert _support(FACE, drawings)["edges"][1]["wide_candidate"] == 0
+        return
+    assert _support(FACE, drawings)["wide_candidate_share"] == 0
+
+
+@pytest.mark.parametrize("gaps", [(3.0, 6.0, 11.0), (9.0, 12.5)], ids=["close-hatch", "two-wide-faces"])
+def test_several_faces_behind_are_never_a_wide_wall(gaps):
+    extra = [line for g in gaps[1:] for line in _loop([(50 - g, 50 - g), (164 + g, 50 - g), (164 + g, 164 + g),
+                                                        (50 - g, 164 + g)])]
+    assert _support(FACE, _thick_room(gaps[0], extra))["wide_candidate_share"] == 0
+
+
+def test_a_return_that_does_not_cross_the_whole_wall_is_not_one():
+    pair = [((40, 50), (180, 50)), ((40, 39), (180, 39))]
+    half = [((40, 45), (40, 50)), ((180, 39), (180, 45))]
+    face = ((50, 50), (170, 50), (170, 100), (50, 100))
+    assert _support(face, _draw_mixed([(pair + half, BLACK)]))["edges"][0]["wide_candidate"] == 0
+
+
+def test_a_drawn_end_cap_is_a_wall_return():
+    pair = [((40, 50), (180, 50)), ((40, 39), (180, 39))]
+    face = ((50, 50), (170, 50), (170, 100), (50, 100))
+    assert _support(face, _draw_mixed([(pair, BLACK)]))["edges"][0]["wide_candidate"] == 0
+    capped = pair + [((40, 39), (40, 50)), ((180, 39), (180, 50))]
+    assert _support(face, _draw_mixed([(capped, BLACK)]))["edges"][0]["wide_candidate"] > 119
+
+
 def _door_lines():
     lines = [line for line in DOUBLE if line not in (((170, 44), (170, 170)), ((164, 50), (164, 164)))]
     return lines + [((170, 44), (170, 90)), ((170, 120), (170, 170)), ((164, 50), (164, 90)),

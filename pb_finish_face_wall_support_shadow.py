@@ -5,7 +5,11 @@ second face of the SAME ink running 1.2 to 8 pt behind the face on that edge, wi
 hatch, not a wall), or one of the layered builder's filled wall bars behind the edge. Lines closer together than the
 builder's 1.2 pt thinnest wall are one face drawn more than once; lines on the room side are ignored. A remaining
 stretch counts as a wall END only when a line is drawn along all of it, it touches a supported wall or closure, and it is
-no longer than that wall is thick there -- never on length alone. Ink that is paper white or the
+no longer than that wall is thick there -- never on length alone.
+
+``wide_candidate`` is separate and never counts as support: an unsupported stretch whose only same-ink partner is 8 to
+14 pt behind (the builder's filled-wall limit), running along at least 70% of the edge, with no further face one thickness
+beyond (hatch), and with a drawn same-ink line across the whole band near an end of the pair (a wall return). Ink that is paper white or the
 owner's excluded green never counts; no other colour is excluded. A doorway closure given by the caller also covers its
 stretch. Thicknesses, minimum length and tolerances are the layered builder's own. Nothing is promoted, closed, removed or
 published, and no live path imports this.
@@ -19,13 +23,14 @@ from typing import Any
 from shapely.geometry import Point, Polygon
 
 from pb_layered_wall_doorway_room_ring_shadow import (
-    NOISE_PT, _STROKE_PAIR_CLUSTER_PT, _STROKE_PAIR_MIN_SPAN, _STROKE_PAIR_THICK_MAX, _STROKE_PAIR_THICK_MIN,
+    NOISE_PT, _DARK_FILL_THICK_MAX, _STROKE_PAIR_CLUSTER_PT, _STROKE_PAIR_MIN_SPAN, _STROKE_PAIR_THICK_MAX,
+    _STROKE_PAIR_THICK_MIN,
     _collect_dark_painted_source_wall_strips, _opaque, _owner_excluded_green_ink, _visible_source_stroke_paint,
 )
 from pb_migration_contracts import EvidenceResolutionStatus
 
-PAIRED, FILLED, CLOSURE, WALL_END = "paired", "filled", "closure", "wall_end"
-_AROUND_PT = 2.0 * _STROKE_PAIR_THICK_MAX  # how far around the face paired strokes and bars are searched
+PAIRED, FILLED, CLOSURE, WALL_END, WIDE = "paired", "filled", "closure", "wall_end", "wide_candidate"
+_AROUND_PT = 2.0 * _DARK_FILL_THICK_MAX + _STROKE_PAIR_CLUSTER_PT  # search radius: a wide pair plus its hatch check
 _BLACK = (0.0, 0.0, 0.0)
 
 
@@ -69,12 +74,12 @@ def _ink_near(drawings: Sequence[Any], region: tuple[float, float, float, float]
     return dict(sorted(inks.items())), fills
 
 
-def _faces(lines, horizontal: bool, line: float, outward: float):
+def _faces(lines, horizontal: bool, line: float, outward: float, behind_limit: float = _STROKE_PAIR_THICK_MAX):
     """Faces on or behind an edge: (offset of the room-side line, its runs). Lines closer than the thinnest wall are one
     face; their collinear pieces are joined and runs shorter than the builder's minimum are dropped."""
     offsets = sorted(((perp - line) * outward, lo, hi) for is_horizontal, perp, lo, hi in lines
                      if is_horizontal == horizontal
-                     and -NOISE_PT * 2 <= (perp - line) * outward <= _STROKE_PAIR_CLUSTER_PT + _STROKE_PAIR_THICK_MAX)
+                     and -NOISE_PT * 2 <= (perp - line) * outward <= _STROKE_PAIR_CLUSTER_PT + behind_limit)
     groups: list[list[tuple[float, float, float]]] = []
     for item in offsets:
         if groups and item[0] - groups[-1][-1][0] < _STROKE_PAIR_THICK_MIN:
@@ -113,6 +118,30 @@ def _paired_stretches(lines, horizontal: bool, line: float, outward: float, star
         if covers(near[1]) and len(partners) == 1:
             found.append((lo - start, hi - start, partners[0]))
     return found
+
+
+def _wide_stretches(lines, horizontal: bool, line: float, outward: float, start: float, end: float):
+    """Stretches paired only 8 to 14 pt apart, long enough, not hatch, and with a drawn wall return near an end."""
+    faces = _faces(lines, horizontal, line, outward, behind_limit=3.0 * _DARK_FILL_THICK_MAX)
+    near = next(((offset, runs) for offset, runs in faces if offset <= _STROKE_PAIR_CLUSTER_PT), None)
+    if near is None or any(_STROKE_PAIR_THICK_MIN <= offset - near[0] <= _STROKE_PAIR_THICK_MAX for offset, _ in faces):
+        return []
+    wide = [(offset - near[0], runs) for offset, runs in faces
+            if _STROKE_PAIR_THICK_MAX < offset - near[0] <= _DARK_FILL_THICK_MAX]
+    if not wide:
+        return []
+    thickness, far = wide[0]  # any second face within reach is caught by the next check
+    if any(thickness < offset - near[0] <= 2.0 * thickness + _STROKE_PAIR_CLUSTER_PT for offset, _ in faces):
+        return []  # a further face one thickness on: hatch or steps, not a wall
+    together = [(max(a, c, start), min(b, d, end)) for a, b in near[1] for c, d in far if min(b, d, end) > max(a, c, start)]
+    if sum(hi - lo for lo, hi in together) < 0.7 * (end - start):
+        return []
+    band = sorted((line + outward * near[0], line + outward * (near[0] + thickness)))
+    returns = [position for is_horizontal, position, lo, hi in lines if is_horizontal != horizontal
+               and lo <= band[0] + _STROKE_PAIR_CLUSTER_PT and hi >= band[1] - _STROKE_PAIR_CLUSTER_PT]
+    return [(lo - start, hi - start) for lo, hi in together
+            if any(min(abs(position - lo), abs(position - hi)) <= thickness + _STROKE_PAIR_CLUSTER_PT
+                   for position in returns)]
 
 
 def _drawn_on(lines, horizontal: bool, line: float, outward: float, lo: float, hi: float) -> bool:
@@ -191,7 +220,7 @@ def face_wall_support(polygon: Sequence[tuple[float, float]], drawings: Sequence
         vertical = abs(a[0] - b[0]) <= NOISE_PT * 2 < abs(a[1] - b[1])
         stretches: dict[str, list[tuple[float, float]]] = {PAIRED: [], FILLED: [], CLOSURE: []}
         support: list[tuple[float, float, float, tuple | None]] = []  # (from, to, wall thickness there, ink)
-        edge = {"length": length, "axis": None, "support": support, "stretches": stretches, "ends": []}
+        edge = {"length": length, "axis": None, "support": support, "stretches": stretches, "ends": [], "wide": []}
         if horizontal or vertical:
             along, across = (0, 1) if horizontal else (1, 0)
             line = (a[across] + b[across]) / 2.0
@@ -211,6 +240,7 @@ def face_wall_support(polygon: Sequence[tuple[float, float]], drawings: Sequence
                 for lo, hi, thickness in _paired_stretches(runs, horizontal, line, edge["outward"], start, end):
                     stretches[PAIRED].append((lo, hi))
                     support.append((lo, hi, thickness, ink))
+                edge["wide"] += _wide_stretches(runs, horizontal, line, edge["outward"], start, end)
             for strip in bars:
                 if not (strip.horizontal if horizontal else strip.vertical):
                     continue
@@ -232,10 +262,12 @@ def face_wall_support(polygon: Sequence[tuple[float, float]], drawings: Sequence
         length, stretches = edge["length"], edge["stretches"]
         every = [span for spans in stretches.values() for span in spans] + edge["ends"]
         covered, longest_gap = _union_length(every, length)
+        wide = _union_length(every + edge["wide"], length)[0] - covered  # only what the rules above leave bare
         edges.append({
             "length": length,
             **{kind: _union_length(spans, length)[0] for kind, spans in stretches.items()},
             WALL_END: _union_length(edge["ends"], length)[0],
+            WIDE: max(0.0, wide),
             "unsupported": max(0.0, length - covered),
             "longest_gap": longest_gap,
         })
@@ -246,4 +278,5 @@ def face_wall_support(polygon: Sequence[tuple[float, float]], drawings: Sequence
         "reason": "every_edge_on_wall_evidence" if supported else "face_edge_without_wall_evidence",
         "edges": edges,
         "unsupported_share": sum(edge["unsupported"] for edge in edges) / total if total else 1.0,
+        "wide_candidate_share": sum(edge[WIDE] for edge in edges) / total if total else 0.0,
     }
