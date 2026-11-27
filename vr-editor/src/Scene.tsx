@@ -33,6 +33,7 @@ import {nominalShellFraming} from "./constructionFrameVisual";
 import {roofPresentationParts,roofSkinAndGables} from "./roofPresentation";
 import {junctionBackingMesh} from "./constructionJunctionVisual";
 import {wallCornerJoins} from "./wallCornerJoin";
+import {corniceContactRuns,corniceMesh} from "./fineConstructionTrim";
 import {sourceWallLiningPreview,sourceCeilingLiningPreview} from "./sourceLiningPreview";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type { ConstructionStage } from "./constructionStages";
@@ -1028,6 +1029,12 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         }else for(const opening of wall.openings??[]){
           const id=doorKey(wall.proposalId,opening.openingId);
           if(openDoors.has(id))nextOpenDoors.add(id);
+        }
+        const runs=corniceContactRuns(wall,ceilings),corniceKey=JSON.stringify(runs);
+        if(group.userData.corniceKey!==corniceKey){
+          const old=group.children.find(c=>c.userData.nominalCornice);
+          if(old instanceof THREE.Mesh){group.remove(old);old.geometry.dispose();(Array.isArray(old.material)?old.material:[old.material]).forEach(m=>m.dispose());}
+          const cornice=corniceMesh(wall,runs,corner);if(cornice)group.add(cornice);group.userData.corniceKey=corniceKey;
         }
         nextMeshes.set(key,{signature,object:group});
         let hosts=wallHostCache.get(group);
@@ -2115,6 +2122,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
             if (child.userData.illustrativeFraming) child.visible = layerVisible(construction.current.layers,"framing",inspect||currentStage==="framing"||currentStage==="insulation");
             else if(child.userData.constructionAccessory==="bracing"||child.userData.constructionAccessory==="tie-down")child.visible=layerVisible(construction.current.layers,child.userData.constructionAccessory,inspect||currentStage==="framing");
             else if(child.userData.illustrativeInsulation)child.visible=layerVisible(construction.current.layers,"insulation",currentStage==="insulation");
+            else if(child.userData.nominalCornice)child.visible=!topEditing()&&!inspect&&currentStage!=="slab"&&layerVisible(construction.current.layers,"wall",!framing)&&layerVisible(construction.current.layers,"ceiling",currentStage==="finished")&&layerVisible(construction.current.layers,"finishes",currentStage==="finished");
             else if(child.userData.illustrativeTrim)child.visible=!inspect&&currentStage!=="slab"&&layerVisible(construction.current.layers,"wall",!framing)&&layerVisible(construction.current.layers,"finishes",currentStage==="finished");
             else if(child instanceof THREE.Mesh&&child.userData.illustrativeLining){
               child.visible=!!liningStage&&!inspect&&layerVisible(construction.current.layers,"wall",true)&&layerVisible(construction.current.layers,"lining",true);

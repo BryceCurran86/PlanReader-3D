@@ -245,18 +245,22 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
     case "cabinet":
     case "bench":
       const plinth=box(w*.91,h*.085,d*.80,0,h*.0425,-d*.06,detail);plinth.name="Recessed cabinet plinth";
-      const carcass=box(w,h*.87,d*.94,0,h*.52,-d*.02);carcass.name="Cabinet carcass";
+      const carcass=box(w,h*.87,d*.91,0,h*.52,-d*.035);carcass.name="Cabinet carcass";
       const topMaterial=h<1.3?white:body;
       worktop=softBox(w*1.018,h*.047,d*1.02,0,h*.9765,0,topMaterial);worktop.name="Bevelled benchtop";
-      for (let index = 0; index < count; index++) {
-        const x = ((index + 0.5) / count - 0.5) * w;
-        const panelWidth=w/count-.009;
-        const front=softBox(panelWidth,h*.82,.018,x,h*.515,d*.5);front.name="Radiused cabinet front";
-        // Recessed panel reveal and physical pull with two mounting posts.
-        const pull=Math.min(.16,panelWidth*.48);
-        const handle=softBox(pull,.012,.016,x,h*.79,d*.5+.029,detail);handle.name="Cabinet pull";
-        for(const sign of [-1,1])box(.012,.012,.025,x+sign*pull*.36,h*.79,d*.5+.015,detail);
-        if(h<1.3)box(panelWidth*.88,.004,.003,x,h*.68,d*.5+.010,detail);
+      // Three-count cabinet is the catalogue drawer unit (not three skinny
+      // doors); islands remain vertical panels. Reveals are actual gaps.
+      const drawers=shape==="cabinet"&&count===3&&h<1.3;
+      const lo=h*.09,hi=h*.94,span=hi-lo;
+      for(let i=0;i<count;i++){
+        const panelWidth=drawers?w-.012:w/count-.009,panelHeight=drawers?span/count-.006:span-.008;
+        const x=drawers?0:((i+.5)/count-.5)*w,y=drawers?lo+(i+.5)*span/count:(lo+hi)/2;
+        const front=softBox(panelWidth,panelHeight,.018,x,y,d*.5);front.name=drawers?"Radiused drawer front":"Radiused cabinet front";
+        const pull=Math.min(.16,panelWidth*.48),handleY=drawers?y+panelHeight*.25:hi-.10;
+        const handle=softBox(pull,.012,.016,x,handleY,d*.5+.029,detail);handle.name="Cabinet pull";
+        for(const sign of [-1,1])box(.012,.012,.025,x+sign*pull*.36,handleY,d*.5+.015,detail).name="Pull mounting post";
+        // A recessed shadow-line behind the face, not a painted fake drawer.
+        box(panelWidth*.88,.004,.003,x,drawers?y-panelHeight/2-.003:hi-.002,d*.485,detail).name="Joinery reveal";
       }
       if (h >= 1.3) worktop = undefined;
       break;

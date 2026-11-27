@@ -17,7 +17,7 @@ import {menuButtonAt} from "./toolWheelInput.ts";
 import {nominalFrameLayout} from "./constructionDetailLayout.ts";
 import {makeLiningVisual} from "./constructionLiningVisual.ts";
 import {nominalWallConnections,nominalCeilingFraming} from "./constructionFrameVisual.ts";
-import {nominalTrimMesh} from "./constructionTrimVisual.ts";
+import {fineTrimMesh} from "./fineConstructionTrim.ts";
 import type {WallCornerJoins} from "./wallCornerJoin.ts";
 import {MENU_ATLAS_SIZE,menuAtlasScale} from "./menuAtlas.ts";
 import {openingFrameVisual,nominalDoorSlab,windowDetailVisual} from "./openingFinishVisual.ts";
@@ -221,7 +221,7 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
       face.userData.draftFinishFace=side;group.add(face);
     }
   }
-  const trim=nominalTrimMesh(wall);if(trim)group.add(trim);
+  const trim=fineTrimMesh(wall,joins);if(trim)group.add(trim);
   group.add(illustrativeTimberFrame(wall));
   for(const accessory of nominalWallConnections(wall).children.slice())group.add(accessory);
   if(profile.core!=="masonry"){

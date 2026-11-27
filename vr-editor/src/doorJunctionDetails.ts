@@ -49,5 +49,5 @@ export function doorJunctionDetails(wall:WallVisual,opening:WallAdditionOpening)
   mesh.name=name;mesh.userData.nominalOpeningFrame=true;mesh.castShadow=true;mesh.receiveShadow=true;return mesh;
  }
  const hardware={chrome:0xc4ced4,"matte-black":0x292c2e,"brushed-brass":0xb99b63,"brushed-nickel":0xaaa9a4}[opening.doorHardware??"chrome"];
- return [batch(frame,0xe8e6df,0,.74,"Door jamb stops"),batch(metal,hardware,opening.doorHardware==="matte-black"?.12:.65,.38,"Door hinges, strike and threshold")].filter((p):p is THREE.Mesh=>p!==null);
+ return [batch(frame,0xe8e6df,0,.74,"Door jamb stops"),batch(metal,hardware,opening.doorHardware==="matte-black"?.12:.65,.38,"Door hinges, strike and threshold")].filter(p=>p!==null);
 }

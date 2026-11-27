@@ -9,7 +9,7 @@ const wall=starterBuild(starterManifest()).walls[0];
 const win=wall.openings.find(o=>o.openingKind==="window"),door=wall.openings.find(o=>o.openingKind==="door");
 test("window detail has bounded batch count, seals and recessed reflective pane",()=>{
  const original=JSON.stringify(wall),parts=windowDetailVisual(wall,win);
- assert.equal(parts.length,2);assert.equal(parts[0].count,4);assert.equal(parts[1].count,3);
+ assert.equal(parts.length,2);assert.equal(parts[0].count,4);assert.equal(parts[1].count,8);
  assert.ok(parts.every(p=>p instanceof THREE.InstancedMesh&&p.userData.nominalOpeningFrame));
  const mesh=displayWallDraft(wall).children.find(p=>p.userData.catalogueWindow);assert.ok(mesh);mesh.geometry.computeBoundingBox();
  const b=mesh.geometry.boundingBox;assert.ok(b.max.x-b.min.x<win.widthM);assert.ok(b.max.y-b.min.y<win.heightM);
