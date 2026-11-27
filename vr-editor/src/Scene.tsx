@@ -428,6 +428,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
     function groupIds(){return build.current.buildState.walls.filter(w=>w.levelId===build.current.buildLevel&&selectedGroup.has(w.proposalId)).map(w=>w.proposalId);}
     let deleteArmed = false;
     let snapGrid: 0.05 | 0.1 | 0.25 = 0.05;
+    let dragGain=1;
     let snapAxis: WallAxis = "auto";
     let nudgeStep: 0.05 | 0.1 | 0.25 = 0.05;
     let panelPinned = true;
@@ -531,7 +532,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
           canTeleport:teleportSettings.current.teleportAvailable,
           teleport:teleportSettings.current.teleportMode,overview:overviewOpen,
-          elevatedView:!!elevatedReturn,walkSpeed,ghost:ghostMode,night:visualSettings.current.mood==="night",previewLights:visualSettings.current.previewLights,magnetic,multiSelect,selectedCount:groupIds().length,
+          elevatedView:!!elevatedReturn,walkSpeed,dragGain,ghost:ghostMode,night:visualSettings.current.mood==="night",previewLights:visualSettings.current.previewLights,magnetic,multiSelect,selectedCount:groupIds().length,
           budget:liveBudget.current.summary,budgetOpen,budgetPage,
           wallProfilesOpen,nextWallAssembly:build.current.buildSizes.wallAssembly,dimensions,allDimensions:construction.current.allDimensions,
           radial,layersOpen,layers:construction.current.layers,liningBoard:construction.current.liningBoard,liningHidden:!!selectedDraftId&&inspectedWall===selectedDraftId,
@@ -710,6 +711,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         }
         if(choice.action==="clear-group"){selectedGroup.clear();deleteArmed=false;return;}
         if (choice.action === "grid") snapGrid = nextStep(snapGrid);
+        if(choice.action==="drag-gain"){dragGain=dragGain===.25?1:dragGain===1?3:dragGain===3?5:.25;reportTool("Drag sensitivity · "+dragGain+"×");}
         if (choice.action === "nudge-size") nudgeStep = nextStep(nudgeStep);
         if (choice.action === "axis") {
           const axes: WallAxis[] = ["auto","free","horizontal","vertical"];
@@ -1394,7 +1396,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
       const hand = controllerIndex === undefined || topEditing() ? undefined :
         controllers[controllerIndex].getWorldPosition(new THREE.Vector3());
       return draftGesturePreview(gesture, buildSizes, raycaster.ray, buildState,
-        hand ? [hand.x, hand.z] : undefined,snapOptions(),connectedRotation);
+        hand ? [hand.x, hand.z] : undefined,snapOptions(),connectedRotation,dragGain);
     }
     function completeDrag(gesture: DraftGesture, controllerIndex?: number) {
       const preview = previewDrag(gesture, controllerIndex);
@@ -1542,8 +1544,8 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
     function fixtureDestination(grab:FixtureGrab,index:number):[number,number]{
       const hand=controllers[index].getWorldPosition(new THREE.Vector3());
       const at=topEditing()&&grab.planePoint?raycaster.ray.intersectPlane(fixturePlane,new THREE.Vector3()):null;
-      const dx=at&&grab.planePoint?at.x-grab.planePoint.x:hand.x-grab.hand.x;
-      const dz=at&&grab.planePoint?at.z-grab.planePoint.z:hand.z-grab.hand.z;
+      const dx=at&&grab.planePoint?at.x-grab.planePoint.x:(hand.x-grab.hand.x)*dragGain;
+      const dz=at&&grab.planePoint?at.z-grab.planePoint.z:(hand.z-grab.hand.z)*dragGain;
       return [Math.round((grab.entry.point[0]+dx)*20)/20,Math.round((grab.entry.point[2]+dz)*20)/20];
     }
     const xrGestures: (DraftGesture | null)[] = [null, null];
@@ -2161,7 +2163,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         // Probe at 10 Hz only, while inspecting, never during an active edit.
         const rightPointer=inputSources.findIndex(s=>s?.handedness==="right"&&s.targetRayMode==="tracked-pointer");
         const hoverAllowed=rightPointer>=0&&interaction.current.mode==="inspect"&&!buildState.tool&&!item&&!resize.current.enabled&&!resize.current.projection&&!multiSelect&&!teleportSettings.current.teleportMode&&!xrPress.some(Boolean)&&!activeGrip;
-        if(hoverAllowed&&(!toolsOpen||automaticContext)&&now-lastContextProbe>=100){
+        if(hoverAllowed&&!toolsOpen&&now-lastContextProbe>=100){
           lastContextProbe=now;aimController(controllers[rightPointer]);
           const overPanel=automaticContext&&displayedMenuLayout&&buildOverlay.menuHit(raycaster,displayedMenuLayout);
           if(!overPanel&&!menuStickFocus){
