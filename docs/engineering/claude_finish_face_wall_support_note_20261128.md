@@ -39,7 +39,11 @@ It promotes, closes, removes and publishes nothing, and no live path imports it.
 - Same sheet, the builder's 171 candidate rings: 8 fully supported, 3 under 10% unsupported, 5 from 10 to 50%, 155 over
   (many are rows of identical fixture-sized outlines bounded by single lines).
 - Real Office: the builder's existing default-off `door_jamb_returns` gives it its own ring (source-stroke doorway closure);
-  every long edge is supported, three jogs of 0.6, 5.2 and 2.2 pt are not (about 1%), so it still abstains. WSH/DRY: 1%.
+  every long edge is supported, the 5.2 pt jamb stub counts as a wall end, and a 2.2 pt step with no drawn geometry does not
+  (0.6 pt is within tolerance), so it still abstains. WSH/DRY (without the option): 1% unsupported.
+- Cross-sheet, `door_jamb_returns` off vs on (builder only): only two sheets change. It gains the Office (Maryborough
+  171 to 178 candidate rings) but LOSES the WSH/DRY room, which merges into an open region; another set loses 4 rings that
+  were over 50% unsupported. Not a safe global switch.
 - Known misses on real rooms: Cold Room passes three sides, its fourth is a panel wall about 8.6 pt thick, above the
   builder's 8 pt pair limit; the Freezer has 8.4 to 8.6 pt sides (73% unsupported). Raising the limit to the builder's
   14 pt filled-wall limit, and counting jogs no longer than a wall as part of it, are separate decisions, not made.

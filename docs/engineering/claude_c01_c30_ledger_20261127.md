@@ -12,7 +12,7 @@ drawings only). Nothing here is merged; MAX owns merge, pins and official scorin
 | C05 non-wall ink never a wall | PARTIAL | opt-in | guard built (two modes); originals: walls withheld, 0 host/frame changes; signed-row check pending before any default |
 | C06 rooms in wall-ink scope | PARTIAL | report | existing ring builder gives inside-face rings on the three topology sheets (171 / 18 / 54 candidates); the two floor-finish rooms have no ring (both open into one interior part); not wired |
 | C07 wall identity ambiguity | PARTIAL | report | no verified sheet-7 scale; a band alone would publish non-wall lines (AG holds its scale until C05) |
-| C08 room-to-wall identity | PARTIAL | report | floor-finish outlines of Food Prep and Office are non-wall linework; shadow `face_wall_support` (28 Nov) rejects both on every edge; real Office ring (builder option `door_jamb_returns`) supported except three small jogs; thick (about 8.6 pt) panel walls fail the 8 pt pair limit (MAX decisions) |
+| C08 room-to-wall identity | PARTIAL | report | floor-finish outlines of Food Prep and Office are non-wall linework; shadow `face_wall_support` (28 Nov) rejects both on every edge; real Office ring (builder option `door_jamb_returns`) supported except a 2.2 pt step; that option is not a safe global switch (loses the WSH/DRY room); thick (about 8.6 pt) panel walls fail the 8 pt pair limit (MAX decisions) |
 | C09 exterior inside-face trace | NOT STARTED | | |
 | C10 garage closure | NOT STARTED | | |
 | C11 dual dwellings / party walls | NOT STARTED | | |
