@@ -34,5 +34,12 @@ letter strokes; no published native wall lost, 3 more publish), ambiguous 2,035 
 3,598, published 442 to 439 (its one picture covers 0.5% of the page); 3Laurel and Q5446 identical. Openings, rooms,
 quantities, other sheets and a signed-row replay are not checked.
 
+## Signed-row replay result (2026-11-28): NOT SAFE TO PROMOTE
+All 65 signed rows kept the same values and Maryborough's three floor rooms were identical, but Lot16 sheet 3 lost 10 rooms
+including a WC and a LINEN cupboard whose walls exist only in the page's picture: where line work drawn over the picture
+extends a picture line, the full-render segment is partly outside the picture and the filter drops it whole. Next design:
+detect the primary raster family on the images-only render (picture ink stays whole, overlaid text and lines are never
+seen), check receipt binding, and repeat the replay.
+
 ## Must not influence
 Any wall count or quantity expectation. Originals: counts only, before any use.
