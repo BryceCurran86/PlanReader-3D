@@ -232,7 +232,31 @@ def _verify_row_lineage(
             f"customer row {quantity_id!r} is missing measurement authority lineage"
         )
 
-    if sealed.family == "floor_finish_area":
+    # Independent finished-face producers sign a three-part material key,
+    # rather than the cross-view schedule issuer's four-part code/family key.
+    # Preserve the signed physical identity and material without fabricating
+    # a schedule code or changing an existing sealed quantity.
+    floor_parts = sealed.semantic_key.split(":")
+    if sealed.family == "floor_finish_area" and len(floor_parts) == 3:
+        meta = qprov.get("metadata")
+        if (
+            floor_parts[0] != "floor_finish_area"
+            or any(not part or part != part.strip() for part in floor_parts)
+            or tuple(sealed.object_identity_refs) != (floor_parts[1],)
+            or not isinstance(meta, Mapping)
+            or meta.get("finished_floor_face_source_id") != floor_parts[1]
+            or meta.get("semantic_finish") != floor_parts[2]
+            or meta.get("finish_code") != floor_parts[2]
+            or meta.get("finish_system") != floor_parts[2]
+            or row.get("finish_system") != floor_parts[2]
+            or meta.get("net_internal_finished_face_authorized") is not True
+            or meta.get("commercial_projection_allowed") is not True
+        ):
+            raise CustomerOutputVerificationError(
+                f"customer row {quantity_id!r} has unverified independent floor finish identity"
+            )
+
+    if sealed.family == "floor_finish_area" and len(floor_parts) != 3:
         # Original CrossViewFloorFinishProducer issues ONE typed canonical
         # floor/material receipt. The actual source semantic key, not a
         # mutable customer caption, owns the finish role:
