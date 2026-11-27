@@ -18,7 +18,7 @@ import { createPresentationRoughnessTile, sourceWallUV } from "./surfaceDetail";
 import type { SurfaceDetail } from "./surfaceDetail";
 import type { SourceSurface } from "./sourceSurfaces";
 import { activeStart, buildGuide, newPlacementId, rotatedDraftWall,
-  translatedDraftWall, validWallLength, viewRelativeNudge } from "./buildPlacement";
+  translatedDraftWall, validWallLength, viewRelativeNudge, aimOpening, validEditedWall } from "./buildPlacement";
 import type { WallAxis, WallRotationPivot } from "./buildPlacement";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, WallVisual } from "./buildPlacement";
 import { aimBuild, beginDraftGesture, createBuildOverlay, displayCeilingDraft,
@@ -1164,8 +1164,23 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
     function placeSelectedItem(item: CatalogueItem) {
       syncItems();
       const { hit: target, reason } = itemView.candidate(raycaster, item, itemControls.current.turn);
-      if (target) itemControls.current.onPlace(item.id, target);
-      else reportTool(reason ?? itemGuide(item));
+      if (target) {itemControls.current.onPlace(item.id, target);return;}
+      // Sliding-door catalogue selection can create a real local opening,
+      // rather than requiring the user to cut a separate aperture first.
+      if(item.group==="sliding-doors"&&item.visual.kind==="opening-style"&&item.visual.type==="door"&&!resize.current.projection&&!resize.current.enabled){
+        const aimed=targetWallAim();
+        const wall=aimed?.target.kind==="draft"?build.current.buildState.walls.find(w=>w.proposalId===aimed.target.id):undefined;
+        if(wall&&aimed){
+          const result=aimOpening(wall,aimed.point,"door",build.current.buildSizes,newPlacementId("sliding-door"));
+          if(!result||result.error){reportTool(result?.error??"Aim at a clear portion of the draft wall.");return;}
+          const opening={...result.opening,doorMechanism:"sliding" as const};
+          const next={...wall,openings:[...wall.openings,opening]};
+          if(!validEditedWall(next)){reportTool("Sliding door needs clear adjacent wall space for its travel. Choose a narrower door or another location.");return;}
+          build.current.onBuildAction({kind:"adjust",previous:wall,wall:next});
+          return;
+        }
+      }
+      reportTool(reason ?? itemGuide(item));
     }
     const select = (id: string | null) => {if(id)updateDraftSelection(null);callback.current(id);};
     let targetKey:readonly unknown[]=[];let targets:WallTarget[]=[];
