@@ -115,7 +115,7 @@ export class DesktopRenderGovernor {
   else if(this.fast>=90){this.cap=Math.min(2,this.cap+1);this.fast=0;}
   const interval=this.requested==="performance"||this.cap===0?1000/30:1000/45;
   // Reserve an actual event-processing interval after an expensive frame.
-  this.nextAt=now+Math.max(interval,elapsed+Math.min(1000,Math.max(8,elapsed*.85)))-1;
+  this.nextAt=now+Math.max(interval,elapsed+(elapsed>=100?Math.min(1000,Math.max(8,elapsed*.85)):Math.min(100,Math.max(8,elapsed*.65))))-1;
  }
  idle(){this.previous=-Infinity;}
  reset(){this.cap=2;this.nextAt=this.previous=-Infinity;this.slow=this.fast=0;}
