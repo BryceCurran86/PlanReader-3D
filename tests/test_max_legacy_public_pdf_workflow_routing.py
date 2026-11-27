@@ -55,3 +55,41 @@ def test_original_only_jobs_do_no_work_except_notice(filename, pair):
     assert "if" not in data[focused]
     assert data[focused]["strategy"]["matrix"]["python-version"] == ["3.13", "3.14"]
     assert any("pytest" in s.get("run", "") and "if" not in s for s in data[focused]["steps"])
+
+# Batch two: preserve every step before the original replay boundary.
+BATCH_TWO = [
+    ("diag-gpt2-page7-remaining-label-face-ownership.yml", "source-face-physical-ownership", "Source-owned native room text vs authentic physical face first gate"),
+    ("diag-gpt2-page7-split-label-wall-separators.yml", "source-face-physical-ownership", "Source-owned native room text vs authentic physical face first gate"),
+    ("diag-gpt2-page7-source-room-label-owners.yml", "source-face-physical-ownership", "Prove source-owned floor plan wall and room faces"),
+    ("test-gpt2-original-page11-schedule-frame-ownership.yml", "source-schedule-frame-gate", "Original Maryborough source SHA page11 physical plan vs schedule"),
+    ("test-gpt2-source-double-plan-border.yml", "source-double-plan-border", "Identify strict source frame first rejection without relaxing authority"),
+    ("test-source-plan-material-occurrences.yml", "source-plan-material-proof", "Both immutable originals and preserved consumer gates"),
+    ("test-gpt2-b01-real-vertical-titles.yml", "maryborough-vertical-source", None),
+    ("test-gpt2-page7-physical-faces-after-frame.yml", "source-face-physical-ownership", "Prove source-owned floor plan wall and room faces"),
+    ("test-gptmax-producer-g17-wall-shadow.yml", "original-source-retention", None),
+    ("diag-gpt2-page7-room-figured-witnesses.yml", "source-face-physical-ownership", "Prove source-owned floor plan wall and room faces"),
+    ("diag-gpt2-b01-semantic-regions.yml", "maryborough-semantic-regions", None),
+    ("diag-gpt2-original-ft3-native-frame-scope.yml", "original", None),
+    ("test-source-owned-physical-plan-view.yml", "source-view-proof", "Both immutable original source proofs and downstream consumption"),
+    ("test-gptmax-original-g17-shadow-cells.yml", "original-lot16-retention", None),
+    ("test-gptmax-interior-dimension-tick-source.yml", "original-lot16", None),
+]
+
+
+@pytest.mark.parametrize("filename,job,boundary", BATCH_TWO)
+def test_batch_two_original_replay_boundary(filename, job, boundary):
+    data = jobs(filename)
+    steps = data[job]["steps"]
+    assert_notice(steps)
+    notice_index = next(i for i, s in enumerate(steps) if NOTICE in s.get("run", ""))
+    assert all(s.get("if") == OFF for s in steps[notice_index + 1:])
+    if boundary is None:
+        assert notice_index == 0
+    else:
+        assert steps[notice_index + 1]["name"] == boundary
+        assert notice_index > 0
+        assert all(s.get("if") != OFF for s in steps[:notice_index])
+    for sibling, config in data.items():
+        if sibling != job:
+            assert config.get("if") != OFF
+            assert all(s.get("if") != OFF for s in config.get("steps", []))
