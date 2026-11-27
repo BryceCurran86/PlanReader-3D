@@ -413,3 +413,101 @@ def _abstain_extraction(
         receipt_sha256=digest,
         reason_codes=reasons,
     )
+
+
+_OUTLINED_CAPTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("roof_plan", re.compile(r"\broof\s+plan\b", re.IGNORECASE)),
+    ("site_plan", re.compile(r"\bsite\s+plan\b", re.IGNORECASE)),
+    ("reflected_ceiling_plan", re.compile(r"\b(?:reflected\s+)?ceiling\s+plan\b", re.IGNORECASE)),
+    ("floor_finish_plan", re.compile(r"\bfloor\s+finish(?:es)?\s+plan\b", re.IGNORECASE)),
+    ("floor_plan", re.compile(r"\b(?:ground\s+|first\s+|upper\s+|lower\s+|level\s+\d+\s+)?floor\s+plan\b", re.IGNORECASE)),
+    ("elevation", re.compile(r"\b(?:north|south|east|west|front|rear|side|left|right)?\s*elevations?\b", re.IGNORECASE)),
+    ("section", re.compile(r"\bsections?\s*(?:[A-Z]\s*[-–—]\s*[A-Z]|\d+)?\b", re.IGNORECASE)),
+    ("schedule", re.compile(r"\b(?:door|window|finish(?:es)?|room|hardware)\s+schedule\b", re.IGNORECASE)),
+)
+
+
+@dataclass(frozen=True)
+class OutlinedCaptionViewClassification:
+    """Multi-DPI agreed outlined-vector in-drawing caption classification (A06/Q5446 P0)."""
+
+    status: str  # "CORROBORATED" | "CONFLICT" | "ABSTAINED"
+    view_type: str  # "floor_plan" | "roof_plan" | ... | "unproven"
+    matched_view_types: tuple[str, ...]
+    supporting_texts: tuple[str, ...]
+    reason_codes: tuple[str, ...]
+    commercial_projection_allowed: bool = False
+    shadow_only: bool = True
+    schema_version: str = SHADOW_SCHEMA_VERSION
+
+
+def classify_outlined_caption_view_type(
+    tokens: Sequence[AgreedOutlinedTextToken],
+) -> OutlinedCaptionViewClassification:
+    """Classify a sheet's view type from multi-DPI agreed outlined-text captions only.
+
+    - Requires ``len(token.agreement_dpis) >= 2`` on every supporting token.
+    - Never guesses on conflicting view types (e.g. both ``floor_plan`` and
+      ``roof_plan`` on one sheet -> returns ``status="CONFLICT"``).
+    - Never grants commercial authority (``shadow_only=True``).
+    """
+    multi_dpi = [t for t in tokens if len(t.agreement_dpis) >= 2 and t.normalized_text]
+    if not multi_dpi:
+        return OutlinedCaptionViewClassification(
+            status="ABSTAINED",
+            view_type="unproven",
+            matched_view_types=(),
+            supporting_texts=(),
+            reason_codes=("no_multi_dpi_agreed_outlined_tokens",),
+        )
+    # Group tokens on the same visual row (within 10 pt in y) into caption lines
+    ordered = sorted(multi_dpi, key=lambda t: (round(t.bbox_pdf_pts[1] / 10.0), t.bbox_pdf_pts[0]))
+    lines: list[str] = []
+    cur_y: float | None = None
+    cur_parts: list[str] = []
+    for tok in ordered:
+        y = float(tok.bbox_pdf_pts[1])
+        if cur_y is None or abs(y - cur_y) <= 10.0:
+            cur_parts.append(tok.normalized_text)
+            if cur_y is None:
+                cur_y = y
+        else:
+            lines.append(" ".join(cur_parts))
+            cur_y = y
+            cur_parts = [tok.normalized_text]
+    if cur_parts:
+        lines.append(" ".join(cur_parts))
+
+    matched_types: set[str] = set()
+    supporting: list[str] = []
+    for line in lines:
+        for view_type, pattern in _OUTLINED_CAPTION_PATTERNS:
+            if pattern.search(line):
+                matched_types.add(view_type)
+                supporting.append(line)
+                break  # specific pattern (e.g., roof_plan) takes precedence over generic
+
+    if not matched_types:
+        return OutlinedCaptionViewClassification(
+            status="ABSTAINED",
+            view_type="unproven",
+            matched_view_types=(),
+            supporting_texts=(),
+            reason_codes=("no_outlined_view_caption_matched",),
+        )
+    sorted_types = tuple(sorted(matched_types))
+    if len(sorted_types) > 1:
+        return OutlinedCaptionViewClassification(
+            status="CONFLICT",
+            view_type="unproven",
+            matched_view_types=sorted_types,
+            supporting_texts=tuple(sorted(set(supporting))),
+            reason_codes=("conflicting_outlined_view_captions_on_sheet",),
+        )
+    return OutlinedCaptionViewClassification(
+        status="CORROBORATED",
+        view_type=sorted_types[0],
+        matched_view_types=sorted_types,
+        supporting_texts=tuple(sorted(set(supporting))),
+        reason_codes=("outlined_in_drawing_caption_corroborated",),
+    )

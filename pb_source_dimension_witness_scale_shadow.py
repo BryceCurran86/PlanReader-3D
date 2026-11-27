@@ -23,9 +23,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from statistics import median
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
+from pb_figured_dimension_authority import (
+    DimensionParseError,
+    parse_figured_dimension_mm,
+)
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_native_dimension_cap_evidence import compile_native_dimension_cap_components
 from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
 
 SCHEMA_VERSION = "1.0.0"
@@ -217,9 +222,85 @@ def corroborate_dimension_witness_scale_shadow(
     )
 
 
+def extract_dimension_witnesses_from_native_components(
+    *,
+    segments: Mapping[str, Sequence[float]],
+    words: Sequence[Mapping[str, object]],
+    document_id: str,
+    revision_id: str,
+    source_sha256: str,
+    page_id: str,
+    viewport_id: str,
+) -> tuple[FiguredDimensionScaleWitness, ...]:
+    """Extract FiguredDimensionScaleWitness objects from native dimension cap components.
+
+    Reuses ``compile_native_dimension_cap_components`` (no duplicate dimension
+    topology engine) and ``parse_figured_dimension_mm``.
+    """
+    word_by_id = {str(w["id"]): w for w in words if "id" in w}
+    components = compile_native_dimension_cap_components(segments=segments, words=words)
+    witnesses: list[FiguredDimensionScaleWitness] = []
+    for idx, (line_ids, word_id, _covered) in enumerate(components):
+        word = word_by_id.get(str(word_id))
+        if word is None:
+            continue
+        raw_text = str(word.get("text") or "").strip()
+        if not raw_text:
+            continue
+        try:
+            figured_mm = parse_figured_dimension_mm(raw_text)
+        except (DimensionParseError, ValueError, TypeError):
+            continue
+        if not math.isfinite(figured_mm) or figured_mm <= 0.0:
+            continue
+        pts: list[tuple[float, float]] = []
+        axis_vec: Optional[tuple[float, float]] = None
+        for sid in line_ids:
+            seg = segments.get(sid)
+            if not seg or len(seg) != 4:
+                continue
+            x0, y0, x1, y1 = map(float, seg)
+            if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+                continue
+            dx, dy = x1 - x0, y1 - y0
+            seg_len = math.hypot(dx, dy)
+            if seg_len > 1e-6 and axis_vec is None:
+                axis_vec = (dx / seg_len, dy / seg_len)
+            pts.append((x0, y0))
+            pts.append((x1, y1))
+        if axis_vec is None or len(pts) < 2:
+            continue
+        ux, uy = axis_vec
+        projections = [px * ux + py * uy for px, py in pts]
+        span_pts = max(projections) - min(projections)
+        if not math.isfinite(span_pts) or span_pts <= 1e-3:
+            continue
+        if abs(uy) <= 0.05:
+            axis_label = "horizontal"
+        elif abs(ux) <= 0.05:
+            axis_label = "vertical"
+        else:
+            axis_label = "diagonal"
+        witnesses.append(
+            FiguredDimensionScaleWitness(
+                witness_id=f"dim_cap:{page_id}:{viewport_id}:{word_id}:{idx}",
+                document_id=document_id,
+                revision_id=revision_id,
+                source_sha256=source_sha256,
+                page_id=page_id,
+                viewport_id=viewport_id,
+                pdf_span_pts=round(span_pts, 6),
+                figured_mm=round(figured_mm, 4),
+                axis=axis_label,
+            )
+        )
+    return tuple(witnesses)
+
+
 __all__ = [
     "DimensionWitnessScaleShadowResult",
     "FiguredDimensionScaleWitness",
     "SCHEMA_VERSION",
     "corroborate_dimension_witness_scale_shadow",
+    "extract_dimension_witnesses_from_native_components",
 ]
