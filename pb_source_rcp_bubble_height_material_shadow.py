@@ -27,18 +27,42 @@ import hashlib
 import json
 import math
 import re
+import unicodedata
 from typing import Any, Sequence
 
 
 _MIN_CEILING_HEIGHT_MM = 1500
 _MAX_CEILING_HEIGHT_MM = 8000
 
+_UNICODE_RCP_TRANSLATION = str.maketrans({
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2012": "-",
+    "\u2013": "-",
+    "\u2014": "-",
+    "\u2212": "-",
+    "\u00a0": " ",
+    "\u2009": " ",
+    "\u202f": " ",
+    "\u200b": "",
+    "\ufeff": "",
+})
+_RCP_THOUSANDS_COMMA_RE = re.compile(r"(?<!\d)(\d{1,2}),(\d{3})(?!\d)")
+
 _RAKED_RANGE_RE = re.compile(
-    r"\b(?:raked|sloped|pitched)?\s*(?P<lo>[1-7]\d{3}|8000)\s*(?:mm)?\s*(?:-|–|to)\s*(?P<hi>[1-7]\d{3}|8000)\s*(?:mm)?\b",
+    r"\b(?:raked|sloped|pitched)?\s*(?P<lo>[1-7]\d{3}|8000)\s*(?:mm)?\s*(?:-|to)\s*(?P<hi>[1-7]\d{3}|8000)\s*(?:mm)?\b",
+    re.IGNORECASE,
+)
+_RAKED_RANGE_M_RE = re.compile(
+    r"\b(?:raked|sloped|pitched)?\s*(?P<lo>[1-8](?:\.\d{1,3})?)\s*m?\s*(?:-|to)\s*(?P<hi>[1-8](?:\.\d{1,3})?)\s*m\b",
     re.IGNORECASE,
 )
 _SINGLE_HEIGHT_MM_RE = re.compile(
     r"(?:(?:ch|clg|ceiling\s*(?:ht|height)?|affl|fcl|ht|h|@)\s*[:=]?\s*)?(?P<mm>[1-7]\d{3}|8000)\s*(?:mm|affl|fcl)?\b",
+    re.IGNORECASE,
+)
+_SINGLE_HEIGHT_M_RE = re.compile(
+    r"(?:(?:ch|clg|ceiling\s*(?:ht|height)?|affl|fcl|ht|h|@)\s*[:=]?\s*)?(?P<m>[1-8]\.\d{1,3})\s*m(?:\s*(?:affl|fcl))?\b",
     re.IGNORECASE,
 )
 _MATERIAL_CODE_RE = re.compile(
@@ -189,11 +213,16 @@ class RcpBubbleAssociationReport:
         }
 
 
+def _normalize_rcp_bubble_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text).translate(_UNICODE_RCP_TRANSLATION)
+    return _RCP_THOUSANDS_COMMA_RE.sub(r"\1\2", normalized)
+
+
 def parse_rcp_bubble_material_and_height(
     lines: Sequence[str],
 ) -> tuple[str | None, int | None, tuple[int, int] | None]:
     """Extract material code and flat or raked height (mm) from an RCP bubble."""
-    joined = " ".join(_clean(line) for line in lines if _clean(line))
+    joined = _normalize_rcp_bubble_text(" ".join(_clean(line) for line in lines if _clean(line)))
     if not joined:
         return (None, None, None)
 
@@ -201,8 +230,14 @@ def parse_rcp_bubble_material_and_height(
     flat_height: int | None = None
 
     m_raked = _RAKED_RANGE_RE.search(joined)
+    m_raked_m = None if m_raked else _RAKED_RANGE_M_RE.search(joined)
     if m_raked:
         lo, hi = int(m_raked.group("lo")), int(m_raked.group("hi"))
+        if _MIN_CEILING_HEIGHT_MM <= min(lo, hi) and max(lo, hi) <= _MAX_CEILING_HEIGHT_MM and lo != hi:
+            raked_range = (min(lo, hi), max(lo, hi))
+    elif m_raked_m:
+        lo = round(float(m_raked_m.group("lo")) * 1000.0)
+        hi = round(float(m_raked_m.group("hi")) * 1000.0)
         if _MIN_CEILING_HEIGHT_MM <= min(lo, hi) and max(lo, hi) <= _MAX_CEILING_HEIGHT_MM and lo != hi:
             raked_range = (min(lo, hi), max(lo, hi))
     else:
@@ -211,12 +246,18 @@ def parse_rcp_bubble_material_and_height(
             val = int(m_h.group("mm"))
             if _MIN_CEILING_HEIGHT_MM <= val <= _MAX_CEILING_HEIGHT_MM:
                 heights_found.append(val)
+        for m_hm in _SINGLE_HEIGHT_M_RE.finditer(joined):
+            val = round(float(m_hm.group("m")) * 1000.0)
+            if _MIN_CEILING_HEIGHT_MM <= val <= _MAX_CEILING_HEIGHT_MM:
+                heights_found.append(val)
         unique_h = sorted(set(heights_found))
         if len(unique_h) == 1:
             flat_height = unique_h[0]
 
     # Strip recognized numeric heights before scanning material codes so digits don't collide
     cleaned_for_mat = _RAKED_RANGE_RE.sub(" ", joined)
+    cleaned_for_mat = _RAKED_RANGE_M_RE.sub(" ", cleaned_for_mat)
+    cleaned_for_mat = _SINGLE_HEIGHT_M_RE.sub(" ", cleaned_for_mat)
     cleaned_for_mat = re.sub(r"\b[1-7]\d{3}\s*(?:mm|affl|fcl)?\b", " ", cleaned_for_mat, flags=re.IGNORECASE)
     mat_code: str | None = None
     for m_mat in _MATERIAL_CODE_RE.finditer(cleaned_for_mat):
