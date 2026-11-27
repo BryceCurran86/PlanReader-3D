@@ -9,7 +9,7 @@ drawings only). Nothing here is merged; MAX owns merge, pins and official scorin
 | C02 withhold non-plan hosts | DONE | opt-in | before/after changes only Maryborough's 6; frames and wall scopes identical |
 | C03 page-set dependence | DONE | **live** (own revertible commit) | order-independent candidacy; combined AG `6bebb3f8d` + Claude check passed: 65/65 customer rows identical, only unresolved-wall counts differ |
 | C04 viewport crossing primitives | NOT STARTED | | |
-| C05 non-wall ink never a wall | PARTIAL | opt-in | guard built (two modes), synthetic; originals not yet measured |
+| C05 non-wall ink never a wall | PARTIAL | opt-in | guard built (two modes); originals: walls withheld, 0 host/frame changes; signed-row check pending before any default |
 | C06 rooms in wall-ink scope | PARTIAL | synthetic | face authority abstains on every double-line layout; route through the layered ring builder |
 | C07 wall identity ambiguity | PARTIAL | report | no verified sheet-7 scale; a band alone would publish non-wall lines (AG holds its scale until C05) |
 | C08 room-to-wall identity | PARTIAL | report | 12 walls of two floor rooms linked but ambiguous; none is wall-support ink; refusal correct |
