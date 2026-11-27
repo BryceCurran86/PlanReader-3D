@@ -1078,13 +1078,23 @@ def resolve_physical_wall_equivalence(
     *,
     walls_by_id: Optional[Mapping[str, WallCandidate]] = None,
     points_per_mm: Optional[float] = None,
+    order_invariant_candidacy_shadow: bool = False,
 ) -> PhysicalWallEquivalenceResolution:
     """Reconcile ALL competing candidates via SAME/DISTINCT/AMBIGUOUS components.
 
     Pure SAME component → exactly one representative may publish.
     Any AMBIGUOUS edge in a connected component → all members abstain.
     Proven DISTINCT walls publish independently when otherwise usable.
+
+    The longitudinal-overlap candidacy test projects onto the FIRST wall's axis,
+    so near-parallel pairs can compete in one argument order and not the other,
+    and input order (which follows snapshot-derived ids) changes the verdicts.
+    ``order_invariant_candidacy_shadow`` (default off) lets a pair compete when
+    either order says so: a superset of both orders' competitors, so it can only
+    withhold publication, never add it.
     """
+    if type(order_invariant_candidacy_shadow) is not bool:
+        raise TypeError("order invariant candidacy shadow must be an explicit boolean")
     del walls_by_id  # ownership already baked into each identity; kept for call-site compat
     usable: list[PhysicalWallIdentity] = []
     blockers: dict[str, list[str]] = {}
@@ -1141,6 +1151,16 @@ def resolve_physical_wall_equivalence(
             right_features,
             points_per_mm=points_per_mm,
         )
+        if order_invariant_candidacy_shadow and not eligible:
+            other_eligible, other_reason = _physical_wall_pair_identity_candidacy_with_features(
+                right,
+                left,
+                right_features,
+                left_features,
+                points_per_mm=points_per_mm,
+            )
+            eligible, exclusion_reason = ((True, None) if other_eligible
+                                          else (False, min(str(exclusion_reason), str(other_reason))))
         if not eligible:
             excluded_pairs += 1
             if exclusion_reason:
