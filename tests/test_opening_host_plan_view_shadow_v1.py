@@ -4,6 +4,8 @@ Synthetic geometry and synthetic sheets only.
 """
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,9 +13,12 @@ import fitz
 import pytest
 
 import pb_opening_host_plan_view_shadow as shadow
+from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority
 from pb_migration_contracts import EvidenceResolutionStatus as Status
+from pb_opening_host_binding_authority import OpeningHostBindingProducer
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer
 from pb_source_visibility_authority import SourceVisibilityProducer
+from tests.test_live_wall_opening_authority_composition import _host_fixture_pdf, _ingest
 from tests.test_physical_wall_candidate_viewport_scope_v1 import _draw_plan
 from tests.test_source_owned_physical_plan_view import _sheet
 
@@ -140,6 +145,8 @@ def test_the_report_finds_the_authenticated_plan_view_that_owns_a_binding(tmp_pa
     assert by_id["inside"]["proven"]["reason_codes"][-1] == shadow.NO_PLAN_VIEW
     assert by_id["outside"]["authenticated"]["reason_codes"][-1] == shadow.SPLIT  # wall inside, opening outside
     assert by_id["unknown-wall"]["authenticated"]["reason_codes"][-1] == shadow.UNAVAILABLE
+    assert by_id["inside"]["combined"] == by_id["inside"]["authenticated"]
+    assert page["ownership"]["combined"][shadow.OWNED] == 1
 
 
 def test_a_schedule_sheet_owns_no_binding():
@@ -150,6 +157,20 @@ def test_a_schedule_sheet_owns_no_binding():
     (page,) = shadow.opening_host_plan_view_report(composition, source)["pages"]
     assert page["plan_views"] == {"authenticated": 0, "proven": 0}
     assert page["rows"][0]["authenticated"]["status"] == Status.ABSTAINED.value
+
+
+def test_a_proven_plan_view_alone_owns_a_binding():
+    source, published = _published(_sheet())  # the stricter source-owned view only; the F.07 builder authenticates none
+    wall = SimpleNamespace(wall_candidate_id="w", wall_candidate=SimpleNamespace(
+        centerline_pts=((100.0, 200.0), (300.0, 200.0)), curve_control_pts=None))
+    walls = SimpleNamespace(selectors_for_authenticated_viewports=lambda **_: (),
+                            resolve_scope=lambda _: SimpleNamespace(records=(wall,)))
+    composition = _composition(published, walls, [_trace("door", members=["w"])], {"door": (150.0, 198.0, 170.0, 202.0)})
+    (page,) = shadow.opening_host_plan_view_report(composition, source)["pages"]
+    assert page["plan_views"] == {"authenticated": 0, "proven": 1}
+    (row,) = page["rows"]
+    assert row["authenticated"]["reason_codes"][-1] == shadow.NO_PLAN_VIEW
+    assert row["proven"]["reason_codes"] == row["combined"]["reason_codes"] == [shadow.OWNED]
 
 
 def _framed(tmp_path, title):
@@ -200,10 +221,95 @@ def test_only_a_source_producer_is_accepted():
         shadow.opening_host_plan_view_report(SimpleNamespace(revision_id="r"), object())
 
 
-def test_nothing_on_a_live_path_imports_the_report():
+def test_only_the_flag_guarded_composition_imports_the_module():
     root = Path(__file__).resolve().parents[1]
     importers = [path.relative_to(root).as_posix() for path in root.rglob("*.py")
                  if not {"tests", "tools"} & set(path.relative_to(root).parts[:1])
                  and path.name != "pb_opening_host_plan_view_shadow.py"
                  and "pb_opening_host_plan_view_shadow" in path.read_text(encoding="utf-8", errors="ignore")]
-    assert importers == []
+    assert importers == ["pb_live_wall_opening_authority_composition.py"]
+    script = ("import sys\n"
+              "from tests.test_live_wall_opening_authority_composition import _host_fixture_pdf, _ingest\n"
+              "from pb_live_wall_opening_authority_composition import compose_live_wall_opening_authority as compose\n"
+              "source, published = _ingest(_host_fixture_pdf(), 'default-off')\n"
+              "compose(source_visibility_producer=source, revision_id=published.revision.revision_id, page_ids=('1',))\n"
+              "sys.exit(int('pb_opening_host_plan_view_shadow' in sys.modules))\n")
+    assert subprocess.run([sys.executable, "-c", script], cwd=root).returncode == 0
+
+
+@pytest.mark.parametrize("authenticated, proven, expected", [
+    ("v", None, shadow.OWNED), (None, "p", shadow.OWNED), ("v", "p", shadow.OWNED),
+    (None, None, shadow.NO_PLAN_VIEW)])
+def test_either_view_builder_may_own_a_binding(authenticated, proven, expected):
+    def result(view):
+        if view is None:
+            return shadow.PlanViewOwnership(Status.ABSTAINED, (shadow.UNPROVEN, shadow.NO_PLAN_VIEW))
+        return shadow.PlanViewOwnership(Status.CORROBORATED, (shadow.OWNED,), view)
+
+    combined = shadow.combine_ownership(result(authenticated), result(proven))
+    assert combined.reason_codes[-1] == expected
+
+
+def test_a_conflict_or_a_measured_outside_beats_a_missing_view():
+    owned = shadow.PlanViewOwnership(Status.CORROBORATED, (shadow.OWNED,), "v")
+    conflict = shadow.PlanViewOwnership(Status.CONFLICT, (shadow.UNPROVEN, shadow.AMBIGUOUS))
+    missing = shadow.PlanViewOwnership(Status.ABSTAINED, (shadow.UNPROVEN, shadow.NO_PLAN_VIEW))
+    outside = shadow.PlanViewOwnership(Status.ABSTAINED, (shadow.UNPROVEN, shadow.OUTSIDE))
+    assert shadow.combine_ownership(owned, conflict) is conflict
+    assert shadow.combine_ownership(conflict, owned) is conflict
+    assert shadow.combine_ownership(outside, missing) is outside
+    assert shadow.combine_ownership(missing, outside) is outside
+
+
+def _framed_host_fixture():
+    with fitz.open(stream=_host_fixture_pdf(), filetype="pdf") as document:
+        page = document[0]
+        page.draw_rect(fitz.Rect(8, 30, 312, 220), color=(0, 0, 0), width=1)
+        page.insert_text((100, 200), "GROUND FLOOR PLAN", fontsize=11)
+        return document.tobytes()
+
+
+def _compose(data, **kwargs):
+    source, published = _ingest(data, "plan-view-gate")
+    return compose_live_wall_opening_authority(source_visibility_producer=source,
+                                               revision_id=published.revision.revision_id, page_ids=("1",), **kwargs)
+
+
+def test_the_opt_in_gate_withholds_a_host_on_a_sheet_without_a_floor_plan():
+    data = _host_fixture_pdf()  # one byte string: opening identities follow the source bytes
+    plain, gated = _compose(data), _compose(data, require_plan_view_host_ownership_shadow=True)
+    assert plain.opening_bindings and all(t.status is Status.CORROBORATED for t in plain.opening_bindings)
+    assert [t.opening_identity_id for t in gated.opening_bindings] == [t.opening_identity_id for t in plain.opening_bindings]
+    for trace in gated.opening_bindings:
+        assert trace.status is Status.ABSTAINED and trace.host_wall_id is None and not trace.member_wall_candidate_ids
+        assert trace.reason_codes == (shadow.UNPROVEN, shadow.NO_PLAN_VIEW)
+        assert gated.opening_host_binding_authority.resolve(
+            gated.binding_selectors[trace.opening_identity_id]).record is None
+    assert all(frame.status is not Status.CORROBORATED for frame in gated.host_frames)
+
+
+def test_the_opt_in_gate_keeps_every_host_a_floor_plan_view_owns():
+    data = _framed_host_fixture()
+    plain, gated = _compose(data), _compose(data, require_plan_view_host_ownership_shadow=True)
+    assert plain.opening_bindings and gated.opening_bindings == plain.opening_bindings
+    assert gated.host_frames == plain.host_frames
+
+
+def test_the_gate_flag_must_be_an_explicit_boolean():
+    with pytest.raises(TypeError):
+        _compose(_host_fixture_pdf(), require_plan_view_host_ownership_shadow="yes")
+
+
+def test_withholding_only_demotes_published_hosts():
+    gated = _compose(_framed_host_fixture())
+    producer = OpeningHostBindingProducer.__new__(OpeningHostBindingProducer)
+    owned = gated.opening_bindings[0].opening_identity_id
+    record = gated.opening_host_binding_authority.resolve(gated.binding_selectors[owned])
+    empty = type(record)(status=Status.ABSTAINED, reason_codes=("other_reason",), record=None)
+    producer._results = {("d", "r", "s", "n", "1", "scope", owned): record, ("d", "r", "s", "n", "1", "scope", "x"): empty}
+    producer._source_fragment_roles_shadow = False
+    producer.withhold_published_hosts({owned: ("why",), "x": ("why",), "unknown": ("why",)})
+    results = producer.published_results()
+    assert results[("d", "r", "s", "n", "1", "scope", owned)].record is None
+    assert results[("d", "r", "s", "n", "1", "scope", owned)].reason_codes == ("why",)
+    assert results[("d", "r", "s", "n", "1", "scope", "x")] is empty and len(results) == 2

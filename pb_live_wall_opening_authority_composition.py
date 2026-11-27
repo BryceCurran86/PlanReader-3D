@@ -161,6 +161,7 @@ def compose_live_wall_opening_authority(
     include_unmeasured_ink_closed_flanks_shadow: bool = False,
     source_fragment_roles_shadow: bool = False,
     source_revision_scope_shadow: bool = False,
+    require_plan_view_host_ownership_shadow: bool = False,
 ) -> LiveWallOpeningAuthorityComposition:
     """Compose exact source-owned wall/opening host authority for source pages.
 
@@ -180,6 +181,8 @@ def compose_live_wall_opening_authority(
         raise TypeError("source fragment roles shadow must be an explicit boolean")
     if type(source_revision_scope_shadow) is not bool:
         raise TypeError("source revision scope shadow must be an explicit boolean")
+    if type(require_plan_view_host_ownership_shadow) is not bool:
+        raise TypeError("plan view host ownership shadow must be an explicit boolean")
     if source_fragment_roles_shadow and not include_unmeasured_ink_closed_flanks_shadow:
         raise ValueError("source fragment roles require isolated G17 source capture")
     revision_id = str(revision_id or "").strip()
@@ -489,6 +492,18 @@ def compose_live_wall_opening_authority(
         )
 
     binding_producer.drop_borrowed_mixed_scope_hosts()
+    if require_plan_view_host_ownership_shadow:
+        # Opt-in demotion only (#4764 geometry task C02): a host no floor-plan view owns is withheld, never re-bound.
+        from pb_opening_host_plan_view_shadow import published_hosts_without_plan_view_owner
+
+        binding_producer.withhold_published_hosts(published_hosts_without_plan_view_owner(
+            source_producer=source_visibility_producer,
+            revision_id=revision_id,
+            binding_results=binding_producer.published_results(),
+            opening_authority=physical_opening_authority,
+            opening_selectors=opening_observation_selectors,
+            wall_authorities=(wall_authority, supplemental_wall_authority),
+        ))
     by_opening = {
         key[-1]: result
         for key, result in binding_producer.published_results().items()

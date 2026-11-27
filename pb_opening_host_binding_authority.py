@@ -1094,6 +1094,18 @@ class OpeningHostBindingProducer:
                     exclusive[key] = result
         self._results = exclusive
 
+    def withhold_published_hosts(self, reasons_by_opening: Mapping[str, Sequence[str]]) -> None:
+        """Opt-in demotion only: a published host for a named opening becomes ABSTAINED with those reasons.
+
+        Nothing can be granted, replaced or re-bound here; openings without a published host record are untouched.
+        """
+        self.drop_borrowed_mixed_scope_hosts()
+        self._results = {
+            key: (_blocked_binding(*reasons_by_opening[key[-1]])
+                  if result.record is not None and key[-1] in reasons_by_opening else result)
+            for key, result in self._results.items()
+        }
+
     def published_results(self) -> Mapping[_BindingKey, OpeningHostBindingResult]:
         return MappingProxyType(dict(self._results))
 

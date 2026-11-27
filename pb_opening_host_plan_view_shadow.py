@@ -3,14 +3,16 @@
 For every corroborated opening host binding of a live wall/opening composition this asks whether the opening's whole source
 support AND every member wall lie inside one and the same floor-plan view, using the repository's existing viewport builder:
 once for authenticated floor-plan viewports and once for the stricter source-owned proven plan views. Ownership is
-CORROBORATED only for exactly one view; none abstains and two or more conflict, each with a typed reason. Nothing on a live
-path imports this module: it changes, publishes and promotes nothing.
+CORROBORATED only for exactly one view; none abstains and two or more conflict, each with a typed reason. A binding is owned
+when either builder owns it and neither conflicts. The report changes nothing. The composition imports
+``published_hosts_without_plan_view_owner`` only when its default-off ``require_plan_view_host_ownership_shadow`` is set,
+and then it can only withhold a host.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
-from typing import Iterable, Optional, Sequence
+from dataclasses import dataclass, replace
+from typing import Iterable, Mapping, Optional, Sequence
 
 from pb_drawing_evidence_binding import DrawingViewType
 from pb_migration_contracts import EvidenceResolutionStatus
@@ -72,22 +74,27 @@ def plan_view_ownership(opening_points: Sequence[Point], member_points: Sequence
     return PlanViewOwnership(EvidenceResolutionStatus.ABSTAINED, (UNPROVEN, SPLIT if touching else OUTSIDE))
 
 
+def combine_ownership(authenticated: PlanViewOwnership, proven: PlanViewOwnership) -> PlanViewOwnership:
+    """Either view builder may own a binding; a conflict in either stays a conflict."""
+    for result in (authenticated, proven):
+        if result.status is EvidenceResolutionStatus.CONFLICT:
+            return result
+    for result in (authenticated, proven):
+        if result.status is EvidenceResolutionStatus.CORROBORATED:
+            return result
+    return proven if authenticated.reason_codes[-1] == NO_PLAN_VIEW else authenticated
+
+
 def _pairs(values: Sequence[float]) -> list[Point]:
     if len(values) < 2 or len(values) % 2:
         return []
     return [(float(values[i]), float(values[i + 1])) for i in range(0, len(values), 2)]
 
 
-def _opening_points(opening_authority, published, trace) -> list[Point]:
+def _opening_points(opening_authority, selector: ObservationSelector, *, identity: str, page_id: str) -> list[Point]:
     """Every point of the opening's own source support, from the producer; empty when any part is unavailable."""
-    def selector(observation_id):
-        return ObservationSelector(
-            document_id=published.revision.document_id, revision_id=published.revision.revision_id,
-            source_sha256=published.revision.source_sha256, snapshot_id=published.snapshot.snapshot_id,
-            observation_id=observation_id)
-
-    record = opening_authority.prove_existence(selector(trace.representative_observation_id)).existence_record
-    if record is None or record.record_id != trace.opening_identity_id or record.page_id != trace.page_id:
+    record = opening_authority.prove_existence(selector).existence_record
+    if record is None or record.record_id != identity or record.page_id != page_id:
         return []
     if record.aperture_bbox_pt is not None:
         x0, y0, x1, y1 = record.aperture_bbox_pt
@@ -95,7 +102,7 @@ def _opening_points(opening_authority, published, trace) -> list[Point]:
     visibility = opening_authority.source_visibility_authority()
     points: list[Point] = []
     for observation_id in record.source_observation_ids:
-        seen = visibility.resolve_visible(selector(observation_id)).observation
+        seen = visibility.resolve_visible(replace(selector, observation_id=observation_id)).observation
         pairs = _pairs(seen.geometry) if seen is not None else []
         if not pairs:
             return []
@@ -131,43 +138,88 @@ def _plan_views(source_producer, published, source_bytes: bytes, page_id: str, *
             if scope.viewport_view_type in PLAN_VIEW_TYPES and scope.viewport_bbox is not None]
 
 
+class _PageViews:
+    """Both view builders' floor-plan boxes and the page's wall geometry, from one source snapshot."""
+
+    def __init__(self, source_producer, published, source_bytes: bytes, page_id: str, wall_authorities):
+        self.views = {name: _plan_views(source_producer, published, source_bytes, page_id, proven=name == "proven")
+                      for name in ("authenticated", "proven")}
+        self.walls = _wall_points(wall_authorities, published, page_id)
+
+    def ownership(self, opening: Sequence[Point], member_ids: Sequence[str]) -> dict[str, PlanViewOwnership]:
+        members = [self.walls.get(wall_id, []) for wall_id in member_ids]
+        owners = {name: plan_view_ownership(opening, members, boxes) for name, boxes in self.views.items()}
+        owners["combined"] = combine_ownership(owners["authenticated"], owners["proven"])
+        return owners
+
+
+def _published(source_producer: SourceVisibilityProducer, revision_id: str):
+    if type(source_producer) is not SourceVisibilityProducer:
+        raise TypeError("source_producer must be producer-owned")
+    published = source_producer.published_snapshot_for_revision(revision_id)
+    if published is None:
+        raise RuntimeError("source snapshot unavailable")
+    return published, source_producer._producer._store.source_bytes_by_revision[revision_id]
+
+
+def published_hosts_without_plan_view_owner(*, source_producer: SourceVisibilityProducer, revision_id: str,
+                                            binding_results: Mapping, opening_authority, opening_selectors: Mapping,
+                                            wall_authorities) -> dict[str, tuple[str, ...]]:
+    """Opening identity -> reasons, for every published host record that no floor-plan view owns."""
+    published, source_bytes = _published(source_producer, revision_id)
+    pages: dict[str, _PageViews] = {}
+    withheld: dict[str, tuple[str, ...]] = {}
+    for key, result in binding_results.items():
+        record = result.record
+        if record is None:
+            continue
+        page_id, identity = key[4], key[-1]
+        if page_id not in pages:
+            pages[page_id] = _PageViews(source_producer, published, source_bytes, page_id, wall_authorities)
+        selector = opening_selectors.get(identity)
+        opening = ([] if selector is None else
+                   _opening_points(opening_authority, selector, identity=identity, page_id=page_id))
+        combined = pages[page_id].ownership(opening, record.member_wall_candidate_ids)["combined"]
+        if combined.status is not EvidenceResolutionStatus.CORROBORATED:
+            withheld[identity] = combined.reason_codes
+    return withheld
+
+
 def _route(reason_codes: Sequence[str]) -> str:
     return next((code for code in reversed(reason_codes) if code.endswith("host_resolved")), "host_band")
 
 
 def opening_host_plan_view_report(composition, source_producer: SourceVisibilityProducer) -> dict:
     """Ownership of every corroborated host binding, per topology page; the composition is only read."""
-    if type(source_producer) is not SourceVisibilityProducer:
-        raise TypeError("source_producer must be producer-owned")
-    published = source_producer.published_snapshot_for_revision(composition.revision_id)
-    if published is None:
-        raise RuntimeError("source snapshot unavailable")
-    source_bytes = source_producer._producer._store.source_bytes_by_revision[composition.revision_id]
+    published, source_bytes = _published(source_producer, composition.revision_id)
     pages = []
     for page_id in composition.page_ids:
         traces = sorted((t for t in composition.opening_bindings if t.page_id == page_id),
                         key=lambda t: (str(t.opening_identity_id), t.representative_observation_id))
         bound = [t for t in traces
                  if t.status is EvidenceResolutionStatus.CORROBORATED and t.host_wall_id and t.opening_identity_id]
-        views = {name: _plan_views(source_producer, published, source_bytes, page_id, proven=name == "proven")
-                 for name in ("authenticated", "proven")}
-        walls = _wall_points((composition.physical_wall_candidate_authority,
-                              composition.supplemental_physical_wall_candidate_authority), published, page_id)
+        context = _PageViews(source_producer, published, source_bytes, page_id,
+                             (composition.physical_wall_candidate_authority,
+                              composition.supplemental_physical_wall_candidate_authority))
         rows = []
         for trace in bound:
-            opening = _opening_points(composition.physical_opening_authority, published, trace)
-            members = [walls.get(wall_id, []) for wall_id in trace.member_wall_candidate_ids]
+            selector = ObservationSelector(
+                document_id=published.revision.document_id, revision_id=published.revision.revision_id,
+                source_sha256=published.revision.source_sha256, snapshot_id=published.snapshot.snapshot_id,
+                observation_id=trace.representative_observation_id)
+            opening = _opening_points(composition.physical_opening_authority, selector,
+                                      identity=trace.opening_identity_id, page_id=trace.page_id)
             row = {"opening_identity_id": trace.opening_identity_id, "route": _route(trace.reason_codes)}
-            for name, boxes in views.items():
-                owner = asdict(plan_view_ownership(opening, members, boxes))
-                row[name] = {**owner, "status": owner["status"].value, "reason_codes": list(owner["reason_codes"])}
+            for name, owner in context.ownership(opening, trace.member_wall_candidate_ids).items():
+                row[name] = {"status": owner.status.value, "reason_codes": list(owner.reason_codes),
+                             "view_id": owner.view_id}
             rows.append(row)
-        summary = {name: {} for name in views}
+        summary = {name: {} for name in ("authenticated", "proven", "combined")}
         for row in rows:
-            for name in views:
+            for name, counts in summary.items():
                 reason = row[name]["reason_codes"][-1]
-                summary[name][reason] = summary[name].get(reason, 0) + 1
-        pages.append({"page_id": page_id, "plan_views": {name: len(boxes) for name, boxes in views.items()},
+                counts[reason] = counts.get(reason, 0) + 1
+        pages.append({"page_id": page_id, "plan_views": {name: len(boxes) for name, boxes in context.views.items()},
                       "host_bindings": len(bound), "other_opening_traces": len(traces) - len(bound),
                       "ownership": summary, "rows": rows})
     return {"source_sha256": published.revision.source_sha256, "revision_id": composition.revision_id, "pages": pages}
