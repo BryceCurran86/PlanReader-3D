@@ -25,3 +25,9 @@ test("studio fallback is finite bounded HDR and needs no offscreen room render",
  let peak=0;for(const n of t.image.data){assert.ok(Number.isFinite(n)&&n>=0);peak=Math.max(peak,n);}
  assert.ok(peak>2&&peak<8);t.dispose();
 });
+
+test("pathological desktop frame immediately reduces detail and reserves a real idle window",()=>{
+ const g=new DesktopRenderGovernor();assert.equal(g.allow(0,"high",false),true);g.complete(0,500);
+ assert.equal(g.cap,0);assert.equal(g.allow(500,"high",false),false);assert.equal(g.allow(924,"high",false),true);
+ const moderate=new DesktopRenderGovernor();moderate.allow(0,"high",false);moderate.complete(0,120);assert.equal(moderate.cap,1);
+});
