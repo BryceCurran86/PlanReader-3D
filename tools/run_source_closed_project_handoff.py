@@ -25,7 +25,7 @@ import math
 import os
 import re
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
