@@ -108,10 +108,28 @@ export class DesktopRenderGovernor {
   const overloaded=elapsed>36||Number.isFinite(gap)&&gap>110;
   const healthy=elapsed<15&&gap<65;
   this.slow=overloaded?this.slow+1:0;this.fast=healthy?this.fast+1:0;
-  if(this.slow>=3){this.cap=Math.max(0,this.cap-1);this.slow=0;this.fast=0;}
+  // A single pathological desktop frame can block DOM input for seconds.
+  // Drop expensive shadows/detail immediately rather than demanding two more.
+  if(elapsed>=250){this.cap=0;this.slow=this.fast=0;}
+  else if(elapsed>=100||this.slow>=3){this.cap=Math.max(0,this.cap-1);this.slow=0;this.fast=0;}
   else if(this.fast>=90){this.cap=Math.min(2,this.cap+1);this.fast=0;}
   const interval=this.requested==="performance"||this.cap===0?1000/30:1000/45;
-  this.nextAt=now+Math.max(interval,elapsed+Math.min(100,Math.max(8,elapsed*.65)))-1;
+  // Reserve an actual event-processing interval after an expensive frame.
+  this.nextAt=now+Math.max(interval,elapsed+(elapsed>=100?Math.min(1000,Math.max(8,elapsed*.85)):Math.min(100,Math.max(8,elapsed*.65))))-1;
  }
+ idle(){this.previous=-Infinity;}
  reset(){this.cap=2;this.nextAt=this.previous=-Infinity;this.slow=this.fast=0;}
+}
+
+/** Demand rendering in desktop mode only. A bounded heartbeat presents async
+ * texture updates and delayed shadows even when input references are stable. */
+export class DesktopFrameDemand {
+ private last:readonly unknown[]=[];
+ private lastDraw=-Infinity;
+ shouldDraw(now:number,key:readonly unknown[],continuous=false){
+  const changed=key.length!==this.last.length||key.some((v,i)=>!Object.is(v,this.last[i]));
+  if(!continuous&&!changed&&now-this.lastDraw<500)return false;
+  this.last=[...key];this.lastDraw=now;return true;
+ }
+ reset(){this.last=[];this.lastDraw=-Infinity;}
 }

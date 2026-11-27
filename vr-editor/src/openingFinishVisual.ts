@@ -3,7 +3,7 @@ import {RoundedBoxGeometry} from "three/addons/geometries/RoundedBoxGeometry.js"
 import type {WallVisual} from "./buildPlacement.ts";
 import {openingFits,planLength} from "./buildPlacement.ts";
 import type {WallAdditionOpening} from "./wallAdditionProtocol.ts";
-import {wallAssembly} from "./wallProfiles.ts";
+import {wallAssembly,profileDetails} from "./wallProfiles.ts";
 /** Presentation-only frame within the existing aperture. No change to
  * clearances, source geometry, walkability or construction certification. */
 export function openingFrameVisual(wall:WallVisual,o:WallAdditionOpening):THREE.InstancedMesh|null{
@@ -46,6 +46,15 @@ export function windowDetailVisual(wall:WallVisual,o:WallAdditionOpening):THREE.
  // Wide openings get a slim centre sash mullion. This is illustrative
  // joinery, not a verified window type or a change to the host aperture.
  if(w>=1.25){aluminium.push([w/2,h/2,.032,h-2*t,.045,0]);}
+ // Recessed inner sash beads and twin bottom tracks within the frame.
+ for(const z of [-.016,.016]){aluminium.push([w/2,t+.007,w-2*t,.009,.008,z]);}
+ const a=wallAssembly(wall.assembly),external=profileDetails(a).role==="external",outside=a.exteriorSide==="left"?1:-1;
+ if(external){
+  const outer=outside*(depth/2+.018);
+  aluminium.push([w/2,.012,w,.018,.045,outer]); // projecting drip sill
+  aluminium.push([w/2,h-.008,w,.016,.042,outer]); // head flashing
+  aluminium.push([w/2,.005,w-.012,.006,.012,outer+outside*.018]); // drip lip
+ }
  const obj=new THREE.Object3D();obj.rotation.y=-Math.atan2(dz,dx);
  function batch(rows:Strip[],color:number,metalness:number,roughness:number,name:string){
   const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color,metalness,roughness}),rows.length);

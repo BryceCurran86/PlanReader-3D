@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {RoundedBoxGeometry} from "three/addons/geometries/RoundedBoxGeometry.js";
+import {applyFixtureFabric} from "./fixtureFabric.ts";
 import type { ItemTarget, ItemVisual } from "./itemCatalogue";
 
 type FixtureSpec = Extract<ItemVisual, { kind: "fixture" }>;
@@ -58,6 +59,37 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
   }
 
   switch (shape) {
+    case "shower-screen": {
+      const glass=new THREE.MeshStandardMaterial({color:0xdce9e7,roughness:.075,metalness:.08,transparent:true,opacity:.19,depthWrite:false,side:THREE.DoubleSide,envMapIntensity:1.4});
+      const pane=box(w-.024,h-.018,.008,0,h/2,0,glass);pane.name="Shower safety-glass preview";pane.castShadow=false;
+      box(.018,h,d,-w/2+.009,h/2,0).name="Screen wall channel";
+      box(w,.012,d,0,.006,0).name="Screen bottom channel";
+      for(const y of [h*.23,h*.78])box(.035,.045,d,w/2-.018,y,0).name="Screen retaining clamp";
+      break;
+    }
+    case "oven": {
+      softBox(w,h,d*.94,0,h/2,-d*.03).name="Oven cabinet";
+      box(w*.9,h*.095,.012,0,h*.87,d*.455,detail).name="Oven control fascia";
+      const glass=new THREE.MeshStandardMaterial({color:0x20272a,metalness:.18,roughness:.12});
+      box(w*.84,h*.56,.018,0,h*.47,d*.475,glass).name="Oven door glazing";
+      box(w*.78,.021,.027,0,h*.765,d*.486).name="Oven handle";
+      for(let i=0;i<4;i++)disk(.017,.013,(i-1.5)*w*.18,h*.87,d*.47);
+      break;
+    }
+    case "fridge":
+    case "dishwasher": {
+      softBox(w,h,d*.92,0,h/2,-d*.04).name="Appliance carcass";
+      const divisions=shape==="fridge"?[.32,.68]:[1];let bottom=.035;
+      for(const fraction of divisions){const height=(h-.065)*fraction;softBox(w*.97,height-.008,d*.06,0,bottom+height/2,d*.46).name="Appliance door";box(w*.62,.019,.019,0,bottom+height-.04,d*.489,detail).name="Appliance handle";bottom+=height;}
+      box(w*.85,.035,.012,0,.0175,d*.42,detail).name="Recessed appliance plinth";
+      break;
+    }
+    case "cooktop": {
+      softBox(w,h,d,0,h/2,0,detail).name="Induction glass surface";
+      const ringMaterial=new THREE.MeshStandardMaterial({color:0x7b8183,roughness:.5});
+      for(const x of [-.24,.24])for(const z of [-.23,.23]){const radius=Math.min(w,d)*.17;const ring=mesh(new THREE.TorusGeometry(radius,.0013,4,32),x*w,h+.001,z*d,ringMaterial);ring.rotation.x=-Math.PI/2;ring.name="Induction zone";ring.castShadow=false;}
+      break;
+    }
     case "service-box":
       box(w, h, d, 0, h / 2, d / 2);
       for (let line = -1; line <= 1; line++) {
@@ -213,22 +245,27 @@ export function createCatalogueFixture(spec: FixtureSpec, target: ItemTarget) {
     case "cabinet":
     case "bench":
       const plinth=box(w*.91,h*.085,d*.80,0,h*.0425,-d*.06,detail);plinth.name="Recessed cabinet plinth";
-      const carcass=box(w,h*.87,d*.94,0,h*.52,-d*.02);carcass.name="Cabinet carcass";
+      const carcass=box(w,h*.87,d*.91,0,h*.52,-d*.035);carcass.name="Cabinet carcass";
       const topMaterial=h<1.3?white:body;
       worktop=softBox(w*1.018,h*.047,d*1.02,0,h*.9765,0,topMaterial);worktop.name="Bevelled benchtop";
-      for (let index = 0; index < count; index++) {
-        const x = ((index + 0.5) / count - 0.5) * w;
-        const panelWidth=w/count-.009;
-        const front=softBox(panelWidth,h*.82,.018,x,h*.515,d*.5);front.name="Radiused cabinet front";
-        // Recessed panel reveal and physical pull with two mounting posts.
-        const pull=Math.min(.16,panelWidth*.48);
-        const handle=softBox(pull,.012,.016,x,h*.79,d*.5+.029,detail);handle.name="Cabinet pull";
-        for(const sign of [-1,1])box(.012,.012,.025,x+sign*pull*.36,h*.79,d*.5+.015,detail);
-        if(h<1.3)box(panelWidth*.88,.004,.003,x,h*.68,d*.5+.010,detail);
+      // Three-count cabinet is the catalogue drawer unit (not three skinny
+      // doors); islands remain vertical panels. Reveals are actual gaps.
+      const drawers=shape==="cabinet"&&count===3&&h<1.3;
+      const lo=h*.09,hi=h*.94,span=hi-lo;
+      for(let i=0;i<count;i++){
+        const panelWidth=drawers?w-.012:w/count-.009,panelHeight=drawers?span/count-.006:span-.008;
+        const x=drawers?0:((i+.5)/count-.5)*w,y=drawers?lo+(i+.5)*span/count:(lo+hi)/2;
+        const front=softBox(panelWidth,panelHeight,.018,x,y,d*.5);front.name=drawers?"Radiused drawer front":"Radiused cabinet front";
+        const pull=Math.min(.16,panelWidth*.48),handleY=drawers?y+panelHeight*.25:hi-.10;
+        const handle=softBox(pull,.012,.016,x,handleY,d*.5+.029,detail);handle.name="Cabinet pull";
+        for(const sign of [-1,1])box(.012,.012,.025,x+sign*pull*.36,handleY,d*.5+.015,detail).name="Pull mounting post";
+        // A recessed shadow-line behind the face, not a painted fake drawer.
+        box(panelWidth*.88,.004,.003,x,drawers?y-panelHeight/2-.003:hi-.002,d*.485,detail).name="Joinery reveal";
       }
       if (h >= 1.3) worktop = undefined;
       break;
   }
+  if(shape==="sofa"||shape==="bed")applyFixtureFabric(group,shape==="bed"?[body,white]:[body]);
   const used = new Set(group.children.flatMap(part => part instanceof THREE.Mesh ? [part.material] : []));
   for (const material of [body, detail, white, lens]) if (!used.has(material)) material.dispose();
   return { group, worktop };
