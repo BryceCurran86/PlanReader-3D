@@ -54,6 +54,7 @@ from pb_physical_wall_identity import (
     PhysicalWallEquivalenceResolution,
     resolve_physical_wall_equivalence,
 )
+from pb_source_coordinate_precision import source_coordinate_tolerance
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import (
     RASTER_OPENING_PRIMITIVE_RENDER_DPI,
@@ -1212,19 +1213,33 @@ def _endpoints(line: Sequence[float]) -> tuple[Point, Point]:
     return ((float(line[0]), float(line[1])), (float(line[2]), float(line[3])))
 
 
-def _parallel(left: Sequence[float], right: Sequence[float]) -> bool:
+def _parallel(left: Sequence[float], right: Sequence[float], tolerance: Optional[float] = None) -> bool:
+    # ``tolerance`` is set only by the opt-in source precision mode (C14); None keeps the historical test exactly.
     lu, ru = _canonical_unit(left), _canonical_unit(right)
-    return lu is not None and ru is not None and abs(_cross(lu, ru)) <= _COORD_TOL
+    if lu is None or ru is None:
+        return False
+    limit = _COORD_TOL
+    if tolerance is not None:
+        shortest = min(math.hypot(line[2] - line[0], line[3] - line[1]) for line in (left, right))
+        limit = max(_COORD_TOL, 2.0 * tolerance / shortest)
+    return abs(_cross(lu, ru)) <= limit
 
 
-def _collinear(left: Sequence[float], right: Sequence[float]) -> bool:
-    if not _parallel(left, right):
+def _collinear(left: Sequence[float], right: Sequence[float], tolerance: Optional[float] = None) -> bool:
+    if not _parallel(left, right, tolerance):
         return False
     axis = _canonical_unit(left)
     assert axis is not None
     first = _endpoints(left)[0]
-    other = _endpoints(right)[0]
-    return abs(_cross(axis, (other[0] - first[0], other[1] - first[1]))) <= _COORD_TOL
+    if tolerance is None:
+        other = _endpoints(right)[0]
+        return abs(_cross(axis, (other[0] - first[0], other[1] - first[1]))) <= _COORD_TOL
+    length = math.hypot(left[2] - left[0], left[3] - left[1])
+    for other in _endpoints(right):
+        delta = (other[0] - first[0], other[1] - first[1])
+        if abs(_cross(axis, delta)) > tolerance * (2.0 + 2.0 * math.hypot(*delta) / length):
+            return False
+    return True
 
 
 def _scalar_interval(line: Sequence[float], axis: Point) -> tuple[float, float]:
@@ -2342,6 +2357,11 @@ def _opening_geometry(
     if len(records) != 6:
         return None
 
+    precise = getattr(authority, "_angled_opening_precision_shadow", False) is True
+    tolerance = (source_coordinate_tolerance([line for line in map(_line, records) if line is not None], floor=_COORD_TOL)
+                 if precise else None)
+    gap_limit = _COORD_TOL if tolerance is None else 4.0 * tolerance
+
     breaks: list[tuple[Point, Point, Point]] = []
     for index, first_record in enumerate(records):
         first = _line(first_record)
@@ -2349,7 +2369,7 @@ def _opening_geometry(
             return None
         for second_record in records[index + 1 :]:
             second = _line(second_record)
-            if second is None or not _collinear(first, second):
+            if second is None or not _collinear(first, second, tolerance):
                 continue
             axis = _canonical_unit(first)
             assert axis is not None
@@ -2359,7 +2379,7 @@ def _opening_geometry(
                 left, left_iv, right, right_iv = first, first_iv, second, second_iv
             else:
                 left, left_iv, right, right_iv = second, second_iv, first, first_iv
-            if right_iv[0] - left_iv[1] <= _COORD_TOL:
+            if right_iv[0] - left_iv[1] <= gap_limit:
                 continue
             start = _point_at_scalar(left, axis, left_iv[1])
             end = _point_at_scalar(right, axis, right_iv[0])
@@ -2375,7 +2395,7 @@ def _opening_geometry(
             a1 = end_a[0] * axis[0] + end_a[1] * axis[1]
             b0 = start_b[0] * axis[0] + start_b[1] * axis[1]
             b1 = end_b[0] * axis[0] + end_b[1] * axis[1]
-            if abs(a0 - b0) > _COORD_TOL or abs(a1 - b1) > _COORD_TOL:
+            if abs(a0 - b0) > gap_limit or abs(a1 - b1) > gap_limit:
                 continue
             normal = (-axis[1], axis[0])
             thickness = abs(

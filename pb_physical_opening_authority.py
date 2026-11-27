@@ -32,6 +32,7 @@ from pb_plan_opening_detection_indexed_v172 import (
     detect_door_candidates_indexed,
     detect_gap_candidates_indexed,
 )
+from pb_source_coordinate_precision import source_coordinate_tolerance
 from pb_source_observation_authority import (
     NativePageImagePlacement,
     ObservationSelector,
@@ -474,10 +475,13 @@ def _line_geometry(record: SourceObservationRecord) -> Optional[tuple[float, flo
     return (x1, y1, x2, y2)
 
 
-def _point_close(left: tuple[float, float], right: tuple[float, float]) -> bool:
+def _point_close(left: tuple[float, float], right: tuple[float, float],
+                 tolerance: Optional[float] = None) -> bool:
+    # ``tolerance`` is set only by the opt-in source precision mode (C14); None keeps the historical test exactly.
+    limit = _COORD_EQ_ABS_TOL if tolerance is None else tolerance
     return (
-        abs(left[0] - right[0]) <= _COORD_EQ_ABS_TOL
-        and abs(left[1] - right[1]) <= _COORD_EQ_ABS_TOL
+        abs(left[0] - right[0]) <= limit
+        and abs(left[1] - right[1]) <= limit
     )
 
 
@@ -485,6 +489,7 @@ def _segment_matches(
     record: SourceObservationRecord,
     first: tuple[float, float],
     second: tuple[float, float],
+    tolerance: Optional[float] = None,
 ) -> bool:
     line = _line_geometry(record)
     if line is None:
@@ -492,15 +497,16 @@ def _segment_matches(
     start = (line[0], line[1])
     end = (line[2], line[3])
     return (
-        _point_close(start, first) and _point_close(end, second)
+        _point_close(start, first, tolerance) and _point_close(end, second, tolerance)
     ) or (
-        _point_close(start, second) and _point_close(end, first)
+        _point_close(start, second, tolerance) and _point_close(end, first, tolerance)
     )
 
 
 def _parallel(
     left: tuple[float, float, float, float],
     right: tuple[float, float, float, float],
+    tolerance: Optional[float] = None,
 ) -> bool:
     ldx, ldy = left[2] - left[0], left[3] - left[1]
     rdx, rdy = right[2] - right[0], right[3] - right[1]
@@ -508,6 +514,8 @@ def _parallel(
     rlen = math.hypot(rdx, rdy)
     if llen <= _COORD_EQ_ABS_TOL or rlen <= _COORD_EQ_ABS_TOL:
         return False
+    if tolerance is not None:  # endpoint rounding turns into angle error tolerance/length on each line
+        return abs(ldx * rdy - ldy * rdx) <= max(_PARALLEL_REL_TOL * llen * rlen, tolerance * (llen + rlen))
     return abs(ldx * rdy - ldy * rdx) <= _PARALLEL_REL_TOL * llen * rlen
 
 
@@ -533,10 +541,18 @@ def _cross(left: tuple[float, float], right: tuple[float, float]) -> float:
 def _collinear(
     left: tuple[float, float, float, float],
     right: tuple[float, float, float, float],
+    tolerance: Optional[float] = None,
 ) -> bool:
-    if not _parallel(left, right):
+    if not _parallel(left, right, tolerance):
         return False
     direction = _canonical_direction(left)
+    if tolerance is not None:  # both ends of the other line, allowing the first line's own direction error
+        length = math.hypot(left[2] - left[0], left[3] - left[1])
+        for point in ((right[0], right[1]), (right[2], right[3])):
+            delta = (point[0] - left[0], point[1] - left[1])
+            if abs(_cross(direction, delta)) > tolerance * (2.0 + 2.0 * math.hypot(*delta) / length):
+                return False
+        return True
     delta = (right[0] - left[0], right[1] - left[1])
     return abs(_cross(direction, delta)) <= _COORD_EQ_ABS_TOL
 
@@ -561,6 +577,7 @@ def _candidate_collinear_record_pairs(
     line_geometries: Optional[
         Sequence[Optional[tuple[float, float, float, float]]]
     ] = None,
+    tolerance: Optional[float] = None,
 ) -> tuple[tuple[int, int], ...]:
     """Return a conservative broad-phase superset of collinear record pairs.
 
@@ -600,6 +617,8 @@ def _candidate_collinear_record_pairs(
         return ()
 
     max_angle_delta = math.asin(min(1.0, _PARALLEL_REL_TOL))
+    if tolerance is not None:  # a wider broad phase only; the exact predicates still decide membership
+        max_angle_delta = max(max_angle_delta, 1e-4)
     angle_width = max(max_angle_delta * 4.0, 1e-12)
     angle_bucket_count = max(1, int(math.ceil(math.pi / angle_width)))
     offset_width = max(
@@ -632,7 +651,7 @@ def _candidate_collinear_record_pairs(
         for prior in candidate_indexes:
             prior_line = lines[prior]
             assert prior_line is not None
-            if _parallel(prior_line, line) and _collinear(prior_line, line):
+            if _parallel(prior_line, line, tolerance) and _collinear(prior_line, line, tolerance):
                 pairs.add((prior, index) if prior < index else (index, prior))
 
         buckets.setdefault((a_bin, o_bin), []).append(index)
@@ -645,12 +664,13 @@ def _face_break(
     *,
     first_line: Optional[tuple[float, float, float, float]] = None,
     second_line: Optional[tuple[float, float, float, float]] = None,
+    tolerance: Optional[float] = None,
 ) -> Optional[_FaceBreak]:
     if first_line is None:
         first_line = _line_geometry(first)
     if second_line is None:
         second_line = _line_geometry(second)
-    if first_line is None or second_line is None or not _collinear(first_line, second_line):
+    if first_line is None or second_line is None or not _collinear(first_line, second_line, tolerance):
         return None
     direction = _canonical_direction(first_line)
     first_values = sorted(
@@ -669,7 +689,7 @@ def _face_break(
         right_record, right_line, right_values = first, first_line, first_values
     gap_start = left_values[1]
     gap_end = right_values[0]
-    if gap_end - gap_start <= _COORD_EQ_ABS_TOL:
+    if gap_end - gap_start <= (_COORD_EQ_ABS_TOL if tolerance is None else tolerance):
         return None
     start_point = _endpoint_at_projection(left_line, direction, gap_start)
     end_point = _endpoint_at_projection(right_line, direction, gap_end)
@@ -686,10 +706,11 @@ def _face_break(
     )
 
 
-def _same_gap(left: _FaceBreak, right: _FaceBreak) -> bool:
-    if abs(left.gap_start - right.gap_start) > _COORD_EQ_ABS_TOL:
+def _same_gap(left: _FaceBreak, right: _FaceBreak, tolerance: Optional[float] = None) -> bool:
+    limit = _COORD_EQ_ABS_TOL if tolerance is None else 4.0 * tolerance  # projections on two slightly different axes
+    if abs(left.gap_start - right.gap_start) > limit:
         return False
-    if abs(left.gap_end - right.gap_end) > _COORD_EQ_ABS_TOL:
+    if abs(left.gap_end - right.gap_end) > limit:
         return False
     dot = left.direction[0] * right.direction[0] + left.direction[1] * right.direction[1]
     return abs(abs(dot) - 1.0) <= _PARALLEL_REL_TOL
@@ -1815,6 +1836,8 @@ class PhysicalOpeningAuthority:
             _source_visibility_producer, "_raster_double_face_negative_shadow", False)
         self._raster_corner_framed_opening_shadow = getattr(
             _source_visibility_producer, "_raster_corner_framed_opening_shadow", False)
+        self._angled_opening_precision_shadow = getattr(
+            _source_visibility_producer, "_angled_opening_precision_shadow", False) is True
         if _raster_paired_outer_faces_shadow_override is not None and type(_raster_paired_outer_faces_shadow_override) is not bool:
             raise ValueError("raster paired outer faces override must be explicit boolean")
         self._raster_paired_outer_faces_shadow = (self._raster_source_policy_at_creation
@@ -3412,6 +3435,7 @@ class PhysicalOpeningAuthority:
     def _visible_structural_candidates(
         seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
+        precision: bool = False,
     ) -> tuple[CandidateSemanticOpening, ...]:
         """Discover exact structural openings without quadratic rescans of breaks.
 
@@ -3462,8 +3486,11 @@ class PhysicalOpeningAuthority:
         collapsed = sorted(last_by_geometry.values(), key=lambda row: row[0])
         scoped = tuple(row[1] for row in collapsed)
         cached_lines = tuple(row[2] for row in collapsed)
+        tolerance = (source_coordinate_tolerance(cached_lines, floor=_COORD_EQ_ABS_TOL) if precision else None)
+        edge = _COORD_EQ_ABS_TOL if tolerance is None else tolerance
+        precise = {} if tolerance is None else {"tolerance": tolerance}  # off: exactly the historical calls
         collinear_pairs = _candidate_collinear_record_pairs(
-            scoped, line_geometries=cached_lines
+            scoped, line_geometries=cached_lines, **precise
         )
         collinear_neighbors: dict[int, set[int]] = {}
         for first_index, second_index in collinear_pairs:
@@ -3477,6 +3504,7 @@ class PhysicalOpeningAuthority:
                 scoped[second_index],
                 first_line=cached_lines[first_index],
                 second_line=cached_lines[second_index],
+                **precise,
             )
             if found is None:
                 continue
@@ -3511,10 +3539,10 @@ class PhysicalOpeningAuthority:
                 # A positive source-visible stub strictly INSIDE the proposed
                 # gap does prove these are not adjacent wall faces.
                 interior_stub = (
-                    values[0] > found.gap_start + _COORD_EQ_ABS_TOL
-                    and values[1] < found.gap_end - _COORD_EQ_ABS_TOL
+                    values[0] > found.gap_start + edge
+                    and values[1] < found.gap_end - edge
                 )
-                if interior_stub and overlap > _COORD_EQ_ABS_TOL:
+                if interior_stub and overlap > edge:
                     continuation = True
                     break
             if not continuation:
@@ -3533,7 +3561,7 @@ class PhysicalOpeningAuthority:
             for record in scoped
         }
 
-        coord_tol = _COORD_EQ_ABS_TOL
+        coord_tol = _COORD_EQ_ABS_TOL if tolerance is None else 4.0 * tolerance
         max_same_angle = math.acos(max(-1.0, 1.0 - _PARALLEL_REL_TOL))
         angle_width = max(max_same_angle * 2.0, 1e-12)
         angle_bucket_count = max(1, int(math.ceil(math.pi / angle_width)))
@@ -3588,7 +3616,7 @@ class PhysicalOpeningAuthority:
                     candidates.values(),
                     key=lambda item: scoped_position[item.observation_id],
                 )
-                if _segment_matches(record, first, second)
+                if _segment_matches(record, first, second, **precise)
             )
             segment_match_cache[key] = result
             return result
@@ -3619,7 +3647,7 @@ class PhysicalOpeningAuthority:
 
             for first_index in sorted(prior_indexes):
                 first_break = breaks[first_index]
-                if not _same_gap(first_break, second_break):
+                if not _same_gap(first_break, second_break, **precise):
                     continue
                 if not _distinct_parallel_axes(first_break, second_break):
                     continue
@@ -4027,8 +4055,10 @@ class PhysicalOpeningAuthority:
         cls,
         seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
+        precision: bool = False,
     ) -> tuple[CandidateSemanticOpening, ...]:
-        strong = cls._visible_structural_candidates(seed, records)
+        strong = (cls._visible_structural_candidates(seed, records, precision=True) if precision
+                  else cls._visible_structural_candidates(seed, records))
         generic = cls._visible_generic_correlated_candidates(seed, records)
         strong_sets = [set(item.source_observation_ids) for item in strong]
         retained = [
@@ -4118,7 +4148,9 @@ class PhysicalOpeningAuthority:
         cached = self._visible_candidate_cache.get(key)
         if cached is not None:
             return cached
-        candidates = self._visible_all_structural_candidates(seed, records)
+        candidates = (self._visible_all_structural_candidates(seed, records, precision=True)
+                      if self._angled_opening_precision_shadow
+                      else self._visible_all_structural_candidates(seed, records))
         self._visible_candidate_cache[key] = candidates
         self._visible_candidate_membership_cache[key] = (
             self._candidate_membership_index(candidates)
@@ -4802,7 +4834,7 @@ class PhysicalOpeningAuthority:
         failure, source_result, _records, by_id, restricted = self._seeded_universe(selector, member_observation_ids)
         if failure is not None:
             return failure
-        found = self._visible_structural_candidates(source_result.observation, restricted)
+        found = self._visible_structural_candidates(source_result.observation, restricted, **({"precision": True} if self._angled_opening_precision_shadow else {}))
         return PhysicalOpeningCandidateStructureResult(
             status=EvidenceResolutionStatus.CANDIDATE,
             page_id=str(source_result.observation.page_id),
@@ -4830,7 +4862,7 @@ class PhysicalOpeningAuthority:
         if failure is not None:
             return SeededFaceInkInventory(
                 status=failure.status, reason_codes=tuple(failure.reason_codes), page_id=failure.page_id, structures=())
-        found = self._visible_structural_candidates(source_result.observation, restricted)
+        found = self._visible_structural_candidates(source_result.observation, restricted, **({"precision": True} if self._angled_opening_precision_shadow else {}))
         used = collections.Counter(i for structure in found for i in set(structure.source_observation_ids))
         structures = []
         for structure in sorted(found, key=lambda c: c.candidate_id):
@@ -4903,7 +4935,7 @@ class PhysicalOpeningAuthority:
         if any(value not in by_id for value in accounted):
             return unresolved(source_result, (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,))
         observation = source_result.observation
-        found = self._visible_structural_candidates(observation, restricted)
+        found = self._visible_structural_candidates(observation, restricted, **({"precision": True} if self._angled_opening_precision_shadow else {}))
         survivors = []
         rivals = []
         for structure in found:

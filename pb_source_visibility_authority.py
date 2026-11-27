@@ -1096,7 +1096,11 @@ class SourceVisibilityProducer:
                  source_raster_text_receipt_replay: bool = False,
                  raster_double_face_negative_shadow: bool = False,
                  source_glyph_ledger_text_trust: bool = False,
-                 raster_corner_framed_opening_shadow: bool = False) -> None:
+                 raster_corner_framed_opening_shadow: bool = False,
+                 angled_opening_precision_shadow: bool = False) -> None:
+        if type(angled_opening_precision_shadow) is not bool:
+            raise ValueError("angled opening precision shadow must be explicit boolean")
+        self._angled_opening_precision_shadow = angled_opening_precision_shadow
         if type(raster_double_face_negative_shadow) is not bool:
             raise ValueError("double-face negative shadow requires an explicit boolean")
         self._raster_double_face_negative_shadow = raster_double_face_negative_shadow
