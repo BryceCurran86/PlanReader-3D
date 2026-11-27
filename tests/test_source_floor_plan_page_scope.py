@@ -27,6 +27,8 @@ from pb_source_floor_plan_page_scope import (
     FLOOR_PLAN_PAGE_F07_VIEWPORT,
     NOT_FLOOR_PLAN,
     NOT_FLOOR_PLAN_PAGE_BOUND_TITLE,
+    NOT_FLOOR_PLAN_PAGE_DOCUMENT_HEADER,
+    NOT_FLOOR_PLAN_PAGE_SCHEDULE_VIEWPORT,
     UNPROVEN,
     classify_source_floor_plan_pages,
     source_floor_plan_topology_scope,
@@ -481,3 +483,115 @@ def test_scope_module_is_not_imported_at_module_level_by_the_customer_path() -> 
     header = source.split("def ", 1)[0]
     assert "pb_source_floor_plan_page_scope" not in header
     assert scope_module.FLOOR_PLAN == "floor_plan"
+
+
+# ---------------------------------------------------------------------------
+# A02 / A03: Generic non-plan register/schedule eligibility & scoped metadata
+# ---------------------------------------------------------------------------
+
+
+def _portrait_admin_page(doc: fitz.Document, *, header: str, body: str = "") -> None:
+    page = doc.new_page(width=595.0, height=842.0)
+    if header:
+        page.insert_text((48.0, 64.0), header, fontsize=14)
+    if body:
+        page.insert_text((48.0, 360.0), body, fontsize=10)
+    for y in (120.0, 150.0, 180.0, 210.0):
+        page.draw_line((48.0, y), (540.0, y), width=0.5)
+
+
+def test_transmittal_and_register_headers_without_title_block_are_excluded_from_topology() -> None:
+    doc = fitz.open()
+    _page(doc, title="FLOOR PLAN")
+    _portrait_admin_page(
+        doc,
+        header="DOCUMENT TRANSMITTAL",
+        body="A01 FLOOR PLAN  A02 REFLECTED CEILING PLAN  A03 FINISHES PLAN",
+    )
+    _portrait_admin_page(
+        doc,
+        header="DRAWING REGISTER",
+        body="SHEET INDEX FOR ISSUE REV B",
+    )
+    data = doc.tobytes()
+    doc.close()
+    reopened = fitz.open(stream=data, filetype="pdf")
+    try:
+        scope = classify_source_floor_plan_pages(reopened, range(3))
+        assert scope.restricts is True
+        assert scope.topology_page_indices() == (0,)
+        assert scope.evidence_page_indices == (1, 2)
+        assert scope.decisions[1].classification == NOT_FLOOR_PLAN
+        assert scope.decisions[1].reason_code == NOT_FLOOR_PLAN_PAGE_DOCUMENT_HEADER
+        assert scope.decisions[1].sheet_role == "register"
+        assert scope.decisions[2].classification == NOT_FLOOR_PLAN
+        assert scope.decisions[2].reason_code == NOT_FLOOR_PLAN_PAGE_DOCUMENT_HEADER
+        assert scope.decisions[2].sheet_role == "register"
+        payload = scope.to_dict()
+        assert payload["decisions"][1]["sheet_role"] == "register"
+        assert payload["decisions"][1]["authenticated_floor_plan_viewport_count"] == 0
+    finally:
+        reopened.close()
+
+
+def test_register_header_guard_never_excludes_mixed_floor_plan_or_lower_body_mentions() -> None:
+    doc = fitz.open()
+    _page(doc, title="FLOOR PLAN")
+    # Mixed top header mentioning FLOOR PLAN must not be excluded as register-only
+    _portrait_admin_page(doc, header="FLOOR PLAN & DRAWING REGISTER")
+    # Word 'TRANSMITTAL' only deep in the page body (below top 25%) must not exclude
+    _portrait_admin_page(doc, header="", body="SEE DOCUMENT TRANSMITTAL FOR REVISION HISTORY")
+    data = doc.tobytes()
+    doc.close()
+    reopened = fitz.open(stream=data, filetype="pdf")
+    try:
+        scope = classify_source_floor_plan_pages(reopened, range(3))
+        assert scope.decisions[1].classification == UNPROVEN
+        assert scope.decisions[2].classification == UNPROVEN
+        assert scope.restricts is False
+        assert scope.topology_page_indices() is None
+    finally:
+        reopened.close()
+
+
+def test_untitled_schedule_only_viewport_page_is_excluded_from_topology() -> None:
+    doc = fitz.open()
+    _page(doc, title="FLOOR PLAN")
+    _portrait_admin_page(doc, header="DOOR SCHEDULE", body="D01 820x2040 TIMBER")
+    data = doc.tobytes()
+    doc.close()
+    reopened = fitz.open(stream=data, filetype="pdf")
+    fake_schedule_vp = SimpleNamespace(
+        view_type="schedule", status="unsupported", bounding_box=None
+    )
+    orig_segment = scope_module.segment_page_viewports
+
+    def _patched_segment(page, page_number=1):
+        if page_number == 2:
+            return (fake_schedule_vp,)
+        return orig_segment(page, page_number=page_number)
+
+    try:
+        with patch.object(scope_module, "segment_page_viewports", side_effect=_patched_segment):
+            scope = classify_source_floor_plan_pages(reopened, range(2))
+        assert scope.restricts is True
+        assert scope.topology_page_indices() == (0,)
+        assert scope.decisions[1].classification == NOT_FLOOR_PLAN
+        assert scope.decisions[1].reason_code == NOT_FLOOR_PLAN_PAGE_SCHEDULE_VIEWPORT
+        assert scope.decisions[1].sheet_role == "schedule"
+        assert scope.decisions[1].viewport_types == ("schedule",)
+    finally:
+        reopened.close()
+
+
+def test_mixed_floor_plan_sheet_reports_mixed_role_and_stays_in_topology() -> None:
+    doc = _doc("FLOOR PLAN & ELEVATIONS", "ELEVATIONS")
+    try:
+        scope = classify_source_floor_plan_pages(doc, range(2))
+        assert scope.topology_page_indices() == (0,)
+        assert scope.decisions[0].classification == FLOOR_PLAN
+        assert scope.decisions[0].is_mixed_sheet is True
+        assert scope.decisions[0].sheet_role == "mixed_floor_plan"
+        assert scope.decisions[1].sheet_role == "elevation"
+    finally:
+        doc.close()

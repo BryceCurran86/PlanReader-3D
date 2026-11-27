@@ -36,11 +36,13 @@ from pb_page_registration_v1225 import weighted_page_type
 from pb_viewport_segmentation import ViewportSegmentationStatus, segment_page_viewports
 
 
-SOURCE_FLOOR_PLAN_PAGE_SCOPE_SCHEMA_VERSION = "1.0.0"
+SOURCE_FLOOR_PLAN_PAGE_SCOPE_SCHEMA_VERSION = "1.1.0"
 
 FLOOR_PLAN_PAGE_BOUND_TITLE = "floor_plan_bound_title"
 FLOOR_PLAN_PAGE_F07_VIEWPORT = "floor_plan_f07_viewport"
 NOT_FLOOR_PLAN_PAGE_BOUND_TITLE = "not_floor_plan_bound_title"
+NOT_FLOOR_PLAN_PAGE_DOCUMENT_HEADER = "not_floor_plan_document_header"
+NOT_FLOOR_PLAN_PAGE_SCHEDULE_VIEWPORT = "not_floor_plan_schedule_viewport"
 UNPROVEN_FLOOR_PLAN_PAGE = "floor_plan_page_unproven"
 UNREADABLE_FLOOR_PLAN_PAGE = "floor_plan_page_unreadable"
 
@@ -51,6 +53,20 @@ UNPROVEN = "unproven"
 _MIN_TITLE_SCORE = 60.0
 _MIN_PAGE_TYPE_CONFIDENCE = 60
 _TITLE_SPLIT_RE = re.compile(r"\s*(?:&|/|\+|,|;|\band\b)\s*", re.IGNORECASE)
+_HEADER_TOP_FRACTION = 0.25
+
+# Generic administrative register / transmittal document headers that appear at
+# the top of standalone non-plan sheets lacking an architectural title block.
+_NON_PLAN_REGISTER_HEADER_PATTERNS = (
+    re.compile(r"\b(?:document|drawing)\s+transmittal\b", re.IGNORECASE),
+    re.compile(r"\btransmittal\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:drawing|document|sheet|issue)\s+(?:register|list|index|schedule)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\btable\s+of\s+contents\b", re.IGNORECASE),
+)
+_FLOOR_PLAN_HEADER_GUARD_RE = re.compile(r"\bfloor\s+plan\b", re.IGNORECASE)
 
 # Room-area cross-view support must be plan-like source evidence rather than
 # every positively non-floor-plan sheet. These roles are generic architectural
@@ -85,6 +101,10 @@ class SourceFloorPlanPageDecision:
     reason_code: str
     title: Optional[str] = None
     view_types: tuple[str, ...] = ()
+    sheet_role: str = UNPROVEN
+    authenticated_floor_plan_viewport_count: int = 0
+    viewport_types: tuple[str, ...] = ()
+    is_mixed_sheet: bool = False
 
 
 @dataclass(frozen=True)
@@ -155,6 +175,12 @@ class SourceFloorPlanPageScope:
                     "reason_code": d.reason_code,
                     "title": d.title,
                     "view_types": list(d.view_types),
+                    "sheet_role": d.sheet_role,
+                    "authenticated_floor_plan_viewport_count": int(
+                        d.authenticated_floor_plan_viewport_count
+                    ),
+                    "viewport_types": list(d.viewport_types),
+                    "is_mixed_sheet": bool(d.is_mixed_sheet),
                 }
                 for d in self.decisions
             ],
@@ -192,17 +218,105 @@ def _bound_titles(page: Any, page_number: int) -> list[str]:
     ]
 
 
-def _has_f07_floor_plan_viewport(page: Any, page_number: int) -> bool:
-    return any(
-        viewport.view_type == DrawingViewType.FLOOR_PLAN.value
+def _viewport_scope_signals(
+    page: Any, page_number: int
+) -> tuple[int, tuple[str, ...], bool]:
+    """Return (authenticated_floor_plan_vp_count, unique_viewport_types, schedule_only)."""
+    viewports = tuple(segment_page_viewports(page, page_number=page_number))
+    auth_fp_count = sum(
+        1
+        for viewport in viewports
+        if viewport.view_type == DrawingViewType.FLOOR_PLAN.value
         and viewport.bounding_box is not None
         and viewport.status
         in (
             ViewportSegmentationStatus.RESOLVED.value,
             ViewportSegmentationStatus.DERIVED.value,
         )
-        for viewport in segment_page_viewports(page, page_number=page_number)
     )
+    vp_types = tuple(
+        sorted(
+            {
+                str(viewport.view_type)
+                for viewport in viewports
+                if getattr(viewport, "view_type", None)
+                and str(viewport.view_type) != DrawingViewType.UNKNOWN.value
+            }
+        )
+    )
+    schedule_only = bool(viewports) and all(
+        str(getattr(viewport, "view_type", "")) == DrawingViewType.SCHEDULE.value
+        for viewport in viewports
+    )
+    return auth_fp_count, vp_types, schedule_only
+
+
+def _has_f07_floor_plan_viewport(page: Any, page_number: int) -> bool:
+    auth_fp_count, _vp_types, _schedule_only = _viewport_scope_signals(
+        page, page_number
+    )
+    return auth_fp_count > 0
+
+
+def _document_header_non_plan_role(page: Any) -> Optional[tuple[str, str]]:
+    """Detect an explicit standalone non-plan document header in the top band.
+
+    Only fires when a page has no bound architectural title block and no
+    authoritative floor-plan viewport. Rejects any top band mentioning a floor
+    plan so mixed sheets are never silently excluded.
+    """
+    height = float(getattr(getattr(page, "rect", None), "height", 0.0) or 0.0)
+    if height <= 0.0:
+        return None
+    top_limit = height * _HEADER_TOP_FRACTION
+    blocks = page.get_text("blocks") or ()
+    header_lines: list[str] = []
+    for block in blocks:
+        if len(block) < 5:
+            continue
+        y0 = float(block[1])
+        if y0 > top_limit:
+            continue
+        text = " ".join(str(block[4] or "").strip().split())
+        if text:
+            header_lines.append(text)
+    if not header_lines:
+        return None
+    header_blob = " ".join(header_lines)
+    if _FLOOR_PLAN_HEADER_GUARD_RE.search(header_blob):
+        return None
+    for line in header_lines:
+        if any(pattern.search(line) for pattern in _NON_PLAN_REGISTER_HEADER_PATTERNS):
+            return ("register", line)
+    return None
+
+
+def _infer_sheet_role(
+    classification: str,
+    view_types: tuple[str, ...],
+    *,
+    is_mixed: bool,
+) -> str:
+    if classification == UNPROVEN:
+        return UNPROVEN
+    if classification == FLOOR_PLAN:
+        return "mixed_floor_plan" if is_mixed else FLOOR_PLAN
+    for candidate in (
+        DrawingViewType.SCHEDULE.value,
+        DrawingViewType.LEGEND.value,
+        DrawingViewType.SPECIFICATION.value,
+        DrawingViewType.REFLECTED_CEILING_PLAN.value,
+        DrawingViewType.FLOOR_FINISH_PLAN.value,
+        DrawingViewType.ELEVATION.value,
+        DrawingViewType.SECTION.value,
+        DrawingViewType.ROOF_PLAN.value,
+        DrawingViewType.DETAIL.value,
+    ):
+        if candidate in view_types:
+            return candidate
+    if "register" in view_types:
+        return "register"
+    return "other_drawing"
 
 
 def _classify_page(page: Any, page_index: int) -> SourceFloorPlanPageDecision:
@@ -211,28 +325,101 @@ def _classify_page(page: Any, page_index: int) -> SourceFloorPlanPageDecision:
         titles = _bound_titles(page, page_number)
     except Exception:  # noqa: BLE001 - unreadable evidence never removes a page
         return SourceFloorPlanPageDecision(
-            page_index, UNPROVEN, UNREADABLE_FLOOR_PLAN_PAGE
+            page_index, UNPROVEN, UNREADABLE_FLOOR_PLAN_PAGE, sheet_role=UNPROVEN
         )
     if titles:
-        types = frozenset().union(*(_title_view_types(title) for title in titles))
+        types = tuple(sorted(frozenset().union(*(_title_view_types(title) for title in titles))))
         title = titles[0]
         if DrawingViewType.FLOOR_PLAN.value in types:
+            auth_fp_count = 0
+            vp_types: tuple[str, ...] = ()
+            try:
+                auth_fp_count, vp_types, _schedule_only = _viewport_scope_signals(
+                    page, page_number
+                )
+            except Exception:  # noqa: BLE001
+                auth_fp_count = 0
+                vp_types = ()
+            distinct_views = set(types) | set(vp_types)
+            is_mixed = len(distinct_views) > 1
             return SourceFloorPlanPageDecision(
-                page_index, FLOOR_PLAN, FLOOR_PLAN_PAGE_BOUND_TITLE, title, tuple(sorted(types))
+                page_index,
+                FLOOR_PLAN,
+                FLOOR_PLAN_PAGE_BOUND_TITLE,
+                title,
+                types,
+                sheet_role=_infer_sheet_role(FLOOR_PLAN, types, is_mixed=is_mixed),
+                authenticated_floor_plan_viewport_count=auth_fp_count,
+                viewport_types=vp_types,
+                is_mixed_sheet=is_mixed,
             )
+        is_mixed = len(types) > 1
         return SourceFloorPlanPageDecision(
-            page_index, NOT_FLOOR_PLAN, NOT_FLOOR_PLAN_PAGE_BOUND_TITLE, title, tuple(sorted(types))
+            page_index,
+            NOT_FLOOR_PLAN,
+            NOT_FLOOR_PLAN_PAGE_BOUND_TITLE,
+            title,
+            types,
+            sheet_role=_infer_sheet_role(NOT_FLOOR_PLAN, types, is_mixed=is_mixed),
+            is_mixed_sheet=is_mixed,
         )
     try:
-        if _has_f07_floor_plan_viewport(page, page_number):
-            return SourceFloorPlanPageDecision(
-                page_index, FLOOR_PLAN, FLOOR_PLAN_PAGE_F07_VIEWPORT
-            )
+        auth_fp_count, vp_types, schedule_only = _viewport_scope_signals(
+            page, page_number
+        )
     except Exception:  # noqa: BLE001
         return SourceFloorPlanPageDecision(
-            page_index, UNPROVEN, UNREADABLE_FLOOR_PLAN_PAGE
+            page_index, UNPROVEN, UNREADABLE_FLOOR_PLAN_PAGE, sheet_role=UNPROVEN
         )
-    return SourceFloorPlanPageDecision(page_index, UNPROVEN, UNPROVEN_FLOOR_PLAN_PAGE)
+    if auth_fp_count > 0:
+        is_mixed = len(vp_types) > 1
+        return SourceFloorPlanPageDecision(
+            page_index,
+            FLOOR_PLAN,
+            FLOOR_PLAN_PAGE_F07_VIEWPORT,
+            view_types=vp_types,
+            sheet_role=_infer_sheet_role(FLOOR_PLAN, vp_types, is_mixed=is_mixed),
+            authenticated_floor_plan_viewport_count=auth_fp_count,
+            viewport_types=vp_types,
+            is_mixed_sheet=is_mixed,
+        )
+    try:
+        header_hit = _document_header_non_plan_role(page)
+    except Exception:  # noqa: BLE001
+        header_hit = None
+    if header_hit is not None:
+        role, header_title = header_hit
+        return SourceFloorPlanPageDecision(
+            page_index,
+            NOT_FLOOR_PLAN,
+            NOT_FLOOR_PLAN_PAGE_DOCUMENT_HEADER,
+            title=header_title,
+            view_types=(role,),
+            sheet_role=role,
+            authenticated_floor_plan_viewport_count=0,
+            viewport_types=vp_types,
+            is_mixed_sheet=False,
+        )
+    if schedule_only:
+        return SourceFloorPlanPageDecision(
+            page_index,
+            NOT_FLOOR_PLAN,
+            NOT_FLOOR_PLAN_PAGE_SCHEDULE_VIEWPORT,
+            view_types=(DrawingViewType.SCHEDULE.value,),
+            sheet_role=DrawingViewType.SCHEDULE.value,
+            authenticated_floor_plan_viewport_count=0,
+            viewport_types=vp_types,
+            is_mixed_sheet=False,
+        )
+    return SourceFloorPlanPageDecision(
+        page_index,
+        UNPROVEN,
+        UNPROVEN_FLOOR_PLAN_PAGE,
+        sheet_role=UNPROVEN,
+        authenticated_floor_plan_viewport_count=0,
+        viewport_types=vp_types,
+        is_mixed_sheet=len(vp_types) > 1,
+    )
 
 
 def classify_source_floor_plan_pages(
@@ -277,6 +464,8 @@ __all__ = [
     "FLOOR_PLAN_PAGE_F07_VIEWPORT",
     "NOT_FLOOR_PLAN",
     "NOT_FLOOR_PLAN_PAGE_BOUND_TITLE",
+    "NOT_FLOOR_PLAN_PAGE_DOCUMENT_HEADER",
+    "NOT_FLOOR_PLAN_PAGE_SCHEDULE_VIEWPORT",
     "SOURCE_FLOOR_PLAN_PAGE_SCOPE_SCHEMA_VERSION",
     "SourceFloorPlanPageDecision",
     "SourceFloorPlanPageScope",
