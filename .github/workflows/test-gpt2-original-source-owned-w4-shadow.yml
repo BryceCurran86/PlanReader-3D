@@ -42,7 +42,11 @@ jobs:
           PYTHONPATH=. python -m pytest -q tests/test_gpt2_source_owned_physical_w4_shadow.py
           PYTHONPATH=. python scripts/check_provider_gold_isolation.py
           PYTHONPATH=. python scripts/check_full_plan_v2_integrity.py
+      - name: Original replay NOT RUN - local validation required
+        run: |
+          echo 'NOT RUN_LOCAL_REQUIRED: private original replay is not a passing source verification. Execute the preserved replay steps locally against pinned base/head.' >> "$GITHUB_STEP_SUMMARY"
       - name: Exact immutable original page-11 view to W4 shadow
+        if: ${{ false }}
         run: |
           set -euo pipefail
           PDF='documents/sources/Arch_Combined_Maryborough_Service_Station.pdf'
