@@ -526,6 +526,60 @@ def _write_json(path: Path, payload: Any) -> None:
     _write_text_atomic(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
+def _verify_independent_floor_area_family_customer_projection(
+    *,
+    claim: Any,
+    family_runs: Sequence[tuple[str, SealedSourceClosedRun]],
+    workspace_id: int,
+    project_id: str,
+    source_sha256: str,
+) -> tuple[tuple[dict[str, Any], ...], SealedSourceClosedRun, tuple[str, ...]]:
+    """Verify exact family-only floor_area customer projection against its sealed family run.
+
+    Used strictly when another family abstains and withholds the whole-project
+    combined seal. Enforces:
+    - exactly one sealed ``floor_area`` family run;
+    - exact ``source_sha256`` envelope match;
+    - every sealed quantity belongs to ``floor_area`` with unique IDs;
+    - exact 1:1 bijection via ``verify_sealed_customer_output`` with zero
+      duplicate, extra, missing, or cross-family customer rows.
+    """
+    floor_runs = tuple(run for family, run in family_runs if family == "floor_area")
+    if len(floor_runs) != 1:
+        raise RuntimeError("independent floor_area family seal is ambiguous or missing")
+    floor_run = floor_runs[0]
+    if set(floor_run.source_sha256s) != {source_sha256}:
+        raise RuntimeError("independent floor_area family seal source SHA envelope mismatch")
+    if not floor_run.quantities:
+        raise RuntimeError("independent floor_area family seal has no quantities")
+    if any(str(getattr(q, "family", "")).strip() != "floor_area" for q in floor_run.quantities):
+        raise RuntimeError("independent floor_area family seal contains non-floor_area quantity")
+    quantity_ids = tuple(q.quantity_id for q in floor_run.quantities)
+    if len(set(quantity_ids)) != len(quantity_ids):
+        raise RuntimeError("independent floor_area family seal has duplicate quantity IDs")
+    rows = tuple(
+        project_live_floor_area_customer_rows(
+            claim, workspace_id=workspace_id, project_id=project_id,
+        )
+    )
+    if not rows:
+        raise RuntimeError("independent floor_area customer projection returned no rows")
+    if any(
+        not isinstance(r, Mapping) or str(r.get("quantity_family", "")).strip() != "floor_area"
+        for r in rows
+    ):
+        raise RuntimeError("independent floor_area customer projection contains wrong family row")
+    verified = verify_sealed_customer_output(floor_run, rows)
+    expected_ids = set(quantity_ids)
+    if (
+        len(rows) != len(expected_ids)
+        or verified.customer_row_count != len(expected_ids)
+        or set(verified.verified_quantity_ids) != expected_ids
+    ):
+        raise RuntimeError("independent floor_area family customer projection bijection failed")
+    return rows, floor_run, tuple(sorted(expected_ids))
+
+
 def _write_run(
     directory: Path,
     family: str,
@@ -1456,6 +1510,32 @@ def _generate_project_handoff_locked(
             _write_json(output_dir / "production_summary.json", summary)
             raise
 
+    verified_floor_area_family_only: Optional[
+        tuple[tuple[dict[str, Any], ...], SealedSourceClosedRun, tuple[str, ...]]
+    ] = None
+    floor_area_family_only_error: Optional[str] = None
+    if combined is None and floor_finish_family_abstained and floor_quantities:
+        try:
+            verified_floor_area_family_only = (
+                _verify_independent_floor_area_family_customer_projection(
+                    claim=claim,
+                    family_runs=family_runs,
+                    workspace_id=workspace_id,
+                    project_id=project_id,
+                    source_sha256=source_sha256,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed without blocking unsealed diagnostics
+            floor_area_family_only_error = f"{type(exc).__name__}: {exc}"
+            summary.setdefault("family_only_verified_outputs", {})["floor_area"] = {
+                "family": "floor_area",
+                "scope": "family_only_incomplete_project",
+                "verified": False,
+                "whole_project_verified": False,
+                "benchmark_score_granted": False,
+                "error": floor_area_family_only_error,
+            }
+
     # An independently sealed source-positive floor finish can now carry
     # a separately verified customer receipt. Do not label the entire
     # floor/ceiling/wall/opening project customer-verified from one family.
@@ -1741,6 +1821,27 @@ def _generate_project_handoff_locked(
         summary["verified_customer_row_count"] = 0
         summary["benchmark_score_granted"] = False
         summary["status"] = "source_attempt_recorded_unsealed"
+        if verified_floor_area_family_only is not None:
+            floor_rows, floor_run, floor_qids = verified_floor_area_family_only
+            floor_family_customer_path = (
+                output_dir / "verified_floor_area_family_customer_rows.json"
+            )
+            encoded_rows = json.dumps(list(floor_rows), indent=2, sort_keys=True) + "\n"
+            _write_text_atomic(floor_family_customer_path, encoded_rows)
+            summary.setdefault("family_only_verified_outputs", {})["floor_area"] = {
+                "family": "floor_area",
+                "scope": "family_only_incomplete_project",
+                "verified": True,
+                "whole_project_verified": False,
+                "benchmark_score_granted": False,
+                "source_sha256": source_sha256,
+                "family_run_id": floor_run.run_id,
+                "family_run_file": str(output_dir / "family_runs" / "floor_area.sealed.json"),
+                "customer_rows_file": str(floor_family_customer_path),
+                "customer_row_count": len(floor_rows),
+                "verified_quantity_ids": list(floor_qids),
+                "customer_rows_sha256": hashlib.sha256(encoded_rows.encode("utf-8")).hexdigest(),
+            }
     else:
         summary["combined_quantity_count"] = 0
         # ABSTAIN with a bounded-source complexity failure is not an empty
