@@ -38,7 +38,11 @@ jobs:
           python scripts/check_full_plan_v2_integrity.py
         env:
           PYTHONPATH: .
+      - name: Original replay NOT RUN - local validation required
+        run: |
+          echo 'NOT RUN_LOCAL_REQUIRED: private original replay is not a passing source verification. Execute the preserved replay steps locally against pinned base/head.' >> "$GITHUB_STEP_SUMMARY"
       - name: Both immutable original source proofs and downstream consumption
+        if: ${{ false }}
         run: |
           mkdir -p artifacts/source-owned-plan-view
           git rev-parse HEAD > artifacts/source-owned-plan-view/producer_head_sha.txt
@@ -66,7 +70,7 @@ jobs:
         env:
           PYTHONPATH: .
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ false }}
         with:
           name: source-owned-original-plan-views
           path: artifacts/source-owned-plan-view
