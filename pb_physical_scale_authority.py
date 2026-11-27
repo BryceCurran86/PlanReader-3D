@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import hashlib
 import math
 import re
+import unicodedata
 from types import MappingProxyType
 from typing import Mapping, Optional, Sequence
 
@@ -56,6 +57,23 @@ _PHYSICAL_LABEL_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(mm|cm|m)\s*$", re.I)
 _ZERO_RE = re.compile(r"^\s*0(?:\.0+)?\s*$")
 _RATIO_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\b")
 _SEGMENT_PRIMITIVE_RE = re.compile(r"^visible:segment:d(\d+)i(\d+)$")
+_UNICODE_SCALE_TRANSLATION = str.maketrans({
+    "\u2236": ":",  # ratio symbol
+    "\uff1a": ":",  # fullwidth colon
+    "\u00a0": " ",  # nbsp
+    "\u2009": " ",  # thin space
+    "\u202f": " ",  # narrow nbsp
+    "\u200b": "",   # zero-width space
+    "\ufeff": "",   # BOM
+})
+_SCALE_THOUSANDS_COMMA_RE = re.compile(r"(?<!\d)(\d{1,3}),(\d{3})(?!\d)")
+
+
+def _normalize_scale_token_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(text or "")).translate(
+        _UNICODE_SCALE_TRANSLATION
+    )
+    return _SCALE_THOUSANDS_COMMA_RE.sub(r"\1\2", normalized)
 
 
 @dataclass(frozen=True)
@@ -503,7 +521,7 @@ def _distance_point_to_segment(point: _Point, segment: _VisibleSegment) -> tuple
 
 
 def _physical_mm(text: str) -> Optional[float]:
-    match = _PHYSICAL_LABEL_RE.match(str(text))
+    match = _PHYSICAL_LABEL_RE.match(_normalize_scale_token_text(text))
     if match is None:
         return None
     value = float(match.group(1))
@@ -669,7 +687,7 @@ def _bar_candidates(
 def _ratios(words: Sequence[_TrustedWord]) -> tuple[float, ...]:
     values: set[float] = set()
     for word in words:
-        for match in _RATIO_RE.finditer(word.text):
+        for match in _RATIO_RE.finditer(_normalize_scale_token_text(word.text)):
             numerator = float(match.group(1))
             denominator = float(match.group(2))
             if numerator > 0 and denominator > 0:
