@@ -1,0 +1,26 @@
+# Which paint made each raster segment (Lot16 raster walls, 2026-11-28)
+
+Architecture note before the change (AGENTS); ordered by MAX 7227402524 / 7228307037. Report only.
+
+## Observed
+- On a page with no native visible vector observations, raster segments come from the full page render.
+- On a page with both, they come from the same full render, kept only inside embedded image regions. Native line work drawn
+  over an image is inside those regions, so it is found again as raster segments with their own raster identities.
+- The producer already renders an images-only page (embedded images, no line art or text) for other raster evidence.
+- Wall candidates built from raster segments carry no native identity, so they cannot be matched to room edges by source.
+
+## Inference
+Authentic lineage for a raster segment is the paint that made its pixels: if they are in the images-only render it is image
+ink; if they are not, and native line segments cover it within the render's pixel size, it is those lines' ink.
+
+## Built (shadow)
+`pb_raster_segment_paint_lineage_shadow.classify_raster_segment_paint(segments, images_only_png, native_lines, dpi)`:
+- image share: the part of the segment's pixels that are foreground in the images-only render (within one pixel);
+- native cover: the part of its length covered by native lines of the same direction within half their width plus one pixel,
+  all such lines listed, none chosen;
+- `image_ink` (image share at least 90%, native cover under 90%), `vector_ink` (image share at most 10%, native cover at least
+  90%), `image_and_vector` (both at least 90%), else `unattributed`.
+It names no new identities, changes nothing and no live path imports it. Segments and lines must be in the same page frame.
+
+## Must not influence
+Any wall count or quantity expectation. Originals: counts only, before any use.

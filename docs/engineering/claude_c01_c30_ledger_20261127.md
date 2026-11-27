@@ -30,11 +30,11 @@ drawings only). Nothing here is merged; MAX owns merge, pins and official scorin
 | C23 holes, shafts, exclusions | PARTIAL | report | lists enclosed loops and net area; does not classify them |
 | C24 inside-face room polygons | NOT STARTED | | |
 | C25 curved/angled/stepped walls | PARTIAL | synthetic | curved walls are never candidates (only straight segments are extracted) |
-| C26 vector/raster corroboration | NOT STARTED | | |
+| C26 vector/raster corroboration | PARTIAL | synthetic | shadow paint lineage for raster segments (image ink vs native line ink drawn over images); original counts pending |
 | C27 donor recovery | PARTIAL | report | `claude_donor_audit_c27_20261127.md`; nothing ported |
 | C28 preview/review app routes | NOT STARTED | | |
 | C29 performance | NOT STARTED | | |
 | C30 consolidated PR | IN PROGRESS | | #4810 |
 
-Done 4, partial 9, in progress 1, not started 16. Next: Office doorway closure; Food Prep open-plan ownership (C22);
+Done 4, partial 10, in progress 1, not started 15. Next: Office doorway closure; Food Prep open-plan ownership (C22);
 C12 originals before/after; C14 and C05 signed-row checks.
