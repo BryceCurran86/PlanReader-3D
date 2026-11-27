@@ -14,6 +14,7 @@ from collections import OrderedDict
 from collections.abc import Iterator, MutableMapping
 import dataclasses
 from dataclasses import dataclass, replace
+import gc
 import hashlib
 import math
 from operator import attrgetter
@@ -54,6 +55,12 @@ _NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES = 2
 _NATIVE_IMAGE_ONLY_PNG_CACHE_MAX_ENTRIES = 3
 _NATIVE_IMAGE_ONLY_PNG_CACHE_MAX_BYTES = 8 * 1024 * 1024
 _NATIVE_RENDER_METHODS = (fitz.Page.get_pixmap, fitz.Page.get_displaylist)
+_FZ_ERROR_SYSTEM_TYPE = getattr(getattr(fitz, "mupdf", None), "FzErrorSystem", MemoryError)
+_NATIVE_DISPLAY_LIST_OOM_ERRORS: tuple[type[BaseException], ...] = (
+    (MemoryError, _FZ_ERROR_SYSTEM_TYPE)
+    if _FZ_ERROR_SYSTEM_TYPE is not MemoryError
+    else (MemoryError,)
+)
 _HISTORIC_VERIFIED_CACHE_TARGET = 150_000
 _SNAPSHOT_MEMBERSHIP_CACHE_MAX_SNAPSHOTS = 3
 # Representation cache only. Lookups stay the same above and below this size.
@@ -776,10 +783,21 @@ class SourceObservationProducer:
         self._native_image_scope_cache: "OrderedDict[tuple[str, str, str, int], tuple]" = OrderedDict()
         self._native_clip_display_lists: "OrderedDict[tuple[str, int], fitz.DisplayList]" = OrderedDict()
         self._native_image_only_png_cache: "OrderedDict[tuple[str, int, float], bytes]" = OrderedDict()
+        self._native_render_stats: dict[str, int] = {
+            "clip_calls": 0,
+            "display_list_hits": 0,
+            "display_list_misses": 0,
+            "display_list_evictions": 0,
+            "display_list_oom_fallbacks": 0,
+        }
         # One immutable native-decode scope per revision on this producer.
         # None means the complete source document; a tuple means an explicit
         # page subset. Replaying a revision at a different scope fails closed.
         self._ingest_scope_by_revision: dict[str, tuple[int, ...] | None] = {}
+
+    def native_render_stats(self) -> dict[str, int]:
+        """Return a snapshot of producer-owned native render/cache counters."""
+        return dict(self._native_render_stats)
 
     def _cached_page_count(self, source_sha256: str) -> Optional[int]:
         key = str(source_sha256)
@@ -1158,8 +1176,11 @@ class SourceObservationProducer:
 
                     # PyMuPDF's ordinary get_pixmap builds this same display list
                     # on every crop. Retain at most two immutable source pages;
-                    # each DPI still renders its own exact validated clip. Custom
-                    # renderer hooks and mutable pages keep the ordinary path.
+                    # each DPI still renders its own exact validated clip. Evict
+                    # BEFORE allocating a new display list so MAX+1 huge pages
+                    # are never simultaneously resident, and fall back to direct
+                    # clipped get_pixmap(annots=True) on MuPDF C-heap OOM.
+                    self._native_render_stats["clip_calls"] += 1
                     if (
                         not pdf.is_dirty
                         and fitz.Page.get_pixmap is _NATIVE_RENDER_METHODS[0]
@@ -1167,22 +1188,59 @@ class SourceObservationProducer:
                     ):
                         cache_key = (source_sha256, page_number)
                         display_list = self._native_clip_display_lists.get(cache_key)
-                        if display_list is None:
-                            display_list = page.get_displaylist(annots=True)
-                            self._native_clip_display_lists[cache_key] = display_list
-                        self._native_clip_display_lists.move_to_end(cache_key)
-                        while len(self._native_clip_display_lists) > _NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES:
-                            self._native_clip_display_lists.popitem(last=False)
-                        pix = display_list.get_pixmap(
-                            matrix=fitz.Matrix(scale, scale),
-                            clip=render_clip,
-                            alpha=False,
-                        )
+                        try:
+                            if display_list is None:
+                                self._native_render_stats["display_list_misses"] += 1
+                                evicted = 0
+                                max_keep = max(0, _NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES - 1)
+                                while len(self._native_clip_display_lists) > max_keep:
+                                    self._native_clip_display_lists.popitem(last=False)
+                                    evicted += 1
+                                if evicted:
+                                    self._native_render_stats["display_list_evictions"] += evicted
+                                    gc.collect()
+                                    try:
+                                        fitz.TOOLS.store_shrink(100)
+                                    except Exception:
+                                        pass
+                                display_list = page.get_displaylist(annots=True)
+                                if _NATIVE_CLIP_DISPLAY_LIST_CACHE_MAX_PAGES > 0:
+                                    self._native_clip_display_lists[cache_key] = display_list
+                                    self._native_clip_display_lists.move_to_end(cache_key)
+                            else:
+                                self._native_render_stats["display_list_hits"] += 1
+                                self._native_clip_display_lists.move_to_end(cache_key)
+                            pix = display_list.get_pixmap(
+                                matrix=fitz.Matrix(scale, scale),
+                                clip=render_clip,
+                                alpha=False,
+                            )
+                        except _NATIVE_DISPLAY_LIST_OOM_ERRORS:
+                            self._native_render_stats["display_list_oom_fallbacks"] += 1
+                            if self._native_clip_display_lists:
+                                self._native_render_stats["display_list_evictions"] += len(
+                                    self._native_clip_display_lists
+                                )
+                                self._native_clip_display_lists.clear()
+                            self._native_image_only_png_cache.clear()
+                            display_list = None
+                            gc.collect()
+                            try:
+                                fitz.TOOLS.store_shrink(100)
+                            except Exception:
+                                pass
+                            pix = page.get_pixmap(
+                                matrix=fitz.Matrix(scale, scale),
+                                clip=render_clip,
+                                alpha=False,
+                                annots=True,
+                            )
                     else:
                         pix = page.get_pixmap(
                             matrix=fitz.Matrix(scale, scale),
                             clip=render_clip,
                             alpha=False,
+                            annots=True,
                         )
                 png_bytes = pix.tobytes("png")
                 if image_cache_ok and len(png_bytes) <= _NATIVE_IMAGE_ONLY_PNG_CACHE_MAX_BYTES:
@@ -1194,6 +1252,8 @@ class SourceObservationProducer:
         finally:
             if "pix" in locals() and pix is not None:
                 del pix
+            if "display_list" in locals() and display_list is not None:
+                del display_list
             if "page" in locals() and page is not None:
                 del page
             if "render_page" in locals() and render_page is not None:
