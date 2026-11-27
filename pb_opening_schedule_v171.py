@@ -1895,6 +1895,46 @@ def _basic_word_rows(words: list) -> List[Dict[str, Any]]:
     return output
 
 
+def parse_schedule_pages(
+    pdf_pages: Sequence[Tuple[int, Any]],
+    *,
+    two_level_header: bool = False,
+) -> List[ScheduleEntry]:
+    """Parse schedule entries deterministically across multiple PDF pages.
+
+    Each element of *pdf_pages* is ``(page_no, pdf_page)``. Pages are processed
+    in ascending ``page_no`` order so multi-page schedules preserve per-page
+    provenance deterministically regardless of caller order.
+    """
+    if type(two_level_header) is not bool:
+        raise TypeError("two_level_header must be a bool")
+    ordered = sorted(
+        ((int(page_no), page) for page_no, page in pdf_pages),
+        key=lambda item: item[0],
+    )
+    entries: List[ScheduleEntry] = []
+    for page_no, pdf_page in ordered:
+        entries.extend(
+            parse_schedule_page(
+                pdf_page,
+                page_no=page_no,
+                two_level_header=two_level_header,
+            )
+        )
+    return entries
+
+
+def _schedule_mark_lookup_key(mark: str) -> Any:
+    """Canonical lookup key so 'D01', 'D1', and 'D-01' match and detect conflicts."""
+    clean = str(mark or "").strip()
+    if not clean:
+        return None
+    canonical = _canonical_opening_mark_key(clean)
+    if canonical is not None:
+        return canonical
+    return clean.upper()
+
+
 def enrich_opening_evidence(
     instances: List[OpeningEvidence],
     schedule_entries: List[ScheduleEntry],
@@ -1902,17 +1942,24 @@ def enrich_opening_evidence(
     if not instances or not schedule_entries:
         return list(instances)
 
-    schedule_by_mark: Dict[str, List[ScheduleEntry]] = {}
+    schedule_by_key: Dict[Any, List[ScheduleEntry]] = {}
     for entry in schedule_entries:
-        if entry.type_mark:
-            schedule_by_mark.setdefault(entry.type_mark, []).append(entry)
+        key = _schedule_mark_lookup_key(entry.type_mark)
+        if key is not None:
+            schedule_by_key.setdefault(key, []).append(entry)
 
-    _PROVENANCE_RANK = {"header_separate": 3, "header_dims": 2, "heuristic": 1, "": 0}
-    mark_authority: Dict[str, Optional[ScheduleEntry]] = {}
-    mark_conflicts: Dict[str, List[ScheduleEntry]] = {}
-    for mark, entries_list in schedule_by_mark.items():
+    _PROVENANCE_RANK = {
+        "grid_nested_header": 4,
+        "header_separate": 3,
+        "header_dims": 2,
+        "heuristic": 1,
+        "": 0,
+    }
+    key_authority: Dict[Any, Optional[ScheduleEntry]] = {}
+    key_conflicts: Dict[Any, List[ScheduleEntry]] = {}
+    for key, entries_list in schedule_by_key.items():
         if len(entries_list) == 1:
-            mark_authority[mark] = entries_list[0]
+            key_authority[key] = entries_list[0]
         else:
             dims_set = set()
             for e in entries_list:
@@ -1920,18 +1967,19 @@ def enrich_opening_evidence(
             if len(dims_set) == 1:
                 best = max(entries_list,
                            key=lambda e: _PROVENANCE_RANK.get(e.parse_source, 0))
-                mark_authority[mark] = best
+                key_authority[key] = best
             else:
-                mark_authority[mark] = None
-                mark_conflicts[mark] = entries_list
+                key_authority[key] = None
+                key_conflicts[key] = entries_list
 
     enriched = []
     for inst in instances:
         mark = inst.type_mark
-        if mark and mark in mark_authority:
-            sched = mark_authority[mark]
+        lookup_key = _schedule_mark_lookup_key(mark) if mark else None
+        if lookup_key is not None and lookup_key in key_authority:
+            sched = key_authority[lookup_key]
             if sched is None:
-                alternatives = mark_conflicts.get(mark, [])
+                alternatives = key_conflicts.get(lookup_key, [])
                 conflicting_obs = {
                     "source": "schedule_parse",
                     "width_m": None,
