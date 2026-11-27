@@ -12,7 +12,7 @@ drawings only). Nothing here is merged; MAX owns merge, pins and official scorin
 | C05 non-wall ink never a wall | PARTIAL | opt-in | guard built (two modes); originals: walls withheld, 0 host/frame changes; signed-row check pending before any default |
 | C06 rooms in wall-ink scope | PARTIAL | report | existing ring builder gives inside-face rings on the three topology sheets (171 / 18 / 54 candidates); the two floor-finish rooms have no ring (both open into one interior part); not wired |
 | C07 wall identity ambiguity | PARTIAL | report | no verified sheet-7 scale; a band alone would publish non-wall lines (AG holds its scale until C05) |
-| C08 room-to-wall identity | PARTIAL | report | 28 Nov probe: the floor-finish outlines of Food Prep and Office are non-wall linework (grey lines, white masks, green equipment; 0 of 22 edges on wall ink), so refusal is correct; next: positive wall evidence for finish-bearing faces (design first) |
+| C08 room-to-wall identity | PARTIAL | report | floor-finish outlines of Food Prep and Office are non-wall linework; shadow `face_wall_support` (28 Nov) rejects both on every edge; real rooms pass except thick (about 8.6 pt) panel walls, above the builder's 8 pt pair limit (MAX decision) |
 | C09 exterior inside-face trace | NOT STARTED | | |
 | C10 garage closure | NOT STARTED | | |
 | C11 dual dwellings / party walls | NOT STARTED | | |
@@ -36,5 +36,5 @@ drawings only). Nothing here is merged; MAX owns merge, pins and official scorin
 | C29 performance | NOT STARTED | | |
 | C30 consolidated PR | IN PROGRESS | | #4810 |
 
-Done 4, partial 9, in progress 1, not started 16. Next: C12 originals before/after; C14 and C05 signed-row checks; design
-note for positive wall evidence on finish-bearing room faces (C06/C08).
+Done 4, partial 9, in progress 1, not started 16. Next: Office doorway closure; Food Prep open-plan ownership (C22);
+C12 originals before/after; C14 and C05 signed-row checks.
