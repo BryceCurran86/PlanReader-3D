@@ -35,6 +35,21 @@ export function menuButtonAt(layout:MenuLayout,x:number,y:number):number {
 export function displayedMenuAction(shown:MenuLayout|null,current:MenuLayout,index:number):MenuLayout["buttons"][number]["action"]|null {
  if(!shown||shown.width!==current.width||shown.height!==current.height||shown.radial!==current.radial||!Number.isInteger(index)||index<0)return null;
  const before=shown.buttons[index],after=current.buttons[index];
- if(!before||!after||before.disabled||after.disabled||JSON.stringify(before)!==JSON.stringify(after))return null;
+ if(!before||!after||before.disabled||after.disabled||before.x!==after.x||before.y!==after.y||before.w!==after.w||before.h!==after.h||JSON.stringify(before.action)!==JSON.stringify(after.action))return null;
  return before.action;
+}
+
+/** Move one enabled rectangular key in the requested direction; stay at an edge. */
+export function adjacentMenuButton(layout:MenuLayout,index:number,dx:number,dy:number):number{
+ if(!Number.isFinite(dx)||!Number.isFinite(dy))return index;
+ const enabled=layout.buttons.map((b,i)=>({b,i})).filter(({b})=>!b.disabled);
+ if(!enabled.length)return -1;
+ const current=layout.buttons[index];if(!current||current.disabled)return enabled[0].i;
+ if(Math.max(Math.abs(dx),Math.abs(dy))<.55)return index;
+ const horizontal=Math.abs(dx)>=Math.abs(dy),direction=Math.sign(horizontal?dx:dy);
+ let best=index,score=Infinity;
+ for(const {b,i} of enabled){if(i===index)continue;const x=b.x+b.w/2-current.x-current.w/2,y=b.y+b.h/2-current.y-current.h/2;
+ const forward=(horizontal?x:y)*direction;if(forward<1)continue;const cross=Math.abs(horizontal?y:x);if(cross>forward*.65)continue;const rank=forward+cross*3;
+ if(rank<score){best=i;score=rank;}}
+ return best;
 }

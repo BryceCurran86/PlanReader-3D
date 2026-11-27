@@ -1,4 +1,4 @@
-import {ITEM_CATALOGUE,getCatalogueItem,catalogueGroupLabel} from "./itemCatalogue.ts";
+import {ITEM_CATALOGUE,getCatalogueItem,catalogueGroupLabel,CATALOGUE_GROUPS} from "./itemCatalogue.ts";
 import type {CatalogueGroup,CatalogueItem,ItemTarget} from "./itemCatalogue.ts";
 import type {ItemHit,PlacedItem,Vector} from "./itemPlacement.ts";
 export type FinishContext={hit:ItemHit;entry?:PlacedItem;worldPoint?:Vector};
@@ -12,7 +12,7 @@ export function contextGroups(context:FinishContext):CatalogueGroup[]{
  const old=context.entry&&getCatalogueItem(context.entry.itemId);
  if(old?.visual.kind==="fixture")return [old.group];
  const t=context.hit.target;
- const groups=priority.filter(g=>finishCandidates.some(i=>i.group===g&&i.targets.includes(t)));
+ const groups=[...new Set([...priority,...CATALOGUE_GROUPS.map(([g])=>g)])].filter(g=>finishCandidates.some(i=>i.group===g&&i.targets.includes(t)));
  if(t==="opening")return groups.filter(g=>context.hit.opening?.door?["doors","entry","sliding-doors"].includes(g):context.hit.opening?.window?["windows","window-coverings"].includes(g):false);
  return groups;
 }
@@ -35,3 +35,50 @@ export function contextTitle(c:FinishContext){
 }
 export function finishGroupLabel(group:CatalogueGroup){return group==="electrical"?"Power points / switches":group==="facades"?"External finishes":catalogueGroupLabel(group);}
 export function preferredFinishGroup(target:ItemTarget){return target==="wall"?"paint":target==="floor"?"floors":target==="opening"?"doors":target==="ceiling"?"paint":null;}
+
+/** Do not keep editing a removed or rehosted fixture from an old grip selection. */
+export function refreshFinishContext(context:FinishContext,items:readonly PlacedItem[]):FinishContext|null{
+ const old=context.entry&&getCatalogueItem(context.entry.itemId);
+ if(old?.visual.kind!=="fixture")return context;
+ const live=items.find(p=>p.id===context.entry!.id);
+ const next=live&&getCatalogueItem(live.itemId);
+ if(!live||!next||!sameFixtureFamily(old,next)||live.hostId!==context.hit.hostId||live.target!==context.hit.target)return null;
+ return live===context.entry?context:{...context,hit:live,entry:live};
+}
+/** Read the actual committed draft, not the palette's original selection snapshot. */
+export function activeContextFinish(context:FinishContext,group:CatalogueGroup|null,items:readonly PlacedItem[]):string|undefined{
+ if(!group)return;
+ const refreshed=refreshFinishContext(context,items);
+ if(!refreshed)return;
+ const selected=refreshed.entry&&getCatalogueItem(refreshed.entry.itemId);
+ if(selected?.visual.kind==="fixture")return selected.group===group?selected.id:undefined;
+ const hit=refreshed.hit;
+ const sideSensitive=hit.target==="wall"||hit.target==="opening";
+ return [...items].reverse().find(p=>{
+  const i=getCatalogueItem(p.itemId);
+  if(p.hostId!==hit.hostId||p.target!==hit.target||i?.group!==group)return false;
+  if(i.visual.kind==="fixture"||i.visual.kind==="design-assembly")return false;
+  // Opening styles covering both sides share one slot; coverings retain side.
+  const shared=hit.target==="opening"&&(i.visual.kind==="entry"||i.visual.kind==="opening-style"&&i.visual.type!=="covering");
+  return !sideSensitive||shared||p.side===hit.side;
+ })?.itemId;
+}
+
+/** Stable target identity excludes the moving hit position. Face selection is
+ * separate, and a mounted object wins over its supporting wall/floor. */
+export function contextTargetKey(context:FinishContext|null):string|null{
+ if(!context)return null;
+ const {hit,entry}=context;
+ return entry?JSON.stringify(["item",entry.id]):JSON.stringify(["host",hit.hostId,hit.target,hit.target==="wall"||hit.target==="opening"?hit.side:1]);
+}
+export type LocalContextTarget={kind:"wall"|"ceiling"|"opening";id:string;openingId?:string};
+export function localContextTarget(context:FinishContext):LocalContextTarget|null{
+ const {hostId,target}=context.hit;
+ if(typeof hostId!=="string")return null;
+ if(target==="wall"&&hostId.startsWith("draft-wall:"))return {kind:"wall",id:hostId.slice(11)};
+ if(target==="ceiling"&&hostId.startsWith("draft-ceiling:"))return {kind:"ceiling",id:hostId.slice(14)};
+ if(target==="opening"&&hostId.startsWith("opening:"))try{
+  const ids:unknown=JSON.parse(hostId.slice(8));if(Array.isArray(ids)&&ids.length===2&&ids.every(id=>typeof id==="string"))return {kind:"opening",id:ids[0],openingId:ids[1]};
+ }catch{/* malformed host */}
+ return null;
+}

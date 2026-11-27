@@ -1,0 +1,50 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {ITEM_CATALOGUE} from "../src/itemCatalogue.ts";
+import {emptyItemDraft,placeItem,editLocalFloorFixture,undoItem,redoItem,localFloorHostId,worktopId,currentItemPlacements} from "../src/itemPlacement.ts";
+import {starterManifest,starterBuild} from "../src/starterHouse.ts";
+import {scopeKey} from "../src/reviewDraft.ts";
+import {buildMenuLayout,EMPTY_ITEM_BROWSER} from "../src/catalogueMenu.ts";
+const scene=starterManifest(),build=starterBuild(scene),key=scopeKey(scene);
+const fixture=ITEM_CATALOGUE.find(i=>i.visual.kind==="fixture"&&i.visual.shape==="vanity"&&i.visual.widthM<=.9);
+const hit={hostId:localFloorHostId("ground"),target:"floor",point:[2,.002,2],normal:[0,1,0],side:1};
+const initial=()=>placeItem(emptyItemDraft(key),key,"cab",fixture.id,hit,0);
+test("local floor fitting editing preserves identity, attached worktop children and undo/redo",()=>{
+ let d=initial();
+ const tap=ITEM_CATALOGUE.find(i=>i.group==="tapware"&&i.targets.includes("worktop"));
+ d=placeItem(d,key,"tap",tap.id,{hostId:worktopId("cab"),target:"worktop",point:[0,.02,0],normal:[0,1,0],side:1},0);
+ const moved=editLocalFloorFixture(d,key,"cab","right",build.walls).draft;
+ assert.notEqual(moved,d);assert.equal(moved.items[0].point[0],2.1);assert.equal(moved.items[1],d.items[1]);
+ const turned=editLocalFloorFixture(moved,key,"cab","rotate",build.walls).draft;
+ assert.equal(turned.items[0].turn,1);assert.equal(currentItemPlacements(turned.items,scene,build.walls,false,build.ceilings).length,2);
+ assert.equal(undoItem(turned).items,moved.items);assert.equal(redoItem(undoItem(turned)).items,turned.items);
+ assert.equal(editLocalFloorFixture(turned,key,"cab","duplicate",build.walls,"copy").draft,turned);
+});
+test("duplicates are independent and invalid boundary, collision and source edits abstain",()=>{
+ const d=initial();const copied=editLocalFloorFixture(d,key,"cab","duplicate",build.walls,"copy").draft;
+ assert.equal(copied.items.length,2);assert.equal(copied.items[1].itemId,fixture.id);
+ assert.equal(editLocalFloorFixture(copied,key,"cab","right",build.walls).draft===copied,false);
+ const near={...d,items:[{...d.items[0],point:[.01,.002,2]}]};
+ assert.equal(editLocalFloorFixture(near,key,"cab","left",build.walls).draft,near);
+ const wallNear={...d,items:[{...d.items[0],point:[6,.002,2]}]};
+ assert.equal(editLocalFloorFixture(wallNear,key,"cab","rotate",build.walls).draft,wallNear);
+ const bad={...d,items:[{...d.items[0],hostId:"floor:source"}]};
+ assert.equal(editLocalFloorFixture(bad,key,"cab","rotate",build.walls).draft,bad);
+ assert.equal(editLocalFloorFixture(d,"other","cab","rotate",build.walls).draft,d);
+ assert.equal(editLocalFloorFixture(d,key,"cab","rotate",[]).draft,d);
+});
+test("immersive fitting palette exposes direct edits without replacing finish controls",()=>{
+ const entry=initial().items[0];const layout=buildMenuLayout(build,"ground",EMPTY_ITEM_BROWSER,undefined,false,0,"","finished",false,undefined,undefined,{finishContext:{entry,hit:entry},finishGroup:fixture.group});
+ const edits=layout.buttons.filter(b=>b.action.area==="items"&&b.action.action.kind==="edit-fixture");
+ assert.equal(edits.length,6);assert.ok(edits.every(b=>b.action.action.id==="cab"&&b.y+b.h<=layout.height));
+ assert.ok(layout.buttons.some(b=>b.action.area==="finish"&&b.action.action==="apply"));
+});
+
+test("trigger drag moves the selected fitting to a snapped destination, rejects stale grabs",()=>{
+ const d=initial(),entry=d.items[0];
+ const moved=editLocalFloorFixture(d,key,"cab","move-to",build.walls,undefined,{from:entry.point,to:[3,2.5]}).draft;
+ assert.notEqual(moved,d);assert.deepEqual(moved.items[0].point,[3,.002,2.5]);assert.equal(moved.items[0].id,"cab");
+ assert.equal(editLocalFloorFixture(moved,key,"cab","move-to",build.walls,undefined,{from:entry.point,to:[4,2.5]}).draft,moved);
+ assert.equal(editLocalFloorFixture(d,key,"cab","move-to",build.walls,undefined,{from:entry.point,to:[-1,2]}).draft,d);
+ assert.equal(editLocalFloorFixture(d,key,"cab","move-to",build.walls,undefined,{from:entry.point,to:[NaN,2]}).draft,d);
+});

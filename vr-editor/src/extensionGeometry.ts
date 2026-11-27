@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import {createWindowTreatment} from "./windowTreatmentGeometry.ts";
 import type { DesignAssembly, OpeningStyle } from "./itemCatalogue.ts";
 
 export function createOpeningStyle(spec: OpeningStyle, width: number, height: number, finishColor?: number) {
@@ -15,31 +16,8 @@ export function createOpeningStyle(spec: OpeningStyle, width: number, height: nu
   }
   if (spec.type === "covering") {
     glass.dispose();
-    const depth = 0.10;
-    const w = width + 0.14, h = height + 0.12;
-    box(w + 0.05, 0.025, 0.035, 0, h + 0.01, depth);
-    if (spec.style === "curtain" || spec.style === "sheer") {
-      material.transparent = spec.style === "sheer";
-      material.opacity = spec.style === "sheer" ? 0.49 : 1;
-      material.depthWrite = !material.transparent;
-      for (let index = 0; index < 22; index++) {
-        const mesh = box(w / 22 * 1.22, h, 0.022, -w / 2 + (index + 0.5) * w / 22,
-          h / 2, depth + 0.02 * Math.cos(index * Math.PI / 2));
-        mesh.rotation.y = 0.24 * Math.sin(index * Math.PI / 2);
-      }
-    } else if (spec.style === "vertical") {
-      for (let index = 0; index < 14; index++)
-        box(w / 14 * 0.8, h, 0.01, -w / 2 + (index + 0.5) * w / 14, h / 2, depth);
-    } else if (spec.style === "roller") {
-      box(w, h * 0.84, 0.014, 0, h * 0.58, depth);
-    } else {
-      const slats = spec.style === "roman" ? 6 : spec.style === "shutter" ? 10 : 18;
-      for (let index = 0; index < slats; index++) {
-        const mesh = box(w, (h / slats) * 0.83, 0.018, 0, (index + 0.5) * h / slats, depth);
-        mesh.rotation.x = spec.style === "venetian" ? -0.42 : 0;
-      }
-    }
-    return group;
+    material.dispose();
+    return createWindowTreatment(spec,width,height);
   }
   box(width, bar, 0.062, 0, bar / 2, 0);
   box(width, bar, 0.062, 0, height - bar / 2, 0);

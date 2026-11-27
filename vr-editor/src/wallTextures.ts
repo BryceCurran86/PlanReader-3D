@@ -17,14 +17,17 @@ export function patternPixels(pattern:Pattern,size=128){
  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
   const u=x/size,v=y/size,row=Math.floor(v*2);
   const noise=((Math.imul(x+1,73856093)^Math.imul(y+1,19349663))>>>0)%19;
+  const cloud=Math.sin(u*Math.PI*6+Math.sin(v*Math.PI*4))*Math.cos(v*Math.PI*6);
   let shade=230+noise;
   if(pattern==="brick"||pattern==="block"){
    const shifted=(u+(row%2)*.25)%1;
    const mortar=v%0.5<.055||shifted%0.5<.018;
-   shade=mortar?160:215+noise+(Math.floor(shifted*2)===row?8:0);
+   const localX=shifted%0.5,localY=v%0.5;
+   const edge=Math.min(localX,.5-localX,localY,.5-localY);
+   shade=mortar?171+noise*.4:218+noise*.65+cloud*6+(Math.floor(shifted*2)===row?8:-4)-Math.max(0,.025-edge)*500;
   }else if(pattern==="cladding"){
-   shade=v<.025?120:v<.08?185:225+noise-Math.round(v*20);
-  }else shade=220+noise;
+   shade=v<.018?151:v<.045?191:232+noise*.35+cloud*3-Math.round(v*12);
+  }else shade=222+noise*.6+cloud*8;
   const i=(y*size+x)*4;
   pixels[i]=pixels[i+1]=pixels[i+2]=shade;pixels[i+3]=255;
  }
@@ -39,11 +42,11 @@ export function createWallTextureLibrary(){
    const pattern=exteriorPattern(profile);if(!pattern)return null;
    let texture=cache.get(pattern);
    if(!texture){
-    texture=new THREE.DataTexture(patternPixels(pattern),128,128,THREE.RGBAFormat);
+    texture=new THREE.DataTexture(patternPixels(pattern,256),256,256,THREE.RGBAFormat);
     texture.colorSpace=THREE.SRGBColorSpace;
     texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
-    texture.magFilter=THREE.NearestFilter;
-    texture.minFilter=THREE.NearestMipmapLinearFilter;
+    texture.magFilter=THREE.LinearFilter;
+    texture.minFilter=THREE.LinearMipmapLinearFilter;texture.anisotropy=4;
     texture.generateMipmaps=true;texture.needsUpdate=true;cache.set(pattern,texture);
    }
    return {texture,repeat:patternRepeat(pattern)};

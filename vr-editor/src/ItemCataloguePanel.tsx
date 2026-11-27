@@ -3,8 +3,8 @@ import {
   CATALOGUE_GROUPS, catalogueGroupLabel, getCatalogueItem, itemCanRotate, searchCatalogue,
 } from "./itemCatalogue";
 import type { CatalogueGroup, CatalogueItem } from "./itemCatalogue";
-import { itemGuide, itemSchedule, itemScheduleCsv } from "./itemPlacement";
-import type { PlacedItem } from "./itemPlacement";
+import { itemGuide, itemSchedule, itemScheduleCsv,canEditFloorFixture } from "./itemPlacement";
+import type { PlacedItem,FixtureEdit } from "./itemPlacement";
 import { CATALOGUE_DRAG_TYPE } from "./constructionStages";
 
 const PAGE_SIZE = 16;
@@ -18,10 +18,11 @@ type Props = {
   onRotate: () => void;
   onUndo: () => void;
   onRemove: (id: string) => void;
+  onEdit?: (id:string,edit:FixtureEdit)=>void;
 };
 
 export function ItemCataloguePanel({
-  active, items, canUndo, turn, onChoose, onCancel, onRotate, onUndo, onRemove,
+  active, items, canUndo, turn, onChoose, onCancel, onRotate, onUndo, onRemove,onEdit,
 }: Props) {
   const [group, setGroup] = useState<CatalogueGroup | "">("");
   const [query, setQuery] = useState("");
@@ -103,6 +104,7 @@ export function ItemCataloguePanel({
           <summary>Individual placements</summary>
           <ul>{items.map((placement, index) => <li key={placement.id}>
             <span>{getCatalogueItem(placement.itemId)?.label} · {placement.target}</span>
+            {onEdit&&canEditFloorFixture(placement)&&<div className="catalogue-actions" aria-label={"Edit fitting "+(index+1)}>{([["Rotate 90°","rotate"],["X −100 mm","left"],["X +100 mm","right"],["Z −100 mm","forward"],["Z +100 mm","back"],["Duplicate","duplicate"]] as [string,FixtureEdit][]).map(([label,edit])=><button key={edit} type="button" onClick={()=>onEdit(placement.id,edit)}>{label}</button>)}</div>}
             <button type="button" onClick={() => onRemove(placement.id)}
               aria-label={"Remove placement " + (index + 1)}>Remove</button>
           </li>)}</ul>

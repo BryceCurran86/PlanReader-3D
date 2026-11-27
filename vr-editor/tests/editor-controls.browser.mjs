@@ -5,7 +5,7 @@ import { resolve, sep } from "node:path";
 import { chromium } from "playwright";
 
 const dist = resolve("dist");
-const mime = { html: "text/html", js: "text/javascript", css: "text/css", json: "application/json" };
+const mime = { html: "text/html", js: "text/javascript", css: "text/css", json: "application/json", jpg: "image/jpeg", hdr: "application/octet-stream" };
 const server = createServer(async (request, response) => {
   try {
     const path = new URL(request.url, "http://localhost").pathname;
@@ -28,12 +28,25 @@ try {
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(12000);
-  const errors = [];
+  const errors = [],assetErrors=[],externalRequests=[];
   page.on("pageerror", error => errors.push(error.message));
+  page.on("console", message=>{if(message.type()==="error"&&/Local architectural HDR unavailable|Missing local photographic asset|Local photographic map unavailable/.test(message.text()))assetErrors.push(message.text());});
+  page.on("request", request=>{if(/^https?:/.test(request.url())&&!request.url().startsWith("http://127.0.0.1:"))externalRequests.push(request.url());});
   await page.goto("http://127.0.0.1:" + server.address().port);
   const canvas = page.locator(".viewport canvas");
   await page.locator(".header-state").getByText("Editable starter house", {exact:true}).waitFor();
   await canvas.waitFor();
+  await page.waitForFunction(()=>document.querySelector(".viewport canvas")?.dataset.architecturalEnvironment==="loaded",{},{timeout:30000});
+  const photoFiles=await page.evaluate(async()=>{
+    const manifest=await (await fetch("/architectural-assets/manifest.json")).json();
+    const files=Object.entries(manifest.files);const decoded=[];
+    for(const [name,info] of files){if(name.endsWith(".jpg")){const image=new Image();image.src="/architectural-assets/"+name;await image.decode();decoded.push({name,width:image.naturalWidth,height:image.naturalHeight});}}
+    return {count:files.length,decoded};
+  });
+  assert.equal(photoFiles.count,7);assert.equal(photoFiles.decoded.length,6);
+  // Verify the real renderer's material loader consumed the photos, not merely that URLs decode.
+  await page.waitForFunction(()=>["wood-colour","wood-normal","wood-rough","plaster-normal","plaster-rough","grass-colour"].every(name=>document.documentElement.getAttribute("data-photo-"+name)==="loaded"),undefined,{timeout:30000});
+  assert.ok(photoFiles.decoded.every(f=>f.width>=512&&f.height>=512),"Photographic maps must decode at useful resolution");
   await page.locator(".build-tools").getByText("Draft walls (7)",{exact:true}).waitFor();
   const selection=page.locator("#selected-draft-object");
   assert.equal(await selection.locator("option").count(),12,"Seven editable walls and four editable ceilings");
@@ -45,7 +58,8 @@ try {
   assert.equal(await page.getByLabel("Selected ceiling height (mm)",{exact:true}).inputValue(),"2600","Ceiling height must persist when reselected");
   await canvas.evaluate(element=>{window.starterCanvas=element;});
   await page.getByRole("button", { name: "Open example", exact: true }).click();
-  await page.locator(".header-state").getByText("Example plan",{exact:true}).waitFor();
+  try{await page.locator(".header-state").getByText("Example plan",{exact:true}).waitFor();}
+  catch(error){console.error("Example transition diagnostics",JSON.stringify({errors,assetErrors,header:await page.locator(".header-state").textContent(),alerts:await page.getByRole("alert").allTextContents()}));throw error;}
   await page.waitForFunction(()=>!window.starterCanvas.isConnected);
   await canvas.waitFor();
   const layoutClear = () => page.evaluate(() => {
@@ -160,6 +174,8 @@ try {
   await plan.waitFor({state:"hidden"});
   await canvas.waitFor();
   assert.deepEqual(errors, [], "Browser runtime exceptions");
+  assert.deepEqual(assetErrors, [], "Photographic assets must load without decoder errors");
+  assert.deepEqual(externalRequests, [], "Runtime must not contact an external asset provider");
   console.log("Browser checks passed: plan opening, tool switching, drawing, undo/redo, filtering, footprint resize, construction stage/board switching, architectural plan and narrow layout.");
 } finally {
   await browser?.close();

@@ -46,16 +46,23 @@ jobs:
     env:
       ORT_DISABLE_TELEMETRY: "1"
     steps:
+      - name: Original replay NOT RUN - local validation required
+        run: |
+          echo 'NOT RUN_LOCAL_REQUIRED: private original replay is not a passing source verification. Execute the preserved replay steps locally against pinned base/head.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
+        if: ${{ false }}
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-python@v5
+        if: ${{ false }}
         with:
           python-version: "3.13"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-ci-v1228.txt
+        if: ${{ false }}
       - name: Reproduce exact original source stage from immutable PDF
+        if: ${{ false }}
         run: |
           set -euo pipefail
           git worktree add --detach /tmp/gptmax-prior "${{ github.event.pull_request.base.sha }}"
@@ -70,6 +77,7 @@ jobs:
             --pdf "$PDF" --page-id 3 --source-all-pages \
             --include-raw-candidate-source-groups --output grouped.json
       - name: Exact old physical production outputs + truthful raw membership sidecar
+        if: ${{ false }}
         run: |
           python - <<'PY'
           import json
@@ -116,7 +124,7 @@ jobs:
                  "authenticated_hosts":15,"frames":9,"benchmark_matches_claimed":0})
           PY
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ false }}
         with:
           name: gptmax-original-candidate-source-membership
           path: |

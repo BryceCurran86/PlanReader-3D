@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
 import {ITEM_CATALOGUE} from "../src/itemCatalogue.ts";
-import {contextGroups,contextChoices,sameFixtureFamily} from "../src/contextFinishes.ts";
+import {contextGroups,contextChoices,sameFixtureFamily,refreshFinishContext,activeContextFinish} from "../src/contextFinishes.ts";
 import {emptyItemDraft,placeItem,replaceItemFinish,undoItem,currentItemPlacements,localFloorHostId} from "../src/itemPlacement.ts";
 import {buildMenuLayout,EMPTY_ITEM_BROWSER} from "../src/catalogueMenu.ts";
 import {EMPTY_BUILD,STARTING_SIZES,updateBuild} from "../src/buildPlacement.ts";
@@ -62,7 +62,30 @@ test("outdoor scene is lightweight, switchable and separate from design",()=>{
 });
 test("new quick home uses large rectangular buttons and keeps controls discoverable",()=>{
  const menu=buildMenuLayout(EMPTY_BUILD,"ground",EMPTY_ITEM_BROWSER,undefined,false,0,"","finished",false,undefined,undefined,options);
- assert.ok(!menu.radial);assert.ok(menu.buttons.length<=10);
+ assert.ok(!menu.radial);assert.ok(menu.buttons.length<=12);
+ assert.ok(menu.buttons.some(b=>b.label==="Resize footprint"));
+ assert.ok(menu.buttons.some(b=>b.action.area==="slab"));
  assert.ok(menu.buttons.every(b=>b.h>=65));
  assert.ok(menu.buttons.some(b=>b.label.includes("Grass & sky")));
+});
+
+test("context palette follows committed replacement and refuses a removed fixture",()=>{
+ const old=ITEM_CATALOGUE.find(i=>i.group==="tapware"&&i.visual.kind==="fixture");
+ const variant=ITEM_CATALOGUE.find(i=>i.id!==old.id&&sameFixtureFamily(old,i));
+ const entry={...hit,target:old.targets[0],id:"selected",itemId:old.id,turn:0};
+ const ctx={hit:entry,entry},live={...entry,itemId:variant.id};
+ assert.equal(activeContextFinish(ctx,"tapware",[live]),variant.id);
+ assert.equal(refreshFinishContext(ctx,[live]).entry,live);
+ assert.equal(refreshFinishContext(ctx,[]),null);
+ assert.equal(refreshFinishContext(ctx,[{...live,hostId:"other"}]),null);
+ const menu=buildMenuLayout(EMPTY_BUILD,"ground",EMPTY_ITEM_BROWSER,undefined,false,0,"","finished",false,undefined,undefined,{...options,finishContext:ctx,finishGroup:"tapware",activeFinishId:variant.id});
+ assert.equal(menu.buttons.find(b=>b.action.itemId===variant.id)?.active,true);
+ assert.equal(menu.buttons.find(b=>b.action.itemId===old.id)?.active,false);
+});
+test("surface palette highlights the current same-side finish and ignores opposite face",()=>{
+ const [a,b]=ITEM_CATALOGUE.filter(i=>i.group==="paint"&&i.targets.includes("wall"));
+ const first={...hit,id:"a",itemId:a.id,turn:0};
+ const other={...hit,id:"b",itemId:b.id,turn:0,side:-1};
+ assert.equal(activeContextFinish({hit},"paint",[first,other]),a.id);
+ assert.equal(activeContextFinish({hit},"paint",[other]),undefined);
 });

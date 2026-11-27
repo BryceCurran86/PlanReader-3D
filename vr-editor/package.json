@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "prebuild": "node scripts/prepare-architectural-assets.mjs",
+    "assets:prepare": "node scripts/prepare-architectural-assets.mjs",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
