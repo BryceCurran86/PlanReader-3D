@@ -197,6 +197,66 @@ def test_walls_drawn_as_short_pieces_still_pair_but_short_ticks_do_not():
     assert _support(FACE, drawings)["edges"][1]["paired"] == 0
 
 
+def _jamb_stub_room(stub, *, drawn=True):
+    """The right wall has a doorway starting ``stub`` pt below the top inner corner; the closure spans the doorway."""
+    lines = [line for line in DOUBLE if line not in (((170, 44), (170, 170)), ((164, 50), (164, 164)))]
+    lines += [((170, 44), (170, 50 + stub)), ((170, 110), (170, 170)), ((164, 110), (164, 164))]
+    if drawn:
+        lines += [((164, 50), (164, 50 + stub))]
+    _data, drawings, face = _draw(lines)
+    closure = SimpleNamespace(horizontal=False, band=(164.0, 170.0), gap_interval=(50.0 + stub, 110.0))
+    return _support(face, drawings, [closure])
+
+
+def test_a_drawn_door_jamb_stub_no_longer_than_the_wall_is_thick_is_part_of_it():
+    result = _jamb_stub_room(5.0)
+    assert result["status"] is CANDIDATE and result["edges"][1]["wall_end"] == pytest.approx(5, abs=0.5)
+
+
+@pytest.mark.parametrize("stub,drawn", [(5.0, False), (7.5, True)], ids=["not-drawn", "longer-than-the-wall"])
+def test_a_stub_without_drawn_geometry_or_longer_than_the_wall_is_not(stub, drawn):
+    result = _jamb_stub_room(stub, drawn=drawn)
+    assert result["status"] is ABSTAINED and result["edges"][1]["wall_end"] == 0
+
+
+NOTCHED = ((50, 50), (100, 50), (100, 100), (106, 100), (106, 50), (164, 50), (164, 164), (50, 164))
+
+
+@pytest.mark.parametrize("cap", [True, False], ids=["capped", "open"])
+def test_the_drawn_end_of_a_partition_is_part_of_it_and_an_open_end_is_not(cap):
+    lines = [((44, 44), (170, 44)), ((170, 44), (170, 170)), ((170, 170), (44, 170)), ((44, 170), (44, 44)),
+             ((50, 50), (100, 50)), ((106, 50), (164, 50)), ((164, 50), (164, 164)), ((164, 164), (50, 164)),
+             ((50, 164), (50, 50)), ((100, 50), (100, 100)), ((106, 50), (106, 100))]
+    if cap:
+        lines.append(((100, 100), (106, 100)))
+    drawings = _draw_mixed([(lines, BLACK)])
+    result = _support(NOTCHED, drawings)
+    assert result["status"] is (CANDIDATE if cap else ABSTAINED)
+    assert (result["edges"][2]["wall_end"] > 5.5) is cap
+
+
+@pytest.mark.parametrize("cap", [[((100, 100), (102, 100)), ((104, 100), (106, 100))], [((100, 100), (103, 100))]],
+                         ids=["dashed", "half"])
+def test_a_partly_drawn_end_is_not_a_wall_end(cap):
+    partition = [((100, 50), (100, 100)), ((106, 50), (106, 100))]
+    drawings = _draw_mixed([([line for line in DOUBLE] + partition + cap, BLACK)])
+    assert _support(NOTCHED, drawings)["edges"][2]["wall_end"] == 0
+
+
+def test_a_break_in_the_middle_of_a_wall_is_reported_not_filled():
+    lines = [line for line in DOUBLE if line != ((170, 44), (170, 170))] + [((170, 44), (170, 100)), ((170, 104), (170, 170))]
+    drawings = _draw_mixed([(lines, BLACK)])
+    right = _support(FACE, drawings)["edges"][1]
+    assert right["wall_end"] == 0 and right["unsupported"] == pytest.approx(4, abs=0.5)
+
+
+def test_a_drawn_end_in_another_ink_is_not_the_same_wall():
+    lines = [line for line in DOUBLE]
+    partition = [((100, 50), (100, 100)), ((106, 50), (106, 100))]
+    drawings = _draw_mixed([(lines + partition, BLACK), ([((100, 100), (106, 100))], GREY)])
+    assert _support(NOTCHED, drawings)["edges"][2]["wall_end"] == 0
+
+
 def _door_lines():
     lines = [line for line in DOUBLE if line not in (((170, 44), (170, 170)), ((164, 50), (164, 164)))]
     return lines + [((170, 44), (170, 90)), ((170, 120), (170, 170)), ((164, 50), (164, 90)),

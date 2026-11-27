@@ -26,6 +26,10 @@ visible. The owner's existing green-ink exclusion for wall geometry stays; no ot
   builder filled bar lies behind it, or a doorway closure given by the caller covers it;
 - the first version reused the builder's whole-line pairing: it refused a whole long wall for one short line or equipment
   line nearby, so no stretch of the Freezer was supported;
+- wall ends (MAX 7226267598): a stretch at a corner of the outline, still unsupported, counts only when a line of the
+  same ink is drawn along ALL of it, it touches a supported wall or doorway closure, and it is no longer than that wall is
+  thick there. A break in the middle of an edge, a dashed or half-drawn end, or an end in other ink does not count;
+- the 8 pt pair limit stays; a wider 8 to 14 pt route would only ever be a separate candidate (not built);
 - CANDIDATE only when no edge has an unsupported stretch longer than 0.8 pt, else ABSTAINED. Never CORROBORATED.
 
 It promotes, closes, removes and publishes nothing, and no live path imports it.
@@ -42,7 +46,7 @@ It promotes, closes, removes and publishes nothing, and no live path imports it.
 
 ## Required checks before any use
 Synthetic: black and grey double-line rooms and filled-wall rooms supported; single crossing lines, white masks, green
-double lines, three-line hatch, a mixed-ink pair, short ticks, a band on the room side and a single open side are not; doorway closure; translation,
+double lines, three-line hatch, a mixed-ink pair, short ticks, a band on the room side, a single open side and undrawn, over-long, mid-wall or partly drawn ends are not; doorway closure; translation,
 quarter turn, drawing order and segment splitting; determinism and no mutation. Originals: counts only, before any wiring.
 
 ## Must not influence
