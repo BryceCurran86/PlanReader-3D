@@ -89,3 +89,21 @@ test("surface palette highlights the current same-side finish and ignores opposi
  assert.equal(activeContextFinish({hit},"paint",[first,other]),a.id);
  assert.equal(activeContextFinish({hit},"paint",[other]),undefined);
 });
+
+test("quick and selected toolboxes remain bounded and advanced controls remain reachable",()=>{
+ const scene=starterManifest(),build=starterBuild(scene);
+ const layout=(q)=>buildMenuLayout(build,"ground",EMPTY_ITEM_BROWSER,undefined,false,0,"","finished",false,undefined,undefined,q);
+ const home=layout(options),wall=layout({...options,selectedWall:build.walls[0],dragGain:3});
+ const advanced=layout({...options,simpleHome:false,compact:true,dragGain:3});
+ for(const menu of [home,wall,advanced]){
+  for(const b of menu.buttons){assert.ok(b.x>=0&&b.y>=0&&b.x+b.w<=menu.width&&b.y+b.h<=menu.height,b.label);}
+  for(let i=0;i<menu.buttons.length;i++)for(let j=i+1;j<menu.buttons.length;j++){
+   const a=menu.buttons[i],b=menu.buttons[j];
+   assert.ok(a.x+a.w<=b.x||b.x+b.w<=a.x||a.y+a.h<=b.y||b.y+b.h<=a.y,a.label+" overlaps "+b.label);
+  }
+ }
+ assert.ok(home.buttons.length<=12&&wall.buttons.length<=12);
+ for(const menu of [wall,advanced])assert.ok(menu.buttons.some(b=>b.label==="Drag speed: 3×"&&b.action.action==="drag-gain"));
+ assert.ok(advanced.buttons.some(b=>b.action.action==="home"));
+ assert.ok(advanced.buttons.some(b=>b.action.action==="recenter"));
+});
