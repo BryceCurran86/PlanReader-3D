@@ -114,7 +114,10 @@
   - **R09** (`A06` Q5446), **R12** (`A04/A25` Acacia): Opt-in OCR title fallback (`6bebb3f8d`, `39/39`), outlined-caption shadow (`26db7f1b4`), and `SourceSetAdmissionPacket` (`f230c1a83`) implemented & handed off to MAX integration (Section C).
   - **R17** (`faaf7b728`, `40c5dae4d`, `ce70ce693`): Native-first classifier + default-off fail-fast live wiring + end-to-end `_recover_admissible_viewport_lines` equivalence tests (`8/8`); original OCR parity test remains before any default promotion.
   - **R18** (`2204df463`, `94bbcb5b1`, `55155deb1`): Opening-recovery family gate, no-op reproof skip + staged GC release (`203/203`), pre-allocation display-list eviction + OOM fallback (`70/70`), measured `922.8s / 3,996 MB` vs `2,169.6s / 9,553 MB` profile.
-- **Genuinely Missing / Cross-Agent Blocked**:
-  - **R05** (`A12` generic RCP bubble-to-room correspondence), **R06** (`A13` FT2/FT3 cross-sheet finish + Claude real wall/ring identity), **R08** (`A17` floor finish continuity / Claude C22), **R10/R11** (`A18/A19` Q5446 BATH/LIVING + Claude physical faces).
+- **Genuinely Missing AG Code**: **0 remaining** (all AG source/text/scale/material/schedule/RCP/threshold/setback shadow modules are implemented and unit-tested).
+- **Cross-Agent Geometry / MAX Issuer Integration Pending (Shadow Verified)**:
+  - **R05** (`A12`): `pb_source_rcp_room_correspondence_shadow.py` (`3/3` tests, cross-block containment + stepped/raked/bulkhead + zero floor-copy ceilings); awaits MAX `#4594` cross-view wiring.
+  - **R06 & R08** (`A13`/`A17`): `pb_source_floor_finish_threshold_continuity_shadow.py` (`3/3` tests, cross-sheet finish association + 4 typed doorway/open-plan continuity modes, never invents boundaries); ready for Claude `C22` & real wall/ring identity handoff.
+  - **R10 & R11** (`A18`/`A19`): `pb_source_room_finish_setback_witness_shadow.py` (`2/2` tests, wet-area tile-height/setback + multi-wall cross-sheet room finish witnesses); ready for Claude physical face & MAX issuer handoff.
 - **Release-Only (Final Gate)**:
   - **R19–R20**: Combined `#4807 + #4810 + #4806` source/customer validation on latest `main` + final consolidated `#4807` release packet (owned with MAX/Claude; MAX owns residual hosted CI retirement & unchanged `frozen120`).
