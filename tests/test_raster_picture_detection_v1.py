@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import hashlib
 
+import cv2
 import fitz
 import numpy as np
 import pytest
 
 from pb_migration_contracts import EvidenceResolutionStatus
+from pb_raster_visible_segment_detector import detect_axis_aligned_raster_segments
 from pb_physical_wall_candidate_authority import PhysicalWallCandidateProducer, PhysicalWallCandidateSelector, _decision_scope_id
 from pb_source_visibility_authority import (
     RASTER_PICTURE_SEGMENT_IDENTITY_VERSION, RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION, SourceVisibilityProducer,
@@ -113,6 +115,45 @@ def test_default_off_is_exactly_the_historical_capture():
 def test_pure_pictures_and_pages_without_pictures_are_not_affected(kwargs):
     data = _page(**kwargs)
     assert sorted(_capture(data)[2]) == sorted(_capture(data, raster_picture_detection_shadow=True)[2])
+
+
+def _faint_and_dark_picture():
+    pixels = np.full((400, 400), 255, dtype=np.uint8)
+    pixels[10:50, 20:380] = 0  # a dark block in the picture
+    pixels[200:202, 40:360] = 150  # and a faint wall line: page y = 100
+    return fitz.Pixmap(fitz.csGRAY, 400, 400, pixels.tobytes(), False)
+
+
+def test_a_faint_picture_line_keeps_the_full_pages_threshold():
+    document = fitz.open()
+    page = document.new_page(width=200, height=200)
+    page.insert_image(fitz.Rect(0, 0, 200, 200), pixmap=_faint_and_dark_picture())
+    grey = (150 / 255,) * 3
+    page.draw_rect(fitz.Rect(10, 110, 190, 170), color=None, fill=grey)  # grey drawn work elsewhere on the page
+    page.draw_line((10, 190), (190, 190), color=(0, 0, 0), width=1.0)
+    data = document.tobytes()
+    document.close()
+    _s, _p, off = _capture(data)
+    _s, _p, on = _capture(data, raster_picture_detection_shadow=True)
+    faint = lambda found: [g for g in _horizontal(found) if g[0] == 100]
+    assert faint(off) and faint(on) == faint(off)  # the faint line survives with the option
+    assert not any(y == 190 for y, _x0, _x1 in _horizontal(on))
+
+
+def test_the_detector_default_is_unchanged_and_the_reference_decides_the_threshold():
+    image = np.full((400, 400), 255, dtype=np.uint8)
+    image[10:50, 20:380] = 0
+    image[200:202, 40:360] = 150
+    reference = image.copy()
+    reference[220:340, 20:380] = 150
+    png = lambda a: cv2.imencode(".png", a)[1].tobytes()
+    plain = detect_axis_aligned_raster_segments(png(image), dpi=144)
+    with_reference = detect_axis_aligned_raster_segments(png(image), dpi=144, threshold_reference_png=png(reference))
+    level = lambda found: sorted({round(s.pixel_geometry[1]) for s in found if s.orientation == "horizontal"})
+    assert not any(195 <= y <= 206 for y in level(plain)) and any(195 <= y <= 206 for y in level(with_reference))
+    assert plain == detect_axis_aligned_raster_segments(png(image), dpi=144, threshold_reference_png=png(image))
+    with pytest.raises(ValueError):
+        detect_axis_aligned_raster_segments(png(image), dpi=144, threshold_reference_png=png(image[:200]))
 
 
 def test_the_option_must_be_a_boolean():

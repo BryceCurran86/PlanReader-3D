@@ -75,6 +75,18 @@ def _foreground_mask(gray: np.ndarray) -> np.ndarray | None:
     return candidates[0][1]
 
 
+def _reference_foreground_mask(gray: np.ndarray, reference: np.ndarray) -> np.ndarray | None:
+    """``gray`` classified with the threshold and polarity ``_foreground_mask`` chooses for ``reference``."""
+    chosen = _foreground_mask(reference)
+    if chosen is None or gray.shape != reference.shape:
+        return None
+    for mode in (cv2.THRESH_BINARY_INV, cv2.THRESH_BINARY):
+        threshold, mask = cv2.threshold(reference, 0, 255, mode + cv2.THRESH_OTSU)
+        if np.array_equal(mask, chosen):
+            return cv2.threshold(gray, threshold, 255, mode)[1]
+    return None
+
+
 def _component_segments(
     mask: np.ndarray,
     *,
@@ -229,8 +241,13 @@ def detect_axis_aligned_raster_segments(
     png_bytes: bytes,
     *,
     dpi: int = 144,
+    threshold_reference_png: bytes | None = None,
 ) -> tuple[RasterDetectedSegment, ...]:
-    """Return conservative rendered line observations in page-point space."""
+    """Return conservative rendered line observations in page-point space.
+
+    ``threshold_reference_png`` (same size) supplies the dark/light threshold instead of ``png_bytes``, so that pixels
+    shared with another render of the same page are classified identically in both.
+    """
 
     if not isinstance(png_bytes, (bytes, bytearray, memoryview)):
         raise TypeError("png_bytes must be bytes-like")
@@ -242,7 +259,12 @@ def detect_axis_aligned_raster_segments(
     if gray is None or gray.size == 0:
         return ()
 
-    foreground = _foreground_mask(gray)
+    reference = None
+    if threshold_reference_png is not None:
+        reference = cv2.imdecode(np.frombuffer(bytes(threshold_reference_png), dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        if reference is None or reference.shape != gray.shape:
+            raise ValueError("threshold reference must be a render of the same size")
+    foreground = _foreground_mask(gray) if reference is None else _reference_foreground_mask(gray, reference)
     if foreground is None:
         return ()
 

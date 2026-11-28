@@ -2930,9 +2930,22 @@ class SourceVisibilityProducer:
                 **({"images_only": True} if picture_only else {}),
             )
             image_sha256 = hashlib.sha256(png_bytes).hexdigest()
+            threshold_from = {}
+            if picture_only:
+                # Classify the picture's pixels with the full page's threshold: the same pixels read the same way.
+                full_png = self._producer.render_native_page_png(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=snapshot.snapshot_id,
+                    page_id=page_id,
+                    dpi=float(RASTER_RENDER_DPI),
+                )[0]
+                threshold_from = {"threshold_reference_png": full_png}
             segments = detect_axis_aligned_raster_segments(
                 png_bytes,
                 dpi=RASTER_RENDER_DPI,
+                **threshold_from,
             )
             # Once render + detection complete successfully, repeating the same
             # immutable revision/page cannot produce new source evidence.
