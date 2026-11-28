@@ -35,6 +35,16 @@ Hub report 7236464810. Local overlays were checked against the original plan she
 ## Must not influence implementation
 - The printed room areas, floor rows and any benchmark values. No area-plausibility promotion.
 
+## Finished-face edges (MAX 7236570478)
+Live, read-only (28 Nov): none of the Office ring's 11 edges sits on a published wall — 6 have only unpublished wall
+candidates, 4 none, 1 is the doorway closure; Cold Room and Freezer rings have all four edges on unpublished candidates
+only. `pb_ring_finish_face_edge_class_shadow.ring_finish_face_edge_classes` turns the existing ring-to-wall map into
+published / ambiguous / doorway / no candidate / unverified jog classes and counts holes as unverified obstacles; on the
+Office it reports the switchboard notch (edges 8–10) as one unverified jog, one obstacle, and ABSTAINS. So finished-face
+wall quantities stay withheld for these rooms until their walls publish, whatever the notch or hole turn out to be.
+
 ## Tests
 `tests/test_floor_grid_room_ring_guard_v1.py` (synthetic): a tile grid leaves the doorway-closed room whole, one tile
 cell is not wall supported, narrow dark-walled rooms close, ruled drafting cells give no rooms.
+`tests/test_ring_finish_face_edge_class_shadow.py` (16): published / ambiguous / bare / hole cases, a notch from any
+start point, a drawn nib, a split straight wall and other jog look-alikes, input checks.
