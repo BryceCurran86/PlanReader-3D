@@ -4060,8 +4060,16 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
     cross_view_area: Any,
     canonical_floors: Any,
     issued_records: Optional[Sequence[SourceCrossViewFloorCorrespondenceRecord]] = None,
+    registered_only: bool = False,
 ) -> tuple[SourceCrossViewFloorCorrespondenceRecord, ...]:
-    """Resolve source-authenticated physical correspondence or legacy reference."""
+    """Resolve producer-issued correspondence; optionally prohibit legacy fallback.
+
+    Registered-only mode is an acceptance migration switch, not an authority
+    producer. Missing or rejected receipts cannot become commercial quantities.
+    The compatibility default remains until original-source retention passes.
+    """
+    if type(registered_only) is not bool:
+        return ()
     if issued_records is not None:
         return resolve_registered_cross_sheet_floor_correspondences(
             source=source,
@@ -4103,6 +4111,8 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
             canonical_floors=canonical_floors,
             issued_records=tuple(registered),
         )
+    if registered_only:
+        return ()
     if not cross_view_area or not getattr(cross_view_area, "records", None):
         return ()
     if not canonical_floors or not getattr(canonical_floors, "floors", None):
