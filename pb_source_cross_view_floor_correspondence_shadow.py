@@ -211,7 +211,20 @@ def _shift_votes(src: Lines, dst: LineIndex, topn: int, limit: float = 3000.0) -
         destination_totals: dict[float, float] = {}
         for k, ivs in src[o].items():
             t_src = sum(hi - lo for lo, hi in ivs)
-            for k2 in dst.keys[o]:
+            # Restrict the scan to the sorted destination coordinates that
+            # could satisfy the existing displacement predicate. Expand the
+            # bounds by one representable value to cover rounding at the
+            # inclusive endpoints; the original subtraction remains decisive.
+            keys = dst.keys[o]
+            if math.isfinite(k) and math.isfinite(limit) and limit >= 0:
+                lower = math.nextafter(k - limit, -math.inf)
+                upper = math.nextafter(k + limit, math.inf)
+                start = bisect.bisect_left(keys, lower)
+                stop = bisect.bisect_right(keys, upper)
+                candidates = keys[start:stop]
+            else:
+                candidates = keys
+            for k2 in candidates:
                 d = k2 - k
                 if abs(d) > limit:
                     continue
