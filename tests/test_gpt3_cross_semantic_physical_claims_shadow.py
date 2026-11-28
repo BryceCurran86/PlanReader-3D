@@ -59,8 +59,12 @@ def _run(*entries):
     )
 
 
+def _independent(*entries):
+    return tuple(_run(entry) for entry in entries)
+
+
 def test_same_source_opening_alternative_door_window_semantics_is_review_only():
-    run = _run(
+    run = _independent(
         _pair("one", "opening_area", "door_area", ("physical-opening-a",), value=3.0),
         _pair("two", "opening_area", "window_area", ("physical-opening-a",), value=4.0),
     )
@@ -112,7 +116,7 @@ def test_distinct_finish_subsystems_on_one_exact_room_are_flagged_not_deleted():
 
 
 def test_partially_overlapping_physical_parent_sets_are_found_without_guessing():
-    run = _run(
+    run = _independent(
         _pair("part-a", "opening_area", "door_area", ("a", "shared")),
         _pair("part-b", "opening_area", "window_area", ("b", "shared")),
     )
@@ -124,7 +128,7 @@ def test_partially_overlapping_physical_parent_sets_are_found_without_guessing()
 
 
 def test_separate_document_source_envelopes_are_review_not_auto_identity():
-    run = _run(
+    run = _independent(
         _pair("old", "opening_area", "door_area", ("p-one",)),
         _pair("new", "opening_area", "window_area", ("p-one",),
               sha="b" * 64, document="doc-b", revision="rev-b"),
@@ -136,7 +140,7 @@ def test_separate_document_source_envelopes_are_review_not_auto_identity():
 
 
 def test_abstention_or_unfirm_row_does_not_create_a_false_firm_overlap():
-    run = _run(
+    run = _independent(
         _pair("firm", "opening_area", "door_area", ("p-one",)),
         _pair("abstained", "opening_area", "window_area", ("p-one",),
               abstained=True),
@@ -157,11 +161,11 @@ def test_diagnostic_is_deterministic_input_order_invariant_and_no_mutation():
         _pair("three", "opening_area", "door_area", ("p-two",)),
         _pair("one", "opening_area", "door_area", ("p-one",)),
     ]
-    first = _run(*entries)
-    before = deepcopy(first.to_dict())
+    first = _independent(*entries)
+    before = deepcopy([item.to_dict() for item in first])
     expected = audit_cross_semantic_physical_claims(first)
-    assert audit_cross_semantic_physical_claims(_run(*reversed(entries))) == expected
-    assert first.to_dict() == before
+    assert audit_cross_semantic_physical_claims(_independent(*reversed(entries))) == expected
+    assert [item.to_dict() for item in first] == before
     assert expected["review_group_count"] == 1
 
 
@@ -192,3 +196,14 @@ def test_original_signed_lot16_eight_rows_have_no_cross_semantic_claim():
     assert audit["source_run_fingerprint"] == run.fingerprint
     assert audit["review_group_count"] == 0
     assert audit["benchmark_score_granted"] is False
+
+
+def test_independent_diagnostic_conflict_cannot_be_combined_for_commercial_use():
+    from pb_source_closed_run_export import combine_source_closed_runs
+    receipts = _independent(
+        _pair("one", "opening_area", "door_area", ("p-one",)),
+        _pair("two", "opening_area", "window_area", ("p-one",)),
+    )
+    assert audit_cross_semantic_physical_claims(receipts)["review_group_count"] == 1
+    with pytest.raises(SourceClosedRunConflictError, match="conflicting signed opening identity"):
+        combine_source_closed_runs(receipts)

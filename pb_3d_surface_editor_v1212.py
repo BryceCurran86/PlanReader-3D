@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 import plotly.graph_objects as go
 
+from pb_surface_substrates import (
+    FALLBACK_SUBSTRATES as FALLBACK_SUBSTRATES,
+    infer_substrate as infer_substrate,
+    substrate_presets as substrate_presets,
+)
 from pb_takeoff_authority_v164 import (
     AUTHORITY_REVIEW_REQUIRED,
     AUTHORITY_FINGERPRINT_FIELD,
@@ -22,11 +26,6 @@ from pb_takeoff_authority_v164 import (
     AUTHORITY_SOURCE_FIELD,
     AUTHORITY_STATUS_FIELD,
 )
-
-try:
-    import pb_takeoff_studio_v1211 as studio_v1211
-except Exception:  # pragma: no cover
-    studio_v1211 = None
 
 SOURCE_PREFIX = "PB 3D Surface Editor v1.2.12"
 SETTING_KEY = "3d_surface_editor_v1212"
@@ -40,15 +39,6 @@ FACE_LABELS = {
     "bottom": "Underside",
 }
 
-FALLBACK_SUBSTRATES = [
-    {"code": "RBL", "name": "Rendered Block", "color": "#B9C0C4"},
-    {"code": "SOF", "name": "Soffits / Eaves", "color": "#D9C788"},
-    {"code": "EC5", "name": "Timber Look Cladding", "color": "#A77C52"},
-    {"code": "RS", "name": "Roof Sheet", "color": "#C45F74"},
-    {"code": "OTHER", "name": "Other / To Confirm", "color": "#80A6C9"},
-]
-
-
 def _num(value: Any, default: float = 0.0) -> float:
     try:
         result = float(value)
@@ -59,12 +49,6 @@ def _num(value: Any, default: float = 0.0) -> float:
 
 def _clamp(value: Any, low: float, high: float) -> float:
     return max(low, min(high, _num(value, low)))
-
-
-def substrate_presets() -> List[Dict[str, str]]:
-    if studio_v1211 is not None and getattr(studio_v1211, "SUBSTRATE_PRESETS", None):
-        return [dict(item) for item in studio_v1211.SUBSTRATE_PRESETS]
-    return [dict(item) for item in FALLBACK_SUBSTRATES]
 
 
 def substrate_name(code: str) -> str:
@@ -81,44 +65,6 @@ def substrate_color(code: str, fallback: str = "#C9BFA6") -> str:
         if item["code"] == key:
             return item.get("color") or fallback
     return fallback
-
-
-def _substrate_code(text: str) -> str:
-    rules = [
-        (("soffit", "eave"), "SOF"),
-        (("linea", "lineaboard"), "EC1"),
-        (("textureboard",), "EC2"),
-        (("easylap",), "EC3"),
-        (("render", "blockwork", "masonry"), "RBL"),
-        (("timber", "wood"), "EC5"),
-        (("screen",), "SCR"),
-        (("balustrade", "glass"), "BA1"),
-        (("sunhood", "sun hood"), "SHD"),
-        (("gutter", "capping"), "BC"),
-        (("roof", "sheet"), "RS"),
-        (("downpipe",), "DP"),
-        (("garage",), "GD"),
-    ]
-    for needles, code in rules:
-        if any(needle in text for needle in needles):
-            return code
-    return "OTHER"
-
-
-def infer_substrate(finish: Any) -> str:
-    text = str(finish or "").lower()
-    parts = [part.strip() for part in re.split(r"\b(?:and|or)\b", text) if part.strip()]
-    if len(parts) > 1:
-        codes = []
-        for part in parts:
-            code = _substrate_code(part)
-            if code != "OTHER" and code not in codes:
-                codes.append(code)
-        if len(codes) > 1:
-            return "OTHER"
-        if len(codes) == 1:
-            return codes[0]
-    return _substrate_code(text)
 
 
 def _quad(surface_id: str, mass: Dict[str, Any], face: str, points: Sequence[Tuple[float, float, float]], area_m2: float) -> Dict[str, Any]:

@@ -423,10 +423,16 @@ def source_native_trace_preview(
                                                       reason="no_traced_walls_on_this_page")
             else:
                 plan = plan_review(packet, recorder)
-                assisted = build_layered_wall_doorway_room_rings(
-                    wall_drawings, source_native_cs_jamb_closure=False, source_native_internal_swing_closure=False,
-                    **tracer_kwargs, barrier_view=plan,
-                )
+                # Annotation-only changes and unbound rejects do not change
+                # the barrier view. Reuse the exact automatic rings instead of
+                # extracting wall/opening geometry a second time.
+                assisted = result
+                if (plan.removed_strips or plan.removed_fills
+                        or plan.removed_closures or plan.extra_rects):
+                    assisted = build_layered_wall_doorway_room_rings(
+                        wall_drawings, source_native_cs_jamb_closure=False, source_native_internal_swing_closure=False,
+                        **tracer_kwargs, barrier_view=plan,
+                    )
                 review_block = build_review_block(
                     packet, plan, source_sha256=sha, page_index=page_index,
                     automatic_rings=result.rings, user_rings=assisted.rings,

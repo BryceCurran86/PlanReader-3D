@@ -32,6 +32,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import fitz  # PyMuPDF
 
+from pb_native_page_frame import (
+    NATIVE_PAGE_FRAME_UNRESOLVED,
+    NativePageFrameUnresolved,
+    native_page_frame,
+)
+
 
 @dataclass
 class ExtractedPrediction:
@@ -1302,6 +1308,17 @@ class GenericPlanReaderExtractor:
                     and _is_physical_floor_plan_page(i)})
         )
         if first_plan_pages:
+            # Native words and drawings share the unrotated page frame.
+            native_plan_bounds: dict[int, tuple[float, float, float, float]] = {}
+            for plan_page in first_plan_pages:
+                try:
+                    frame = native_page_frame(doc[plan_page])
+                except NativePageFrameUnresolved:
+                    continue
+                native_plan_bounds[plan_page] = (
+                    0.0, 0.0, frame.native_width, frame.native_height,
+                )
+
             try:
                 from pb_external_footprint_first_trace import (
                     trace_external_footprint_first,
@@ -1326,15 +1343,21 @@ class GenericPlanReaderExtractor:
                     )
 
                     for plan_page in first_plan_pages:
+                        native_bounds = native_plan_bounds.get(plan_page)
+                        if native_bounds is None:
+                            inside_face_stages.append({
+                                "status": "ABSTAINED",
+                                "reason": NATIVE_PAGE_FRAME_UNRESOLVED,
+                                "page_index": plan_page,
+                                "measurement_authorized": False,
+                                "commercial_publishable": False,
+                            })
+                            continue
                         page = doc[plan_page]
-                        rect = page.rect
                         inside_face_stages.append(
                             run_inside_face_footprint_runtime_stage(
                                 tuple(page.get_drawings()),
-                                page_bounds_pdf_pts=(
-                                    float(rect.x0), float(rect.y0),
-                                    float(rect.x1), float(rect.y1),
-                                ),
+                                page_bounds_pdf_pts=native_bounds,
                                 source_words=tuple(page.get_text("words")),
                                 page_index=plan_page,
                                 source_sha256=footprint_source_sha,
@@ -1387,16 +1410,23 @@ class GenericPlanReaderExtractor:
                 )
 
                 for plan_page in first_plan_pages:
+                    native_bounds = native_plan_bounds.get(plan_page)
+                    if native_bounds is None:
+                        door_legend_stages.append({
+                            "status": "ABSTAINED",
+                            "reason": NATIVE_PAGE_FRAME_UNRESOLVED,
+                            "page_index": plan_page,
+                            "physical_openings_authenticated": False,
+                            "measurement_authorized": False,
+                            "classification_is_not_physical_opening_authority": True,
+                        })
+                        continue
                     page = doc[plan_page]
-                    rect = page.rect
                     door_legend_stages.append(
                         run_door_legend_read_stage(
                             tuple(page.get_drawings()),
                             source_words=tuple(page.get_text("words")),
-                            page_bounds_pdf_pts=(
-                                float(rect.x0), float(rect.y0),
-                                float(rect.x1), float(rect.y1),
-                            ),
+                            page_bounds_pdf_pts=native_bounds,
                             page_index=plan_page,
                         )
                     )
@@ -1411,7 +1441,9 @@ class GenericPlanReaderExtractor:
                     "classification_is_not_physical_opening_authority": True,
                 }]
             self.door_legend_read_live = {
-                "status": "candidate" if door_legend_stages else "abstained",
+                "status": "candidate" if any(
+                    stage.get("status") != "ABSTAINED" for stage in door_legend_stages
+                ) else "abstained",
                 "pages": door_legend_stages,
                 "physical_openings_authenticated": False,
                 "measurement_authorized": False,

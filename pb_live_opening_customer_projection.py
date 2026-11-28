@@ -17,6 +17,7 @@ from pb_live_opening_count_source_closed_export import (
 )
 from pb_live_opening_source_closed_export import (
     build_live_opening_area_claim_source_traces,
+    seal_live_opening_area_claim_run,
 )
 from pb_live_physical_net_wall_integration import LivePhysicalNetWallClaim
 from pb_migration_contracts import QuantityEvidence
@@ -130,8 +131,11 @@ def project_live_opening_customer_rows(
     *,
     workspace_id: int,
     project_id: str,
+    source_reproved_append_only: bool = False,
 ) -> tuple[dict[str, Any], ...]:
     """Project all currently sealable opening quantities to AI-review rows."""
+    if type(source_reproved_append_only) is not bool:
+        raise ValueError("source-reproved customer projection must be explicitly boolean")
     if type(claim) is not LivePhysicalNetWallClaim:
         raise TypeError("claim must be LivePhysicalNetWallClaim")
     if type(workspace_id) is not int or workspace_id <= 0:
@@ -261,11 +265,24 @@ def project_live_opening_customer_rows(
             authorities_by_quantity_id=authorities,
         )
     )
-    sealed = seal_source_closed_run(
-        quantities,
-        project_id=project_id,
-        traces_by_quantity_id=traces,
-    )
+    if source_reproved_append_only:
+        # Only original-source-authenticated, explicitly permitted append-only
+        # recovery may combine independently sealed producer snapshots.
+        # The same claim and quantity IDs must reach customer verification.
+        if count_quantities:
+            raise ValueError("append-only opening area recovery cannot project stale counts")
+        sealed = seal_live_opening_area_claim_run(
+            claim, workspace_id=workspace_id, project_id=project_id,
+            source_reproved_append_only=True,
+        )
+        if {q.quantity_id for q in sealed.quantities} != set(ids) or len(sealed.quantities) != len(ids):
+            raise ValueError("source-reproved sealed quantity set differs from customer projection")
+    else:
+        sealed = seal_source_closed_run(
+            quantities,
+            project_id=project_id,
+            traces_by_quantity_id=traces,
+        )
     verify_sealed_customer_output(sealed, rows)
     return rows
 

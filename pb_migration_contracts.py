@@ -130,15 +130,44 @@ def _plain(value: Any) -> Any:
     return str(value)
 
 
+def _direct_json_eligible(value: Any) -> bool:
+    """Only exact finite JSON primitives, string-key dicts and lists/tuples.
+
+    Nonstandard mappings, keys, enums, dataclasses and subclasses retain the
+    original normalizer. This does not cache values or change the JSON encoder.
+    Like the existing contract serializer, callers must not mutate a payload
+    during serialization.
+    """
+    value_type = type(value)
+    if value is None or value_type is str or value_type is int or value_type is bool:
+        return True
+    if value_type is float:
+        return math.isfinite(value)
+    if value_type is dict:
+        for key, item in value.items():
+            if type(key) is not str or not _direct_json_eligible(item):
+                return False
+        return True
+    if value_type is list or value_type is tuple:
+        for item in value:
+            if not _direct_json_eligible(item):
+                return False
+        return True
+    return False
+
+
 def canonical_contract_json(value: Any) -> str:
     """Return a stable canonical JSON representation for hashing/artifacts."""
     return json.dumps(
-        _plain(value),
+        value if _direct_json_eligible(value) else _plain(value),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
     )
+
+
+_CANONICAL_ID_PREFIX = re.compile(r"[a-z0-9](?:[a-z0-9_]*[a-z0-9])?\\Z")
 
 
 def stable_contract_id(prefix: str, payload: Any, *, digest_chars: int = 20) -> str:
@@ -147,13 +176,20 @@ def stable_contract_id(prefix: str, payload: Any, *, digest_chars: int = 20) -> 
     ``prefix`` is semantic only (for example ``doc``, ``vp``, ``ev``, ``ent``
     or ``qty``); the digest is calculated solely from the canonical payload.
     """
-    clean_prefix = re.sub(r"[^a-z0-9_]+", "_", str(prefix or "").strip().lower()).strip("_")
+    # Most producer IDs already have a canonical ASCII prefix. Avoid regex
+    # substitution on that hot path; retain the original normalization for
+    # every other input, including Unicode and custom string subclasses.
+    if type(prefix) is str and prefix and prefix.isascii() and _CANONICAL_ID_PREFIX.fullmatch(prefix):
+        clean_prefix = prefix
+    else:
+        clean_prefix = re.sub(r"[^a-z0-9_]+", "_", str(prefix or "").strip().lower()).strip("_")
     if not clean_prefix:
         raise ValueError("prefix must contain at least one alphanumeric character")
-    if not 8 <= int(digest_chars) <= 64:
+    width = int(digest_chars)
+    if not 8 <= width <= 64:
         raise ValueError("digest_chars must be between 8 and 64")
     digest = hashlib.sha256(canonical_contract_json(payload).encode("utf-8")).hexdigest()
-    return f"{clean_prefix}_{digest[:int(digest_chars)]}"
+    return f"{clean_prefix}_{digest[:width]}"
 
 
 @dataclass(frozen=True)

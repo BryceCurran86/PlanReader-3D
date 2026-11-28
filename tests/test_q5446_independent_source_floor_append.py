@@ -26,7 +26,10 @@ def _independent_result(prior, project, source_sha, suffix, physical_id):
     q = replace(
         _quantity(suffix, "floor_finish_area"),
         input_entity_ids=(physical_id,),
+        semantic_key=f"floor_finish_area:{physical_id}:tile",
         metadata={
+            "finished_floor_face_source_id": physical_id,
+            "semantic_finish": "tile", "finish_code": "tile", "finish_system": "tile",
             "source_sha256": source_sha,
             "commercial_projection_allowed": True,
             "tiled_floor_finish_authorized": True,

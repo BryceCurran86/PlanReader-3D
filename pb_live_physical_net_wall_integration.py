@@ -30,6 +30,10 @@ from pb_live_canonical_room_composition import (
     LiveCanonicalRoomObject,
     compose_live_canonical_rooms,
 )
+from pb_live_floor_area_scale_provenance import (
+    LiveFloorScaleSourceReceipt,
+    source_owned_floor_scale_receipt,
+)
 from pb_live_ceiling_lining_integration import LiveCanonicalCeilingSurfaceObject
 from pb_live_canonical_wall_composition import compose_live_canonical_walls
 from pb_live_external_physical_net_wall_publication import (
@@ -142,6 +146,10 @@ class LivePhysicalNetWallClaim:
     # unsupported/ABSTAINED siblings). Shadow witness for downstream preflight;
     # it is NOT a published opening, measured quantity, or count.
     opening_area_replay_source_inventory: tuple[LiveCanonicalOpeningObject, ...] = ()
+    # Non-serializable, in-process original-source authority proof. Only the
+    # recovery producer can issue it; caller-created/serialized claims have
+    # None and cannot acquire mixed-snapshot sealing permission.
+    opening_area_replay_source_proof: object = None
     opening_count_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     opening_dimension_quantity_evidence: tuple[QuantityEvidence, ...] = ()
     room_area_quantity_evidence: tuple[QuantityEvidence, ...] = ()
@@ -164,6 +172,7 @@ class LivePhysicalNetWallClaim:
     correspondence_resolution_status: str = "correspondence_not_attempted"
     surface_pipeline_diagnostics: Mapping[str, Any] = MappingProxyType({})
     schema_version: str = LIVE_PHYSICAL_NET_WALL_INTEGRATION_SCHEMA_VERSION
+    source_owned_floor_scale_receipts: tuple[LiveFloorScaleSourceReceipt, ...] = ()
 
 
 def _selected_page_indices(
@@ -172,18 +181,17 @@ def _selected_page_indices(
 ) -> tuple[int, ...]:
     if pages is None:
         return tuple(range(page_count))
-    selected = tuple(
-        sorted(
-            {
-                int(page)
-                for page in pages
-                if isinstance(page, int) and 0 <= int(page) < page_count
-            }
-        )
-    )
-    if not selected:
-        raise ValueError("pages must select at least one valid PDF page")
-    return selected
+    # Preserve the complete original requested page universe: never silently
+    # drop invalid/foreign sheets before floor, ceiling or opening issuance.
+    # One-shot iterators and bool-as-int pages are not typed source selectors.
+    if type(pages) not in (tuple, list) or not pages:
+        raise ValueError("pages must be a nonempty native PDF page sequence")
+    if any(
+        type(page) is not int or page < 0 or page >= page_count
+        for page in pages
+    ):
+        raise ValueError("pages must contain only in-range native PDF indices")
+    return tuple(sorted(set(pages)))
 
 
 def _unique_authenticated_containing_floor_plan_viewport(
@@ -445,6 +453,7 @@ def _collect_live_physical_net_wall_claim(
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
     viewport_wall_identity_links: bool = False,
+    cross_sheet_registered_only: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -462,6 +471,8 @@ def _collect_live_physical_net_wall_claim(
     The proof needs the optional fontTools dependency and abstains without it.
     """
 
+    if type(cross_sheet_registered_only) is not bool:
+        raise ValueError("cross-sheet registered only must be an explicit boolean")
     if type(single_width_uniform_page_door_height_shadow) is not bool:
         raise ValueError("single width uniform page door height shadow must be an explicit boolean")
     if type(include_surface_finishes) is not bool:
@@ -688,6 +699,7 @@ def _collect_live_physical_net_wall_claim(
     finished_face_statements: Optional[tuple[Any, ...]] = None
     finished_face_statement_diagnostics: tuple[Any, ...] = ()
     physical_scale_failures_by_room: dict[str, tuple[str, ...]] = {}
+    source_owned_floor_scale_receipts: list[LiveFloorScaleSourceReceipt] = []
     same_view_area = None
     cross_view_area = None
     if canonical_rooms.rooms:
@@ -887,6 +899,7 @@ def _collect_live_physical_net_wall_claim(
             )
 
             scale_calibration = None
+            scale_bridge = None
             scale_bridge_reasons: tuple[str, ...] = ()
             scale_selector = PhysicalScaleSelector(
                 document_id=scope_rooms[0].document_id,
@@ -1147,6 +1160,31 @@ def _collect_live_physical_net_wall_claim(
                 canonical_floors,
                 bridge,
             )
+            # Retain the original scale producer lookup once per scope.
+            # Match exact floor owners and quantity IDs, never nearby ink.
+            if scale_bridge is not None and scale_calibration is not None:
+                scope_face_ids = {record.record_id for record in room_scope.records}
+                original_scale_authority = scale_producer.authority()
+                quantities_by_id = {}
+                duplicate_ids = set()
+                for source_quantity in bridge.quantities:
+                    qid = source_quantity.quantity_id
+                    if qid in quantities_by_id:
+                        duplicate_ids.add(qid)
+                    quantities_by_id[qid] = source_quantity
+                for floor in canonical_floors.floors:
+                    if floor.source_room_face_record_id not in scope_face_ids:
+                        continue
+                    qid = floor.metric_area_quantity_id
+                    source_quantity = quantities_by_id.get(qid)
+                    if source_quantity is None or qid in duplicate_ids:
+                        continue
+                    receipt = source_owned_floor_scale_receipt(
+                        floor=floor, quantity=source_quantity, bridge=scale_bridge,
+                        scale_authority=original_scale_authority,
+                    )
+                    if receipt is not None:
+                        source_owned_floor_scale_receipts.append(receipt)
             room_area_quantity_evidence.extend(bridge.quantities)
 
     # Surface finish semantics may live on schedules/RCP/support sheets that
@@ -1215,6 +1253,7 @@ def _collect_live_physical_net_wall_claim(
                     source=surface_semantic_source,
                     cross_view_area=cross_view_area,
                     canonical_floors=canonical_floors,
+                    **({"registered_only": True} if cross_sheet_registered_only else {}),
                 )
                 if correspondence_records:
                     correspondence_status = "correspondence_resolved"
@@ -1478,6 +1517,7 @@ def _collect_live_physical_net_wall_claim(
             physical_scale_first_failure_codes=tuple(sorted(
                 physical_scale_failures_by_room.items()
             )),
+            source_owned_floor_scale_receipts=tuple(source_owned_floor_scale_receipts),
             layered_finished_face_receipts=tuple(finished_face_receipts),
             layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
             correspondence_resolution_status=correspondence_status,
@@ -1538,6 +1578,7 @@ def _collect_live_physical_net_wall_claim(
         physical_scale_first_failure_codes=tuple(sorted(
             physical_scale_failures_by_room.items()
         )),
+        source_owned_floor_scale_receipts=tuple(source_owned_floor_scale_receipts),
         layered_finished_face_receipts=tuple(finished_face_receipts),
         layered_finished_face_statement_diagnostics=finished_face_statement_diagnostics,
         correspondence_resolution_status=correspondence_status,
@@ -1631,6 +1672,7 @@ def collect_live_physical_net_wall_claim(
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
     viewport_wall_identity_links: bool = False,
+    cross_sheet_registered_only: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1645,6 +1687,8 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("supported opening area recovery must be an explicit boolean")
     if recover_additional_opening_areas and recover_supported_opening_areas:
         raise ValueError("choose one opening area recovery policy")
+    if type(cross_sheet_registered_only) is not bool:
+        raise ValueError("cross-sheet registered only must be an explicit boolean")
     if type(single_width_uniform_page_door_height_shadow) is not bool:
         raise ValueError("single width uniform page door height shadow must be an explicit boolean")
     if type(include_surface_finishes) is not bool:
@@ -1731,6 +1775,8 @@ def collect_live_physical_net_wall_claim(
            if layered_wall_end_stroke_closures else {}),
         **({"viewport_wall_identity_links": True}
            if viewport_wall_identity_links else {}),
+        **({"cross_sheet_registered_only": True}
+           if cross_sheet_registered_only else {}),
     )
     if recovery_page_id is None:
         return claim

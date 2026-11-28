@@ -211,7 +211,18 @@ def _shift_votes(src: Lines, dst: LineIndex, topn: int, limit: float = 3000.0) -
         destination_totals: dict[float, float] = {}
         for k, ivs in src[o].items():
             t_src = sum(hi - lo for lo, hi in ivs)
-            for k2 in dst.keys[o]:
+            # Binary-search the actual rounded displacement, not k +/- limit:
+            # cancellation at an inclusive boundary can otherwise lose votes.
+            # Subtraction by a finite constant preserves coordinate ordering.
+            keys = dst.keys[o]
+            if math.isfinite(k) and math.isfinite(limit) and limit >= 0:
+                displacement = lambda coordinate: coordinate - k
+                start = bisect.bisect_left(keys, -limit, key=displacement)
+                stop = bisect.bisect_right(keys, limit, key=displacement)
+                candidates = keys[start:stop]
+            else:
+                candidates = keys
+            for k2 in candidates:
                 d = k2 - k
                 if abs(d) > limit:
                     continue
@@ -4049,8 +4060,16 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
     cross_view_area: Any,
     canonical_floors: Any,
     issued_records: Optional[Sequence[SourceCrossViewFloorCorrespondenceRecord]] = None,
+    registered_only: bool = False,
 ) -> tuple[SourceCrossViewFloorCorrespondenceRecord, ...]:
-    """Resolve source-authenticated physical correspondence or legacy reference."""
+    """Resolve producer-issued correspondence; optionally prohibit legacy fallback.
+
+    Registered-only mode is an acceptance migration switch, not an authority
+    producer. Missing or rejected receipts cannot become commercial quantities.
+    The compatibility default remains until original-source retention passes.
+    """
+    if type(registered_only) is not bool:
+        return ()
     if issued_records is not None:
         return resolve_registered_cross_sheet_floor_correspondences(
             source=source,
@@ -4092,6 +4111,8 @@ def resolve_cross_sheet_floor_correspondence_for_claim(
             canonical_floors=canonical_floors,
             issued_records=tuple(registered),
         )
+    if registered_only:
+        return ()
     if not cross_view_area or not getattr(cross_view_area, "records", None):
         return ()
     if not canonical_floors or not getattr(canonical_floors, "floors", None):

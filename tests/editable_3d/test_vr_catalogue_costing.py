@@ -1,7 +1,8 @@
 """A catalogue preview prices only the linked original-source quantity."""
 from dataclasses import replace
 
-from pb_takeoff_output_authority import TakeoffOutputRow
+from pb_takeoff_output_authority import TakeoffOutputRow, TakeoffSourceType
+from pb_geometry_takeoff_model import AuthorityStatus
 from pb_vr_live_costing import CatalogueRateBinding
 from pb_vr_live_costing_wsgi import make_vr_live_costing_wsgi_app
 from test_vr_editor_command_preview import _fixture
@@ -20,6 +21,9 @@ def _catalogue_app(**row_changes):
         quantity_id="q-finish", description="Floor or wall finish area", value=9.6, unit="m2",
         source_page=obj.source_page, source_sheet=obj.source_sheet, geometry_ref=obj.object_id,
         revision_hash=obj.revision_hash, is_publishable=True,
+        source_type=TakeoffSourceType.DOCUMENTED_DIMENSION.value,
+        authority_status=AuthorityStatus.FIRM.value,
+        dimension_text_id="source-dimension-1",
     )
     row = replace(row, **row_changes)
     calls = []
@@ -63,6 +67,8 @@ def test_catalogue_cost_receipt_reuses_original_amount_and_server_rate():
 def test_catalogue_cost_refuses_stale_rows_browser_amounts_and_unknown_rate():
     for changes, overrides in [
         ({"is_publishable": False}, {}), ({"revision_hash": "old"}, {}),
+        ({"authority_status": AuthorityStatus.BLOCKED.value,
+          "source_type": TakeoffSourceType.BLOCKED.value}, {}),
         ({"geometry_ref": "other-object"}, {}), ({}, {"amount": 1}),
         ({}, {"catalogueItemId": "different"}),
     ]:

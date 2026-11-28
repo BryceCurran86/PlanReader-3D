@@ -347,3 +347,36 @@ verify_network_denial()
     env = dict(os.environ)
     env.pop("GITHUB_ACTIONS", None)
     subprocess.run([sys.executable, "-B", "-c", code], check=True, env=env, timeout=45)
+
+
+def test_parallel_pool_does_not_wait_for_slow_batch_partner(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    source, maps, output = (tmp_path / n for n in ("sources", "maps", "attempt"))
+    source.mkdir()
+    maps.mkdir()
+    sizes = dict(zip(handoff.PROJECTS, (2, 1, 1, 6), strict=True))
+    monkeypatch.setattr(handoff, "original_roster", lambda project, root: [None] * sizes[project])
+    third_started = Event()
+    first, _, third, _ = handoff.PROJECTS
+
+    def produce(project, source_dir, role_dir, timeout_min):
+        if project == first:
+            assert third_started.wait(5), "idle worker did not advance the queue"
+        elif project == third:
+            third_started.set()
+        return {"project_id": project, "status": "TEST"}, {}
+
+    monkeypatch.setattr(runner, "ProcessPoolExecutor",
+                        lambda *, max_workers, mp_context: ThreadPoolExecutor(max_workers=max_workers))
+    monkeypatch.setattr(runner, "_produce_project", produce)
+
+    def score(args):
+        status = json.loads((output / "attempt_status.json").read_text())
+        assert [p["project_id"] for p in status["projects"]] == list(handoff.PROJECTS)
+        return 2
+
+    monkeypatch.setattr(runner, "report_evidence", score)
+    assert runner.run_benchmark(source_dir=source, identity_map_dir=maps,
+                                output_dir=output, timeout_min=20, project_workers=2) == 2

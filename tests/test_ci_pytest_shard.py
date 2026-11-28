@@ -48,3 +48,16 @@ def test_duplicate_empty_and_unbalanced_configuration_rejected():
     for ids, count in [([], 4), (IDS + IDS, 4), (IDS, 0), (IDS, 17), (IDS[:1], 4)]:
         with pytest.raises(ValueError):
             partition(ids, count)
+
+
+def test_duration_weighted_partition_separates_expensive_files():
+    ids = [f"tests/test_{i}.py::test_case_{j}" for i in range(8) for j in range(4)]
+    weights = {"tests/test_0.py": 10000, "tests/test_2.py": 9000,
+               "tests/test_4.py": 8000}
+    parts = partition(ids, 3, time_floors_ms=weights)
+    assert parts == partition(list(reversed(ids)), 3, time_floors_ms=weights)
+    assert sorted(x for part in parts for x in part) == sorted(ids)
+    assert all(sum(any(node.startswith(path + "::") for node in part)
+                   for path in weights) == 1 for part in parts)
+    with pytest.raises(ValueError, match="duration"):
+        partition(ids, 3, time_floors_ms={"tests/test_0.py": -1})

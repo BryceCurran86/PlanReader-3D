@@ -236,7 +236,7 @@ def test_firm_ceiling_seals_and_projects_to_exactly_one_customer_row() -> None:
             **dict(base.metadata),
             "commercial_projection_allowed": True,
             "section": "Internal",
-            "element": "Ceiling lining area",
+            "element": "Ceiling lining area (GRID)",
             "location": "OFFICE",
             "substrate": "Other",
             "finish_system": "ceiling_grid",

@@ -35,6 +35,22 @@ def test_merge_presets_preserves_existing_and_is_idempotent():
     assert twice == once
 
 
+def test_shared_palette_extension_is_visible_to_both_editors():
+    from pb_3d_surface_editor_v1212 import substrate_presets
+    from pb_takeoff_studio_v1211 import SUBSTRATE_PRESETS
+
+    original = SUBSTRATE_PRESETS[:]
+    try:
+        ux.install()
+        assert substrate_presets() == SUBSTRATE_PRESETS
+        assert EXPECTED_INTERNAL.keys() <= {item["code"] for item in SUBSTRATE_PRESETS}
+        copied = substrate_presets()
+        copied[0]["name"] = "Local editor label"
+        assert copied[0]["name"] != SUBSTRATE_PRESETS[0]["name"]
+    finally:
+        SUBSTRATE_PRESETS[:] = original
+
+
 def test_takeoff_studio_loads_zoom_patch_after_main_script():
     index = Path("planreader_takeoff_studio/frontend/index.html").read_text(encoding="utf-8")
     assert '<script src="studio.js"></script>' in index

@@ -44,9 +44,13 @@ def _original_fixture(tmp_path, monkeypatch):
     tile = replace(
         _quantity("synthetic-independent-tile-floor", "floor_finish_area"),
         input_entity_ids=("independent-finished-floor-face",),
+        semantic_key="floor_finish_area:independent-finished-floor-face:tile",
         metadata={"source_sha256": source_sha,
                   "tiled_floor_finish_authorized": True,
-                  "net_internal_finished_face_authorized": True},
+                  "net_internal_finished_face_authorized": True,
+                  "commercial_projection_allowed": True,
+                  "finished_floor_face_source_id": "independent-finished-floor-face",
+                  "semantic_finish": "tile", "finish_code": "tile", "finish_system": "tile"},
     )
     trace = replace(prior.trace, evidence_ids=tile.evidence_ids,
                     canonical_entity_ids=tile.input_entity_ids)
