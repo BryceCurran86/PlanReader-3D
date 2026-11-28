@@ -330,3 +330,71 @@ def test_unknown_job_without_independently_registered_correspondence_abstains():
         cross_view_area=SimpleNamespace(records=(area,)),
         canonical_floors=SimpleNamespace(floors=(floor,)),
     ) == ()
+
+
+def test_registered_only_accepts_existing_generic_producer_receipt():
+    source, areas, floors, receipt = _issued_source_correspondence("new-building")
+    assert resolve_cross_sheet_floor_correspondence_for_claim(
+        source=source, cross_view_area=areas, canonical_floors=floors,
+        registered_only=True,
+    ) == (receipt,)
+
+
+@pytest.mark.parametrize("room_label", ["OFFICE", "FOOD PREP", "PWD"])
+def test_registered_only_never_invokes_legacy_room_dispatch(monkeypatch, room_label):
+    import pb_source_cross_view_floor_correspondence_shadow as bridge
+
+    data = b"synthetic source bytes"
+    floor = replace(_floor(), page_id="7", source_sha256=hashlib.sha256(data).hexdigest())
+    area = _area(floor)
+    area.room_label = room_label
+    area.source_dimension_page_id = "11"
+    source = SimpleNamespace(
+        _store=SimpleNamespace(source_bytes_by_revision={floor.revision_id: data}),
+    )
+
+    def forbidden(**kwargs):
+        pytest.fail("Legacy room dispatch invoked in registered-only mode")
+
+    for name in (
+        "authenticate_maryborough_office_cross_sheet_correspondence",
+        "authenticate_maryborough_food_prep_cross_sheet_correspondence",
+        "authenticate_maryborough_pwd_cross_sheet_correspondence",
+    ):
+        monkeypatch.setattr(bridge, name, forbidden)
+    assert bridge.resolve_cross_sheet_floor_correspondence_for_claim(
+        source=source, cross_view_area=SimpleNamespace(records=(area,)),
+        canonical_floors=SimpleNamespace(floors=(floor,)), registered_only=True,
+    ) == ()
+
+
+def test_registered_only_rejects_foreign_source_without_fallback():
+    source, areas, floors, receipt = _issued_source_correspondence("another-building")
+    source._store.source_bytes_by_revision[receipt.revision_id] = b"foreign"
+    assert resolve_cross_sheet_floor_correspondence_for_claim(
+        source=source, cross_view_area=areas, canonical_floors=floors,
+        registered_only=True,
+    ) == ()
+
+
+def test_live_claim_forwards_registered_only_switch_without_default_change(monkeypatch):
+    import pb_live_physical_net_wall_integration as live
+
+    calls = []
+    sentinel = object()
+
+    def fake_claim(*args, **kwargs):
+        calls.append(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(live, "_collect_live_physical_net_wall_claim", fake_claim)
+    assert live.collect_live_physical_net_wall_claim("unused.pdf") is sentinel
+    assert "cross_sheet_registered_only" not in calls[-1]
+    assert live.collect_live_physical_net_wall_claim(
+        "unused.pdf", cross_sheet_registered_only=True,
+    ) is sentinel
+    assert calls[-1]["cross_sheet_registered_only"] is True
+    with pytest.raises(ValueError, match="explicit boolean"):
+        live.collect_live_physical_net_wall_claim(
+            "unused.pdf", cross_sheet_registered_only=1,
+        )
