@@ -2,7 +2,7 @@ import type {WallAdditionOpening,WallAdditionSketch,DoorMechanism} from "./wallA
 type Wall=WallAdditionSketch & {openings?:readonly WallAdditionOpening[]};
 type Vec=[number,number,number];
 const EPS=1e-6;
-export const DOOR_MECHANISMS=["swing","sliding","garage"] as const;
+export const DOOR_MECHANISMS=["swing","sliding","garage","cavity","barn"] as const;
 export function nextDoorMechanism(value:DoorMechanism|undefined):DoorMechanism{
  return DOOR_MECHANISMS[(DOOR_MECHANISMS.indexOf(value??"swing")+1)%DOOR_MECHANISMS.length];
 }
@@ -28,7 +28,7 @@ export function localDoorMotion(wall:Wall,opening:WallAdditionOpening,halfThickn
   o.offsetM<hi-EPS&&o.offsetM+o.widthM>lo+EPS&&o.sillHeightM<y+h-EPS&&o.sillHeightM+o.heightM>y+EPS);
  const travel=free(a+w,a+2*w)?w:free(a-w,a)?-w:0;
  if(!travel)return null;
- const side=halfThickness+.025;
+ const side=kind==="cavity"?0:halfThickness+(kind==="barn"?.055:.025);
  return {kind,axis:[0,1,0],pivot,angle:0,translation:[ux*travel-uz*side,0,uz*travel+ux*side]};
 }
 export function validLocalDoorMechanisms(wall:Wall):boolean{
