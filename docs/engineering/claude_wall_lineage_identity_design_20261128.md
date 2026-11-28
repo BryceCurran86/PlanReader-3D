@@ -54,7 +54,8 @@ caller; nothing existing changes.
 
 Observed while building: intersections can yield -0.0, and `stable_contract_id` hashes it apart from 0.0. The existing
 `canonical_path_fingerprint` (assembly wall ids) keeps -0.0 too, so those ids can depend on input order at such points.
-Not changed here (it would rename walls); for MAX.
+Not changed here (it would rename walls). Shadow check (MAX 7235189680): on saved Maryborough and Lot16 sheet-3 walls no
+path touches a zero coordinate, none carries -0.0 and normalising adds no collisions, so no change is proposed.
 
 ## Not authority
 No wall, host, opening, measurement or quantity authority; no threshold other than the existing snap tolerance.
