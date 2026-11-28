@@ -453,7 +453,13 @@ def _source_embedded_symbol_byte_glyph_reasons(
             if (to_status == "parsed_one_byte_bfrange_candidates"
                     and symbol_status == "unique_symbol_gid_candidates"
                     and tounicode and symbols):
-                source_cache[xref] = (tounicode, symbols)
+                unique_byte_by_cp: dict[int, Optional[int]] = {}
+                for code, reported in tounicode.items():
+                    if reported in unique_byte_by_cp:
+                        unique_byte_by_cp[reported] = None
+                    else:
+                        unique_byte_by_cp[reported] = code
+                source_cache[xref] = (unique_byte_by_cp, symbols)
             else:
                 source_cache[xref] = None
         except Exception:
@@ -462,7 +468,7 @@ def _source_embedded_symbol_byte_glyph_reasons(
     tables = source_cache[xref]
     if tables is None:
         return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
-    unicode_by_byte, glyph_by_byte = tables
+    unique_byte_by_cp, glyph_by_byte = tables
     chars = span.get("chars") or ()
     if not chars:
         return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
@@ -475,11 +481,10 @@ def _source_embedded_symbol_byte_glyph_reasons(
         # a single unambiguous source byte by this limited source reader.
         if gid <= 0:
             return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
-        matching_bytes = [code for code, reported in unicode_by_byte.items()
-                          if reported == cp]
-        if len(matching_bytes) != 1:
+        matched_byte = unique_byte_by_cp.get(cp)
+        if matched_byte is None:
             return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
-        expected = glyph_by_byte.get(matching_bytes[0])
+        expected = glyph_by_byte.get(matched_byte)
         if expected is None or expected <= 0:
             return (TEXT_GLYPH_MAPPING_UNVERIFIED,)
         if expected != gid:
@@ -1492,6 +1497,23 @@ def _text_clip_reasons(
     # The legacy/default and non-rotated paths remain unchanged.
     if source_raw_no_active_text_clip_shadow and int(getattr(page, "rotation", 0) or 0) != 0:
         if _native_word_is_present(page, native_word):
+            cache = _page_cache(page)
+            immutable_key = None
+            if (
+                fitz is not None
+                and isinstance(page, fitz.Page)
+                and getattr(page, "parent", None) is not None
+                and not getattr(page.parent, "is_dirty", True)
+                and isinstance(getattr(page, "xref", None), int)
+            ):
+                immutable_key = (
+                    "original_raw_unclipped_text_v2_immutable",
+                    int(page.xref),
+                    int(getattr(page, "rotation", 0) or 0),
+                )
+                cached_unclipped = cache.get(immutable_key)
+                if cached_unclipped is not None:
+                    return () if cached_unclipped else (TEXT_CLIP_STATE_UNRESOLVED,)
             from tools.diag_original_pdf_active_clip_operator_authority import (
                 source_page_all_native_text_unclipped,
             )
@@ -1500,9 +1522,10 @@ def _text_clip_reasons(
                 digest = hashlib.sha256(bytes(page.read_contents() or b"")).hexdigest()
                 xobjects = tuple(page.get_xobjects() or ())
                 key = ("original_raw_unclipped_text_v2", digest, xobjects)
-                cache = _page_cache(page)
                 if key not in cache:
                     cache[key] = bool(source_page_all_native_text_unclipped(page))
+                if immutable_key is not None:
+                    cache[immutable_key] = cache[key]
                 if cache[key]:
                     return ()
             except (TypeError, ValueError, AttributeError, RuntimeError):

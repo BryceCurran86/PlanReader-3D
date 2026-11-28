@@ -147,6 +147,9 @@ def _native_vector_grid_axes(page: Any) -> dict[str, tuple[dict, ...]]:
     return {axis:tuple(rows) for axis,rows in result.items()}
 
 
+from bisect import bisect_left, bisect_right
+
+
 def _grid_vector_witness_for_page(
     axes: dict[str,tuple[dict,...]],
     letters: dict, numbers: dict,
@@ -158,10 +161,19 @@ def _grid_vector_witness_for_page(
         ("x",letters,"x"),("y",numbers,"y")
     ):
         owned={}
+        axis_rows = axes[orientation]
+        indexed = sorted(
+            ((float(axis["native_constant_coordinate"]), idx, axis) for idx, axis in enumerate(axis_rows)),
+            key=lambda item: (item[0], item[1]),
+        )
+        axis_coords = [item[0] for item in indexed]
         for key,word in controls.items():
+            target = float(word[coordinate])
+            lo = bisect_left(axis_coords, target - 4.5)
+            hi = bisect_right(axis_coords, target + 4.5)
             candidates=[
-                axis for axis in axes[orientation]
-                if abs(axis["native_constant_coordinate"]-word[coordinate]) <= 4.5
+                axis for _coord, _idx, axis in sorted(indexed[lo:hi], key=lambda item: item[1])
+                if abs(axis["native_constant_coordinate"]-target) <= 4.5
             ]
             if not candidates:
                 return None

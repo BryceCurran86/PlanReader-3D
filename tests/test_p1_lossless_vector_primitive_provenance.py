@@ -469,3 +469,160 @@ def test_live_extractor_predictions_unchanged_by_additive_provenance(tmp_path: P
     preds2 = extractor.extract_from_pdf(str(pdf_path))
     assert sorted(p.tag for p in preds2) == tags
     assert [p.to_dict() for p in preds2] == [p.to_dict() for p in preds]
+
+
+import copy
+from typing import Any
+import pytest
+from pb_source_visibility_authority import (
+    VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,
+    classify_native_segment_visibility,
+)
+from pb_vector_geometry_v130 import _ClipAssociation, _clip_scissor_by_seqno
+
+# PDF ``0 0 100 100 re`` clip on a 300x300 page, in top-left page coordinates.
+_CLOSED_CLIP = "q 0 0 100 100 re W n 10 10 m 50 50 l S Q"
+_CLOSED_CLIP_RECT = [0.0, 200.0, 100.0, 300.0]
+_GROUP_LINE = "200 200 m 250 250 l S"
+
+
+def _transparency_page(content: str, *, form: str = "", gstate: str = "<< >>") -> fitz.Page:
+    """One 300x300 page with a transparency-group form /Fm1 and ExtGState /GS1."""
+    objects = (
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R"
+        " /Resources << /XObject << /Fm1 5 0 R >> /ExtGState << /GS1 6 0 R >> >> >>",
+        f"<< /Length {len(content)} >>\nstream\n{content}\nendstream",
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 300 300]"
+        f" /Group << /S /Transparency >> /Length {len(form)} >>\nstream\n{form}\nendstream",
+        gstate,
+    )
+    pdf = b"%PDF-1.7\n"
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf += f"{number} 0 obj\n{body}\nendobj\n".encode("ascii")
+    xref = f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n"
+    xref += "".join(f"{offset:010d} 00000 n \n" for offset in offsets)
+    trailer = f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{len(pdf)}\n%%EOF\n"
+    doc = fitz.open(stream=pdf + xref.encode("ascii") + trailer.encode("ascii"), filetype="pdf")
+    page = doc[0]
+    page._p1_doc = doc  # type: ignore[attr-defined]
+    return page
+
+
+def _segments_by_id(page: fitz.Page) -> Dict[str, Dict[str, Any]]:
+    return {seg["id"]: seg for seg in extract_native_page(page)["segments"]}
+
+
+def test_group_after_closed_sibling_clip_does_not_inherit_it() -> None:
+    page = _transparency_page(f"{_CLOSED_CLIP} /Fm1 Do", form=_GROUP_LINE)
+    segments = _segments_by_id(page)
+
+    assert sorted(segments) == ["d0i0", "d1i0"]
+    assert segments["d0i0"]["clip_exact_rect"] == _CLOSED_CLIP_RECT
+    grouped = segments["d1i0"]
+    assert (grouped["path_index"], grouped["item_index"]) == (1, 0)
+    assert (grouped["x1"], grouped["y1"], grouped["x2"], grouped["y2"]) == (200.0, 100.0, 250.0, 50.0)
+    # Only the group form's own BBox clip is active once the sibling scope closed.
+    assert grouped["clip_known"] is True
+    assert grouped["clip_present"] is True
+    assert grouped["clip_shape_known"] is True
+    assert grouped["clip_exact_rect"] == [0.0, 0.0, 300.0, 300.0]
+    assert classify_native_segment_visibility(grouped).visible is True
+    assert extract_native_page(page) == extract_native_page(page)
+
+
+def test_group_inside_open_clip_still_inherits_it() -> None:
+    page = _transparency_page("q 0 0 100 100 re W n 10 10 m 50 50 l S /Fm1 Do Q", form=_GROUP_LINE)
+    grouped = _segments_by_id(page)["d1i0"]
+
+    assert grouped["clip_present"] is True
+    assert grouped["clip_exact_rect"] == _CLOSED_CLIP_RECT
+    assert classify_native_segment_visibility(grouped).visible is False
+
+
+def test_blend_mode_group_after_closed_clip_is_known_unclipped() -> None:
+    page = _transparency_page(f"{_CLOSED_CLIP} q /GS1 gs {_GROUP_LINE} Q", gstate="<< /BM /Multiply >>")
+    grouped = _segments_by_id(page)["d1i0"]
+
+    assert grouped["clip_known"] is True
+    assert grouped["clip_present"] is False
+    assert grouped["clip"] is None
+    assert grouped["clip_exact_rect"] is None
+    assert classify_native_segment_visibility(grouped).visible is True
+
+
+def test_real_clip_opened_inside_group_still_applies() -> None:
+    form = "q 150 150 100 100 re W n 120 120 m 250 250 l S Q"
+    page = _transparency_page(f"{_CLOSED_CLIP} /Fm1 Do", form=form)
+    grouped = _segments_by_id(page)["d1i0"]
+
+    assert grouped["clip_present"] is True
+    assert grouped["clip_exact_rect"] == [150.0, 50.0, 250.0, 150.0]
+    decision = classify_native_segment_visibility(grouped)
+    assert decision.visible is False
+    assert decision.reason_codes == (VISIBILITY_RECTANGULAR_CLIP_EXCLUDES_SEGMENT,)
+
+
+class _ExtendedDrawingsPage:
+    def __init__(self, drawings: List[Dict[str, Any]]) -> None:
+        self._drawings = drawings
+
+    def get_drawings(self, *, extended: bool = False) -> List[Dict[str, Any]]:
+        assert extended is True
+        return self._drawings
+
+
+def _clip_entry(level: int, rect: fitz.Rect) -> Dict[str, Any]:
+    return {"type": "clip", "level": level, "scissor": rect, "items": (("re", rect, 1),)}
+
+
+def test_clip_association_levels_include_non_clip_group_hierarchy() -> None:
+    clip = fitz.Rect(20, 100, 120, 140)
+    exact = (20.0, 100.0, 120.0, 140.0)
+    drawings = [
+        {"type": "group", "level": 0},
+        _clip_entry(1, clip),
+        {"type": "s", "level": 2, "seqno": 10},
+        {"type": "group", "level": 1},
+        {"type": "s", "level": 2, "seqno": 11},
+        _clip_entry(2, clip),
+        {"type": "s", "level": 3, "seqno": 12},
+    ]
+    snapshot = copy.deepcopy(drawings)
+    table = _clip_scissor_by_seqno(_ExtendedDrawingsPage(drawings))
+
+    assert drawings == snapshot
+    assert table.available is True
+    clipped = _ClipAssociation(
+        clip_present=True, scissor=exact, exact_shape_known=True, exact_rect=exact
+    )
+    assert table.by_seqno == {
+        10: clipped,
+        11: _ClipAssociation(
+            clip_present=False, scissor=None, exact_shape_known=True, exact_rect=None
+        ),
+        12: clipped,
+    }
+
+
+@pytest.mark.parametrize("level", [None, "1", -1])
+def test_group_without_usable_level_does_not_close_clip_scope(level: Any) -> None:
+    clip = fitz.Rect(20, 100, 120, 140)
+    table = _clip_scissor_by_seqno(
+        _ExtendedDrawingsPage(
+            [
+                {"type": "group", "level": 0},
+                _clip_entry(1, clip),
+                {"type": "group", "level": level},
+                {"type": "s", "level": 2, "seqno": 21},
+            ]
+        )
+    )
+
+    assert table.by_seqno[21].clip_present is True
+    assert table.by_seqno[21].exact_rect == (20.0, 100.0, 120.0, 140.0)
+
+

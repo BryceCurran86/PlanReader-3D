@@ -100,8 +100,9 @@ def compile_native_dimension_cap_components(
     components = []
     # Native text was already authenticated by SourceVisibilityProducer.
     # Defer until the first admissible original source axis, then classify
-    # each unchanged source word once rather than once per split axis.
-    dimension_words = None
+    # and spatially index each unchanged source word once rather than once
+    # per split axis.
+    word_index = None
     for line_ids, line in _source_lines(segments):
         if len(line) != 4 or not all(math.isfinite(v) for v in line):
             continue
@@ -111,17 +112,61 @@ def compile_native_dimension_cap_components(
             continue
         length = math.hypot(*_sub(end, start))
         normal = (-axis[1], axis[0])
-        if dimension_words is None:
-            dimension_words = tuple(
-                (word, _unit(tuple(word['axis'])))
-                for word in words
-                if classify_dimension_token(str(word['text'])).is_linear_dimension
+        if word_index is None:
+            raw_dim_words = []
+            for word in words:
+                if not classify_dimension_token(str(word['text'])).is_linear_dimension:
+                    continue
+                text_axis = _unit(tuple(word['axis']))
+                if text_axis is None:
+                    continue
+                x0, y0, x1, y1 = word['bbox']
+                cx = (x0 + x1) / 2.0
+                cy = (y0 + y1) / 2.0
+                span = abs(x1 - x0) + abs(y1 - y0)
+                pad = 1.5 * span + max(1e-6, span * 1e-4) + 1e-3
+                raw_dim_words.append((cx, cy, x0, y0, x1, y1, text_axis, word, pad))
+            if not raw_dim_words:
+                return ()
+            max_pad = max(item[8] for item in raw_dim_words)
+            horiz_words = sorted(
+                (item for item in raw_dim_words if abs(item[6][1]) <= 2.5e-4),
+                key=lambda item: item[1],
             )
-        for word, text_axis in dimension_words:
-            if text_axis is None or abs(_cross(axis, text_axis)) > 1e-4:
+            horiz_cys = [item[1] for item in horiz_words]
+            vert_words = sorted(
+                (item for item in raw_dim_words if abs(item[6][0]) <= 2.5e-4),
+                key=lambda item: item[0],
+            )
+            vert_cxs = [item[0] for item in vert_words]
+            all_words = sorted(raw_dim_words, key=lambda item: item[0])
+            all_cxs = [item[0] for item in all_words]
+            word_index = (max_pad, horiz_words, horiz_cys, vert_words, vert_cxs, all_words, all_cxs)
+        max_pad, horiz_words, horiz_cys, vert_words, vert_cxs, all_words, all_cxs = word_index
+        sx, sy = start
+        ex, ey = end
+        min_x = sx if sx <= ex else ex
+        max_x = ex if sx <= ex else sx
+        min_y = sy if sy <= ey else ey
+        max_y = ey if sy <= ey else sy
+        if abs(axis[1]) <= 1e-4:
+            w_lo = bisect_left(horiz_cys, min_y - max_pad)
+            w_hi = bisect_right(horiz_cys, max_y + max_pad)
+            candidate_words = horiz_words[w_lo:w_hi]
+        elif abs(axis[0]) <= 1e-4:
+            w_lo = bisect_left(vert_cxs, min_x - max_pad)
+            w_hi = bisect_right(vert_cxs, max_x + max_pad)
+            candidate_words = vert_words[w_lo:w_hi]
+        else:
+            w_lo = bisect_left(all_cxs, min_x - max_pad)
+            w_hi = bisect_right(all_cxs, max_x + max_pad)
+            candidate_words = all_words[w_lo:w_hi]
+        for cx, cy, x0, y0, x1, y1, text_axis, word, _pad in candidate_words:
+            if cx < min_x - max_pad or cx > max_x + max_pad or cy < min_y - max_pad or cy > max_y + max_pad:
                 continue
-            x0, y0, x1, y1 = word['bbox']
-            center = ((x0 + x1) / 2, (y0 + y1) / 2)
+            if abs(_cross(axis, text_axis)) > 1e-4:
+                continue
+            center = (cx, cy)
             height = abs(normal[0]) * (x1 - x0) + abs(normal[1]) * (y1 - y0)
             tolerance = max(1e-6, height * 1e-4)
             along = _dot(_sub(center, start), axis)

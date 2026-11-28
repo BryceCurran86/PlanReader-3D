@@ -32,9 +32,11 @@ JOINERY_HEAD_HEIGHT_SOURCE_SCOPE_UNAVAILABLE = (
 
 _MIN_HEAD_HEIGHT_MM = 1200.0
 _MAX_HEAD_HEIGHT_MM = 3600.0
+_THOUSANDS_COMMA_RE = re.compile(r"(?<!\d)(\d{1,2}),(\d{3})(?!\d)")
 _NOTE_RE = re.compile(
-    r"\bJOINERY\s+HEIGHTS?\s+TO\s+BE\s+(?P<value>\d{3,4})\s*"
-    r"(?:MM\s*)?A\s*F\s*L\s+U\s*N\s*O\b",
+    r"\bJOINERY\s+HEIGHTS?\s+TO\s+BE\s+"
+    r"(?:(?P<value_m>\d(?:\.\d{1,3})?)\s*M\b|(?P<value_mm>\d{3,4})\s*(?:MM\s*)?)"
+    r"\s*A\s*F\s*L\s+U\s*N\s*O\b",
     re.IGNORECASE,
 )
 
@@ -78,7 +80,12 @@ def _blocked(
 
 
 def _normalize_note_text(text: str) -> str:
-    return re.sub(r"[^A-Z0-9]+", " ", str(text or "").upper()).strip()
+    raw = _THOUSANDS_COMMA_RE.sub(r"\1\2", str(text or "").upper())
+    # Preserve decimal points between digits (e.g. "2.1M") while stripping punctuation
+    # such as "U.N.O." -> "U N O".
+    preserved = re.sub(r"(?<=\d)\.(?=\d)", "__DEC__", raw)
+    cleaned = re.sub(r"[^A-Z0-9_]+", " ", preserved).replace("__DEC__", ".")
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _joinery_head_height_values(text: str) -> tuple[float, ...]:
@@ -86,7 +93,10 @@ def _joinery_head_height_values(text: str) -> tuple[float, ...]:
     values: list[float] = []
     for match in _NOTE_RE.finditer(normalized):
         try:
-            value = float(match.group("value"))
+            if match.group("value_m") is not None:
+                value = round(float(match.group("value_m")) * 1000.0, 6)
+            else:
+                value = float(match.group("value_mm"))
         except (TypeError, ValueError):
             continue
         if (

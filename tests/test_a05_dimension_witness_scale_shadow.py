@@ -1,0 +1,384 @@
+"""A05 tests: default-off generic dimension-witness + title-scale ratio corroboration shadow."""
+from __future__ import annotations
+
+import pytest
+
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_page_scale_calibration_authority import POINTS_PER_METRE_AT_1_1
+from pb_source_dimension_witness_scale_shadow import (
+    FiguredDimensionScaleWitness,
+    corroborate_dimension_witness_scale_shadow,
+    extract_dimension_witnesses_from_native_components,
+)
+from pb_source_vector_outlined_text_ocr_shadow import (
+    AgreedOutlinedTextToken,
+    classify_outlined_caption_view_type,
+)
+
+_SHA = "f" * 64
+_PTS_PER_MM_1_100 = (POINTS_PER_METRE_AT_1_1 / 1000.0) / 100.0
+
+
+def test_a05_two_agreeing_dimension_witnesses_corroborate_1_to_100_scale() -> None:
+    w1 = FiguredDimensionScaleWitness(
+        "w1", "doc-1", "rev-1", _SHA, "7", "vp-1",
+        pdf_span_pts=3570.0 * _PTS_PER_MM_1_100, figured_mm=3570.0, axis="horizontal",
+    )
+    w2 = FiguredDimensionScaleWitness(
+        "w2", "doc-1", "rev-1", _SHA, "7", "vp-1",
+        pdf_span_pts=2536.0 * _PTS_PER_MM_1_100, figured_mm=2536.0, axis="vertical",
+    )
+    res = corroborate_dimension_witness_scale_shadow(
+        document_id="doc-1",
+        revision_id="rev-1",
+        source_sha256=_SHA,
+        page_id="7",
+        viewport_id="vp-1",
+        dimension_witnesses=(w1, w2),
+    )
+    assert res.status == EvidenceResolutionStatus.CORROBORATED
+    assert res.implied_scale_denominator == pytest.approx(100.0, rel=1e-4)
+    assert res.requires_typed_negative_ink_guard is True
+    assert res.shadow_only is True
+    assert res.commercial_authority_granted is False
+
+
+def test_a05_single_witness_corroborated_by_explicit_ratio_passes_but_ratio_alone_abstains() -> None:
+    w1 = FiguredDimensionScaleWitness(
+        "w1", "doc-1", "rev-1", _SHA, "7", "vp-1",
+        pdf_span_pts=5000.0 * _PTS_PER_MM_1_100, figured_mm=5000.0, axis="horizontal",
+    )
+    ok = corroborate_dimension_witness_scale_shadow(
+        document_id="doc-1", revision_id="rev-1", source_sha256=_SHA,
+        page_id="7", viewport_id="vp-1",
+        dimension_witnesses=(w1,), explicit_scale_ratios=(100.0,),
+    )
+    assert ok.status == EvidenceResolutionStatus.CORROBORATED
+    assert ok.implied_scale_denominator == pytest.approx(100.0, rel=1e-4)
+
+    # Ratio alone (no dimension witnesses) MUST abstain
+    ratio_only = corroborate_dimension_witness_scale_shadow(
+        document_id="doc-1", revision_id="rev-1", source_sha256=_SHA,
+        page_id="7", viewport_id="vp-1",
+        dimension_witnesses=(), explicit_scale_ratios=(100.0,),
+    )
+    assert ratio_only.status == EvidenceResolutionStatus.ABSTAINED
+    assert ratio_only.mm_per_point is None
+
+    # Single witness without corroborating ratio MUST abstain
+    single_only = corroborate_dimension_witness_scale_shadow(
+        document_id="doc-1", revision_id="rev-1", source_sha256=_SHA,
+        page_id="7", viewport_id="vp-1",
+        dimension_witnesses=(w1,), explicit_scale_ratios=(),
+    )
+    assert single_only.status == EvidenceResolutionStatus.ABSTAINED
+
+
+def test_a05_conflicting_witnesses_ratios_or_revisions_veto_with_conflict() -> None:
+    w_100 = FiguredDimensionScaleWitness(
+        "w1", "doc-1", "rev-1", _SHA, "7", "vp-1",
+        pdf_span_pts=3000.0 * _PTS_PER_MM_1_100, figured_mm=3000.0,
+    )
+    w_50 = FiguredDimensionScaleWitness(
+        "w2", "doc-1", "rev-1", _SHA, "7", "vp-1",
+        pdf_span_pts=3000.0 * _PTS_PER_MM_1_100 * 2.0, figured_mm=3000.0,
+    )
+    # Disagreement between witnesses -> CONFLICT
+    c1 = corroborate_dimension_witness_scale_shadow(
+        document_id="doc-1", revision_id="rev-1", source_sha256=_SHA,
+        page_id="7", viewport_id="vp-1",
+        dimension_witnesses=(w_100, w_50),
+    )
+    assert c1.status == EvidenceResolutionStatus.CONFLICT
+
+    # Witness (1:100) vs explicit ratio (1:50) -> CONFLICT
+    c2 = corroborate_dimension_witness_scale_shadow(
+        document_id="doc-1", revision_id="rev-1", source_sha256=_SHA,
+        page_id="7", viewport_id="vp-1",
+        dimension_witnesses=(w_100,), explicit_scale_ratios=(50.0,),
+    )
+    assert c2.status == EvidenceResolutionStatus.CONFLICT
+
+    # Conflicting explicit ratios (1:50 & 1:100) -> CONFLICT
+    c3 = corroborate_dimension_witness_scale_shadow(
+        document_id="doc-1", revision_id="rev-1", source_sha256=_SHA,
+        page_id="7", viewport_id="vp-1",
+        dimension_witnesses=(w_100,), explicit_scale_ratios=(50.0, 100.0),
+    )
+    assert c3.status == EvidenceResolutionStatus.CONFLICT
+
+    # Cross-revision witness -> CONFLICT
+    w_wrong_rev = FiguredDimensionScaleWitness(
+        "w-bad", "doc-1", "rev-2", _SHA, "7", "vp-1",
+        pdf_span_pts=3000.0 * _PTS_PER_MM_1_100, figured_mm=3000.0,
+    )
+    c4 = corroborate_dimension_witness_scale_shadow(
+        document_id="doc-1", revision_id="rev-1", source_sha256=_SHA,
+        page_id="7", viewport_id="vp-1",
+        dimension_witnesses=(w_100, w_wrong_rev),
+    )
+    assert c4.status == EvidenceResolutionStatus.CONFLICT
+
+
+def test_a05_extract_dimension_witnesses_from_native_components_end_to_end() -> None:
+    # Build two orthogonal synthetic native dimension cap chains at 1:100
+    span_h = 3000.0 * _PTS_PER_MM_1_100
+    span_v = 2400.0 * _PTS_PER_MM_1_100
+    segments = {
+        # Horizontal dim line + left/right ticks + left/right witness caps
+        "h_line": (100.0, 100.0, 100.0 + span_h, 100.0),
+        "h_t0a": (98.0, 98.0, 100.0, 100.0),
+        "h_t0b": (100.0, 100.0, 102.0, 102.0),
+        "h_t1a": (100.0 + span_h - 2.0, 98.0, 100.0 + span_h, 100.0),
+        "h_t1b": (100.0 + span_h, 100.0, 100.0 + span_h + 2.0, 102.0),
+        "h_c0": (100.0, 100.0, 100.0, 120.0),
+        "h_c1": (100.0 + span_h, 100.0, 100.0 + span_h, 120.0),
+        # Vertical dim line + top/bottom ticks + witness caps
+        "v_line": (60.0, 200.0, 60.0, 200.0 + span_v),
+        "v_t0a": (58.0, 198.0, 60.0, 200.0),
+        "v_t0b": (60.0, 200.0, 62.0, 202.0),
+        "v_t1a": (58.0, 200.0 + span_v - 2.0, 60.0, 200.0 + span_v),
+        "v_t1b": (60.0, 200.0 + span_v, 62.0, 200.0 + span_v + 2.0),
+        "v_c0": (60.0, 200.0, 80.0, 200.0),
+        "v_c1": (60.0, 200.0 + span_v, 80.0, 200.0 + span_v),
+    }
+    words = [
+        {
+            "id": "w_h",
+            "text": "3000",
+            "bbox": (100.0 + span_h * 0.4, 90.0, 100.0 + span_h * 0.6, 98.0),
+            "center": (100.0 + span_h * 0.5, 94.0),
+            "axis": (1.0, 0.0),
+        },
+        {
+            "id": "w_v",
+            "text": "2400",
+            "bbox": (48.0, 200.0 + span_v * 0.4, 58.0, 200.0 + span_v * 0.6),
+            "center": (53.0, 200.0 + span_v * 0.5),
+            "axis": (0.0, 1.0),
+        },
+    ]
+    witnesses = extract_dimension_witnesses_from_native_components(
+        segments=segments,
+        words=words,
+        document_id="doc-1",
+        revision_id="rev-1",
+        source_sha256=_SHA,
+        page_id="7",
+        viewport_id="vp-1",
+    )
+    assert len(witnesses) == 2
+    assert {w.axis for w in witnesses} == {"horizontal", "vertical"}
+    scale = corroborate_dimension_witness_scale_shadow(
+        document_id="doc-1",
+        revision_id="rev-1",
+        source_sha256=_SHA,
+        page_id="7",
+        viewport_id="vp-1",
+        dimension_witnesses=witnesses,
+    )
+    assert scale.status == EvidenceResolutionStatus.CORROBORATED
+    assert scale.implied_scale_denominator == pytest.approx(100.0, rel=1e-3)
+
+
+def test_a06_outlined_caption_view_classifier_separates_floor_from_roof_and_rejects_conflict() -> None:
+    def _tok(text: str, x: float, y: float, dpis: tuple[int, ...] = (216, 288)) -> AgreedOutlinedTextToken:
+        return AgreedOutlinedTextToken(
+            normalized_text=text,
+            raw_texts=(text,),
+            source_sha256=_SHA,
+            page_index=0,
+            bbox_pdf_pts=(x, y, x + 40.0, y + 12.0),
+            agreement_dpis=dpis,
+            agreement_ratio=1.0,
+            mean_confidence=0.95,
+        )
+
+    fp = classify_outlined_caption_view_type([_tok("GROUND", 100, 700), _tok("FLOOR", 150, 701), _tok("PLAN", 200, 700)])
+    assert fp.status == "CORROBORATED" and fp.view_type == "floor_plan"
+    assert fp.shadow_only is True and fp.commercial_projection_allowed is False
+
+    roof = classify_outlined_caption_view_type([_tok("ROOF", 100, 700), _tok("PLAN", 150, 700)])
+    assert roof.status == "CORROBORATED" and roof.view_type == "roof_plan"
+
+    # Single-DPI token must abstain
+    single_dpi = classify_outlined_caption_view_type([_tok("FLOOR PLAN", 100, 700, dpis=(216,))])
+    assert single_dpi.status == "ABSTAINED" and single_dpi.view_type == "unproven"
+
+    # Conflicting view types on same sheet must fail closed with CONFLICT
+    conflict = classify_outlined_caption_view_type([_tok("FLOOR PLAN", 100, 700), _tok("ROOF PLAN", 100, 750)])
+    assert conflict.status == "CONFLICT" and conflict.view_type == "unproven"
+
+
+def test_a06_in_drawing_outlined_caption_producer_shadow() -> None:
+    import fitz
+    from pb_source_vector_outlined_text_ocr_shadow import (
+        OcrRawToken,
+        classify_page_in_drawing_outlined_captions_shadow,
+    )
+
+    doc = fitz.open()
+    try:
+        # Page 0: synthetic outlined-vector body (0 native words, >500 vector segments, 0 images)
+        p0 = doc.new_page(width=842, height=595)
+        for i in range(520):
+            y = 20.0 + (i % 50) * 8.0
+            x = 20.0 + (i // 50) * 40.0
+            p0.draw_line(fitz.Point(x, y), fitz.Point(x + 25.0, y), color=(0, 0, 0), width=0.5)
+
+        # Page 1: normal native-text page -> must abstain immediately without OCR
+        p1 = doc.new_page(width=842, height=595)
+        for i in range(25):
+            p1.insert_text(fitz.Point(50.0, 50.0 + i * 14.0), f"NATIVE WORD {i}")
+
+        p0 = doc[0]
+        p1 = doc[1]
+
+        calls = 0
+
+        def _fake_ocr(_png: bytes):
+            nonlocal calls
+            calls += 1
+            # Return multi-DPI agreed tokens in pixel coordinates matching 144 / 216 DPI
+            # (2x and 3x of 72pt). Use fixed pixel scale via call index.
+            scale = 2.0 if calls == 1 else 3.0
+            return [
+                OcrRawToken("GROUND", (100 * scale, 400 * scale, 160 * scale, 415 * scale), 0.96),
+                OcrRawToken("FLOOR", (165 * scale, 400 * scale, 215 * scale, 415 * scale), 0.95),
+                OcrRawToken("PLAN", (220 * scale, 400 * scale, 265 * scale, 415 * scale), 0.97),
+            ]
+
+        res0 = classify_page_in_drawing_outlined_captions_shadow(
+            p0,
+            source_sha256="b" * 64,
+            page_index=0,
+            render_dpis=(144, 216),
+            ocr_callable=_fake_ocr,
+        )
+        assert res0.status == "CORROBORATED"
+        assert res0.view_type == "floor_plan"
+        assert res0.shadow_only is True
+        assert res0.commercial_projection_allowed is False
+        assert calls == 2
+
+        res1 = classify_page_in_drawing_outlined_captions_shadow(
+            p1,
+            source_sha256="b" * 64,
+            page_index=1,
+            render_dpis=(144, 216),
+            ocr_callable=_fake_ocr,
+        )
+        assert res1.status == "ABSTAINED"
+        assert "outlined_text_body_not_suspected" in res1.reason_codes
+        assert calls == 2  # OCR never invoked for native-text page
+    finally:
+        doc.close()
+
+
+def test_a06_outlined_body_tolerates_small_logo_image_but_rejects_full_page_scan() -> None:
+    import fitz
+    from pb_source_vector_outlined_text_ocr_shadow import detect_outlined_text_drawing_body
+
+    # Create a tiny 4x4 PNG bytes buffer via PyMuPDF Pixmap
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 4, 4), False)
+    png_bytes = pix.tobytes("png")
+
+    doc = fitz.open()
+    try:
+        # Page 0: dense vector CAD sheet (>500 paths, 0 native words) + small title-block logo image
+        p0 = doc.new_page(width=842, height=595)
+        for i in range(520):
+            y = 20.0 + (i % 50) * 8.0
+            x = 20.0 + (i // 50) * 40.0
+            p0.draw_line(fitz.Point(x, y), fitz.Point(x + 25.0, y), color=(0, 0, 0), width=0.5)
+        p0.insert_image(fitz.Rect(740, 500, 820, 560), stream=png_bytes)
+
+        # Page 1: full-page raster scan covering 100% of page area
+        p1 = doc.new_page(width=842, height=595)
+        for i in range(520):
+            y = 20.0 + (i % 50) * 8.0
+            x = 20.0 + (i // 50) * 40.0
+            p1.draw_line(fitz.Point(x, y), fitz.Point(x + 25.0, y), color=(0, 0, 0), width=0.5)
+        p1.insert_image(fitz.Rect(0, 0, 842, 595), stream=png_bytes)
+
+        a0 = detect_outlined_text_drawing_body(doc[0], page_index=0)
+        assert a0.raster_image_count >= 1
+        assert a0.outlined_text_suspected is True
+
+        a1 = detect_outlined_text_drawing_body(doc[1], page_index=1)
+        assert a1.raster_image_count >= 1
+        assert a1.outlined_text_suspected is False
+    finally:
+        doc.close()
+
+
+def test_a06_per_viewport_outlined_caption_association_mixed_sheet_and_xref_rejection() -> None:
+    from pb_source_vector_outlined_text_ocr_shadow import (
+        AgreedOutlinedTextToken,
+        OutlinedViewportRegionSpec,
+        associate_outlined_captions_to_viewports_shadow,
+    )
+
+    sha = "c" * 64
+
+    def _tok(txt: str, x0: float, y0: float, x1: float, y1: float) -> AgreedOutlinedTextToken:
+        return AgreedOutlinedTextToken(
+            normalized_text=txt,
+            raw_texts=(txt, txt),
+            source_sha256=sha,
+            page_index=3,
+            bbox_pdf_pts=(x0, y0, x1, y1),
+            agreement_dpis=(144, 216),
+            agreement_ratio=1.0,
+            mean_confidence=0.95,
+        )
+
+    vps = (
+        OutlinedViewportRegionSpec("vp_top", 3, (20.0, 20.0, 700.0, 260.0)),
+        OutlinedViewportRegionSpec("vp_bottom", 3, (20.0, 300.0, 700.0, 560.0)),
+    )
+    tokens = (
+        # Top viewport: genuine ELEVATION caption + cross-reference prose ("REFER TO FLOOR PLAN")
+        _tok("NORTH", 100.0, 240.0, 150.0, 255.0),
+        _tok("ELEVATION", 155.0, 240.0, 230.0, 255.0),
+        _tok("REFER", 400.0, 100.0, 440.0, 112.0),
+        _tok("TO", 445.0, 100.0, 460.0, 112.0),
+        _tok("FLOOR", 465.0, 100.0, 505.0, 112.0),
+        _tok("PLAN", 510.0, 100.0, 545.0, 112.0),
+        # Bottom viewport: genuine SECTION caption
+        _tok("SECTION", 100.0, 540.0, 160.0, 555.0),
+        _tok("A-A", 165.0, 540.0, 195.0, 555.0),
+    )
+
+    res = associate_outlined_captions_to_viewports_shadow(
+        tokens=tokens,
+        viewport_regions=vps,
+        expected_source_sha256=sha,
+        page_index=3,
+    )
+    assert res.is_mixed_sheet is True
+    assert res.shadow_only is True
+    assert res.commercial_projection_allowed is False
+    assert res.rejected_cross_reference_texts == ("REFER TO FLOOR PLAN",)
+    by_vp = {v.viewport_id: v for v in res.viewports}
+    assert by_vp["vp_top"].status == "CORROBORATED"
+    assert by_vp["vp_top"].view_type == "elevation"
+    assert by_vp["vp_top"].rejected_cross_reference_texts == ("REFER TO FLOOR PLAN",)
+    assert by_vp["vp_bottom"].status == "CORROBORATED"
+    assert by_vp["vp_bottom"].view_type == "section"
+
+    # Single viewport containing two non-xref conflicting captions must fail closed with CONFLICT
+    conflict_tokens = (
+        _tok("FLOOR", 100.0, 100.0, 145.0, 115.0),
+        _tok("PLAN", 150.0, 100.0, 190.0, 115.0),
+        _tok("ROOF", 100.0, 150.0, 140.0, 165.0),
+        _tok("PLAN", 145.0, 150.0, 185.0, 165.0),
+    )
+    res_conf = associate_outlined_captions_to_viewports_shadow(
+        tokens=conflict_tokens,
+        viewport_regions=(OutlinedViewportRegionSpec("vp_single", 3, (20.0, 20.0, 400.0, 400.0)),),
+        expected_source_sha256=sha,
+        page_index=3,
+    )
+    assert res_conf.viewports[0].status == "CONFLICT"
+    assert res_conf.viewports[0].view_type == "unproven"

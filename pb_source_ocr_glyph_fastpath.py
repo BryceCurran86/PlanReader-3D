@@ -72,7 +72,14 @@ def get_source_words_with_glyph_fastpath(
 
     try:
         pix = page.get_pixmap(dpi=dpi)
-        img = Image.open(io.BytesIO(pix.tobytes("png")))
+        try:
+            if hasattr(pix, "samples") and hasattr(pix, "n") and hasattr(pix, "width") and hasattr(pix, "height"):
+                mode = "RGB" if pix.n == 3 else ("RGBA" if pix.n == 4 else "L")
+                img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+            else:
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+        finally:
+            del pix
         lines = backend.extract_lines(img, dpi=dpi)
     except (AttributeError, RuntimeError, OSError, ValueError, TypeError):
         return tuple(native_words)

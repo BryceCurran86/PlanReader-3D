@@ -1430,3 +1430,296 @@ def test_source_family_customer_verifier_is_project_neutral_and_fail_closed(monk
     assert handoff._verified_source_family_handoff(**{**args, "family": "wall_finish_area"}) is None
     assert handoff._verified_source_family_handoff(**{**args, "expected_count": 2}) is None
     assert handoff._verified_source_family_handoff(**{**args, "workspace_id": 0}) is None
+
+
+@pytest.mark.parametrize(
+    ("family_group", "expected_recover"),
+    [
+        ("floor_area", False),
+        ("surfaces", False),
+        ("all", True),
+        ("core", True),
+    ],
+)
+def test_project_handoff_gates_opening_area_recovery_by_family_group(
+    tmp_path,
+    monkeypatch,
+    family_group: str,
+    expected_recover: bool,
+) -> None:
+    """floor_area and surfaces omit opening-area recovery; all and core keep it."""
+    import tools.run_source_closed_project_handoff as handoff
+
+    pdf = tmp_path / f"plan_{family_group}.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (1,), 3))
+    seen: dict[str, object] = {}
+
+    def _collect(pdf_path, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(
+            status="unavailable",
+            reason_codes=("live-authority-unavailable",),
+            quantity_m2=None,
+            wall_net_area_quantity_evidence=(),
+            opening_count_quantity_evidence=(),
+            opening_area_quantity_evidence=(),
+            opening_linear_quantity_evidence=(),
+            room_area_quantity_evidence=(),
+            floor_finish_area_quantity_evidence=(),
+        )
+
+    monkeypatch.setattr(handoff, "collect_live_physical_net_wall_claim", _collect)
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_ceiling_lining_claims",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_ceiling_area_quantities",
+        lambda result: (),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "publish_live_floor_area_quantities",
+        lambda claim: (),
+    )
+
+    handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id="project-gating",
+        workspace_id=1,
+        output_dir=tmp_path / f"out_{family_group}",
+        family_group=family_group,
+    )
+
+    assert seen["recover_supported_opening_areas"] is expected_recover
+
+
+def test_verify_family_only_floor_area_manifest_roundtrip_and_negatives(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Hardened verifier enforces trusted output_dir, context, symlinks, IDs, and family."""
+    import hashlib
+    import json
+    from pathlib import Path
+    import pb_source_closed_run_export as export_mod
+    import tools.run_source_closed_project_handoff as handoff
+
+    out_dir = tmp_path / "trusted_out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    src_sha = "a1b2c3d4" * 8
+    rows = [
+        {
+            "quantity_id": "floor_area_q1",
+            "quantity_family": "floor_area",
+            "project_id": "proj-1",
+            "workspace_id": 7,
+            "revision_id": "rev-1",
+            "value": 9.05,
+        }
+    ]
+    rows_path = out_dir / "verified_floor_area_family_customer_rows.json"
+    encoded = json.dumps(rows, indent=2, sort_keys=True) + "\n"
+    handoff._write_text_atomic(rows_path, encoded)
+    rows_sha = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    # Cross-platform LF check: bytes on disk must match UTF-8 LF digest even on Windows.
+    assert hashlib.sha256(rows_path.read_bytes()).hexdigest() == rows_sha
+
+    run_path = out_dir / "family_runs" / "floor_area.sealed.json"
+    run_path.parent.mkdir(parents=True, exist_ok=True)
+    handoff._write_text_atomic(run_path, "{}\n")
+
+    fake_run = SimpleNamespace(
+        run_id="source_closed_run_test",
+        source_sha256s=(src_sha,),
+        revision_id="rev-1",
+        quantities=(SimpleNamespace(quantity_id="floor_area_q1", family="floor_area"),),
+    )
+    monkeypatch.setattr(
+        export_mod,
+        "sealed_source_closed_run_from_dict",
+        lambda payload: fake_run,
+    )
+    monkeypatch.setattr(
+        handoff,
+        "verify_sealed_customer_output",
+        lambda run, r: SimpleNamespace(
+            customer_row_count=len(r),
+            verified_quantity_ids=("floor_area_q1",),
+        ),
+    )
+
+    valid_summary = {
+        "status": "source_attempt_recorded_unsealed",
+        "project_id": "proj-1",
+        "workspace_id": 7,
+        "source_sha256": src_sha,
+        "customer_rows_verified": False,
+        "combined_run_file": None,
+        "benchmark_score_granted": False,
+        "family_only_verified_outputs": {
+            "floor_area": {
+                "family": "floor_area",
+                "scope": "family_only_incomplete_project",
+                "verified": True,
+                "whole_project_verified": False,
+                "benchmark_score_granted": False,
+                "source_sha256": src_sha,
+                "family_run_id": "source_closed_run_test",
+                "family_run_file": str(run_path),
+                "customer_rows_file": str(rows_path),
+                "customer_row_count": 1,
+                "verified_quantity_ids": ["floor_area_q1"],
+                "customer_rows_sha256": rows_sha,
+            }
+        },
+    }
+    ctx = dict(
+        output_dir=out_dir,
+        expected_source_sha256=src_sha,
+        expected_project_id="proj-1",
+        expected_workspace_id=7,
+        expected_revision_id="rev-1",
+    )
+
+    verified = handoff.verify_family_only_floor_area_manifest(valid_summary, **ctx)
+    assert len(verified) == 1
+    assert verified[0]["quantity_id"] == "floor_area_q1"
+
+    # Negative 1: whole-project verified flag flipped True must fail closed.
+    with pytest.raises(ValueError, match="customer_rows_verified"):
+        handoff.verify_family_only_floor_area_manifest(
+            {**valid_summary, "customer_rows_verified": True}, **ctx,
+        )
+
+    # Negative 2: cross-context substitution (wrong project/workspace/source/revision).
+    with pytest.raises(ValueError, match="expected_source_sha256"):
+        handoff.verify_family_only_floor_area_manifest(
+            valid_summary, **{**ctx, "expected_source_sha256": "f" * 64},
+        )
+    with pytest.raises(ValueError, match="project_id mismatch"):
+        handoff.verify_family_only_floor_area_manifest(
+            valid_summary, **{**ctx, "expected_project_id": "other-proj"},
+        )
+    with pytest.raises(ValueError, match="workspace_id mismatch"):
+        handoff.verify_family_only_floor_area_manifest(
+            valid_summary, **{**ctx, "expected_workspace_id": 99},
+        )
+    with pytest.raises(ValueError, match="revision_id mismatch"):
+        handoff.verify_family_only_floor_area_manifest(
+            valid_summary, **{**ctx, "expected_revision_id": "rev-other"},
+        )
+
+    # Negative 3: adversarial path outside trusted output_dir (cross-workspace traversal).
+    other_dir = tmp_path / "other_ws"
+    other_dir.mkdir(parents=True, exist_ok=True)
+    outside_rows = other_dir / "verified_floor_area_family_customer_rows.json"
+    handoff._write_text_atomic(outside_rows, encoded)
+    traversal_summary = {
+        **valid_summary,
+        "family_only_verified_outputs": {
+            "floor_area": {
+                **valid_summary["family_only_verified_outputs"]["floor_area"],
+                "customer_rows_file": str(outside_rows),
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="escapes trusted output_dir"):
+        handoff.verify_family_only_floor_area_manifest(traversal_summary, **ctx)
+
+    # Negative 4: ancestor symlink on family_runs directory must be rejected.
+    orig_is_symlink = Path.is_symlink
+    monkeypatch.setattr(
+        Path,
+        "is_symlink",
+        lambda self: True if self.name == "family_runs" else orig_is_symlink(self),
+    )
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        handoff.verify_family_only_floor_area_manifest(valid_summary, **ctx)
+    monkeypatch.setattr(Path, "is_symlink", orig_is_symlink)
+
+    # Negative 5: duplicate verified_quantity_ids must be rejected.
+    dup_summary = {
+        **valid_summary,
+        "family_only_verified_outputs": {
+            "floor_area": {
+                **valid_summary["family_only_verified_outputs"]["floor_area"],
+                "verified_quantity_ids": ["floor_area_q1", "floor_area_q1"],
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="duplicate IDs"):
+        handoff.verify_family_only_floor_area_manifest(dup_summary, **ctx)
+
+    # Negative 6: non-floor_area quantity inside sealed run must be rejected.
+    bad_family_run = SimpleNamespace(
+        run_id="source_closed_run_test",
+        source_sha256s=(src_sha,),
+        revision_id="rev-1",
+        quantities=(SimpleNamespace(quantity_id="floor_area_q1", family="ceiling_lining"),),
+    )
+    monkeypatch.setattr(
+        export_mod, "sealed_source_closed_run_from_dict", lambda payload: bad_family_run,
+    )
+    with pytest.raises(ValueError, match="non-floor_area quantity"):
+        handoff.verify_family_only_floor_area_manifest(valid_summary, **ctx)
+    monkeypatch.setattr(
+        export_mod, "sealed_source_closed_run_from_dict", lambda payload: fake_run,
+    )
+
+    # Negative 7: tampered file bytes must fail SHA-256 check.
+    handoff._write_text_atomic(rows_path, encoded + " ")
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        handoff.verify_family_only_floor_area_manifest(valid_summary, **ctx)
+
+
+def test_project_handoff_records_explicit_unemitted_families_and_completeness_status(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Empty families in family_group='all' are explicitly surfaced, never silently complete."""
+    import tools.run_source_closed_project_handoff as handoff
+
+    pdf = tmp_path / "partial.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    monkeypatch.setattr(handoff, "_source_page_scopes", lambda path: ((0,), (), 1))
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_physical_net_wall_claim",
+        lambda *a, **k: SimpleNamespace(
+            status="unavailable",
+            reason_codes=("live-authority-unavailable",),
+            quantity_m2=None,
+            wall_net_area_quantity_evidence=(),
+            opening_count_quantity_evidence=(),
+            opening_area_quantity_evidence=(),
+            opening_linear_quantity_evidence=(),
+            room_area_quantity_evidence=(),
+            floor_finish_area_quantity_evidence=(),
+        ),
+    )
+    monkeypatch.setattr(
+        handoff,
+        "collect_live_ceiling_lining_claims",
+        lambda *a, **k: SimpleNamespace(),
+    )
+    monkeypatch.setattr(handoff, "publish_live_ceiling_area_quantities", lambda r: ())
+    monkeypatch.setattr(handoff, "publish_live_floor_area_quantities", lambda c: ())
+
+    summary = handoff.generate_project_handoff(
+        pdf_path=pdf,
+        project_id="project-completeness",
+        workspace_id=1,
+        output_dir=tmp_path / "out",
+        family_group="all",
+    )
+    assert summary["workspace_id"] == 1
+    assert summary["emitted_families"] == []
+    assert "floor_area" in summary["unemitted_families"]
+    assert "floor_finish_area" in summary["unemitted_families"]
+    assert summary["all_expected_families_emitted"] is False
+    assert summary["completeness_status"] == "incomplete_unemitted_or_abstained_families"

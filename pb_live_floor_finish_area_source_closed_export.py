@@ -7,8 +7,9 @@ module does not infer finishes, dimensions, room identity, or benchmark mappings
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
+from typing import Optional
 
 from pb_geometry_takeoff_model import AuthorityStatus
 from pb_live_floor_area_quantity_publication import _valid_original_source_sha
@@ -22,6 +23,30 @@ from pb_source_closed_run_export import (
     SourceClosedRunConflictError,
     seal_source_closed_run,
 )
+
+FLOOR_FINISH_BOUNDING_WALL_AUTHORITY_INCOMPLETE = (
+    "floor_finish_bounding_wall_authority_incomplete"
+)
+
+
+class FloorFinishBoundingWallAuthorityIncompleteError(
+    SourceClosedRunConflictError
+):
+    """Typed conflict raised ONLY when a floor-finish room's bounding walls are absent from claim.canonical_walls."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        quantity_id: str,
+        room_entity_id: Optional[str] = None,
+        missing_bounding_wall_ids: Sequence[str] = (),
+    ) -> None:
+        super().__init__(message)
+        self.quantity_id = str(quantity_id)
+        self.room_entity_id = str(room_entity_id) if room_entity_id is not None else None
+        self.missing_bounding_wall_ids = tuple(str(v) for v in missing_bounding_wall_ids)
+        self.reason_code = FLOOR_FINISH_BOUNDING_WALL_AUTHORITY_INCOMPLETE
 
 
 def _clean(value: object) -> str:
@@ -664,11 +689,15 @@ def build_live_floor_finish_area_source_traces(
                     r_walls = owners_for_walls[0]
                     b_ids = getattr(r_walls, "canonical_bounding_wall_ids", ()) or getattr(r_walls, "bounding_wall_ids", ())
                     if b_ids:
+                        missing_wids = tuple(wid for wid in b_ids if wid not in wall_by_id)
+                        if missing_wids:
+                            raise FloorFinishBoundingWallAuthorityIncompleteError(
+                                f"floor-finish bounding wall authority incomplete: {quantity.quantity_id}",
+                                quantity_id=quantity.quantity_id,
+                                room_entity_id=floor.room_entity_id,
+                                missing_bounding_wall_ids=missing_wids,
+                            )
                         for wid in b_ids:
-                            if wid not in wall_by_id:
-                                raise SourceClosedRunConflictError(
-                                    f"floor-finish bounding wall authority incomplete: {quantity.quantity_id}"
-                                )
                             w_obj = wall_by_id[wid]
                             if getattr(w_obj, "role", None) != "internal_finished_wall_face":
                                 raise SourceClosedRunConflictError(
@@ -800,6 +829,8 @@ def seal_live_floor_finish_area_run(
 
 
 __all__ = [
+    "FLOOR_FINISH_BOUNDING_WALL_AUTHORITY_INCOMPLETE",
+    "FloorFinishBoundingWallAuthorityIncompleteError",
     "build_live_floor_finish_area_source_traces",
     "seal_live_floor_finish_area_run",
 ]

@@ -1044,3 +1044,107 @@ def test_source_only_producer_origin_survives_benign_id_copies(monkeypatch):
             assert "cannot authorize ceiling FIRM" in str(error)
         else:
             raise AssertionError("rekeying erased source-only ceiling origin")
+
+
+def test_opt_in_spatial_viewport_binds_distinct_block_as_material_only(
+    monkeypatch,
+) -> None:
+    source, published = _source()
+    rooms = _rooms(published, _room(published))
+    _patch_material(monkeypatch, published, occurrence_block=8)
+
+    label = _line(
+        text="OFFICE",
+        block_no=7,
+        line_no=0,
+        bbox=(50.0, 50.0, 90.0, 62.0),
+    )
+    monkeypatch.setattr(
+        ceiling,
+        "_trusted_room_labels_for_pages",
+        lambda *_args, **_kwargs: {"2": (label,)},
+    )
+
+    producer = ceiling.CrossViewCeilingFinishProducer.from_source(
+        source=source,
+        rooms=rooms,
+    )
+    # Default off-mode stays strictly ABSTAINED.
+    off_res = producer.publish()
+    assert off_res.status is EvidenceResolutionStatus.ABSTAINED
+    assert off_res.records == ()
+
+    # Opt-in spatial viewport association recovers distinct block_no as MATERIAL-ONLY.
+    on_res = producer.publish(allow_spatial_viewport_label_association=True)
+    assert on_res.status is EvidenceResolutionStatus.CANDIDATE
+    assert ceiling.CROSS_VIEW_CEILING_FINISH_SPATIAL_MATERIAL_ONLY in on_res.reason_codes
+    assert len(on_res.records) == 1
+    rec = on_res.records[0]
+    assert rec.physical_room_id == "room-1"
+    assert rec.finish_code == "GRID"
+    assert rec.material_only is True
+    assert rec.commercial_projection_allowed is False
+    assert rec.record_id.startswith("cross_view_ceiling_finish_spatial_viewport_")
+    try:
+        replace(rec, commercial_projection_allowed=True)
+    except TypeError as error:
+        assert "cannot authorize ceiling FIRM" in str(error)
+    else:
+        raise AssertionError("spatial viewport ceiling record could become FIRM")
+
+
+def test_opt_in_spatial_viewport_vetoes_equidistant_ambiguous_occurrence(
+    monkeypatch,
+) -> None:
+    source, published = _source()
+    rooms = _rooms(
+        published,
+        _room(published, room_id="room-1", canonical_id="c-1", label="OFFICE"),
+        _room(published, room_id="room-2", canonical_id="c-2", label="STORE"),
+    )
+    # Default _patch_material places occurrence at bbox (50, 70, 90, 82) -> center (70, 76).
+    _patch_material(monkeypatch, published, occurrence_block=99)
+
+    # Two distinct rooms equidistant above and below occurrence center (70, 76).
+    label_a = _line(
+        text="OFFICE",
+        block_no=10,
+        line_no=0,
+        bbox=(50.0, 50.0, 90.0, 62.0),  # center (70, 56) -> dy = 20
+    )
+    label_b = _line(
+        text="STORE",
+        block_no=11,
+        line_no=0,
+        bbox=(50.0, 90.0, 90.0, 102.0),  # center (70, 96) -> dy = 20
+    )
+    monkeypatch.setattr(
+        ceiling,
+        "_trusted_room_labels_for_pages",
+        lambda *_args, **_kwargs: {"2": (label_a, label_b)},
+    )
+
+    result = ceiling.CrossViewCeilingFinishProducer.from_source(
+        source=source,
+        rooms=rooms,
+    ).publish(allow_spatial_viewport_label_association=True)
+
+    assert result.status is EvidenceResolutionStatus.ABSTAINED
+    assert result.records == ()
+    assert result.unresolved_physical_room_ids == ("room-1", "room-2")
+
+
+def test_opt_in_spatial_viewport_rejects_non_bool_flag(monkeypatch) -> None:
+    source, published = _source()
+    rooms = _rooms(published, _room(published))
+    producer = ceiling.CrossViewCeilingFinishProducer.from_source(
+        source=source,
+        rooms=rooms,
+    )
+    try:
+        producer.publish(allow_spatial_viewport_label_association=1)  # type: ignore[arg-type]
+    except TypeError as error:
+        assert "must be bool" in str(error)
+    else:
+        raise AssertionError("non-bool opt-in flag should raise TypeError")
+

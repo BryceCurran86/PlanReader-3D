@@ -96,6 +96,36 @@ def _graph_records(segments, opening, side, tolerance):
             tuple(sorted(j.junction_type.value for j in junctions)), ())
 
 
+from collections import OrderedDict
+import threading
+
+_DECODED_PNG_RGB_CACHE_MAX = 4
+_DECODED_PNG_RGB_CACHE: "OrderedDict[str, np.ndarray]" = OrderedDict()
+_DECODED_PNG_RGB_CACHE_LOCK = threading.Lock()
+
+
+def _decode_png_rgb_cached(png: bytes, *, digest: str | None = None) -> np.ndarray:
+    """Decode immutable PNG bytes to a read-only RGB ndarray with bounded SHA-256 LRU reuse."""
+    key = digest if digest is not None else sha256(png).hexdigest()
+    with _DECODED_PNG_RGB_CACHE_LOCK:
+        cached = _DECODED_PNG_RGB_CACHE.get(key)
+        if cached is not None:
+            _DECODED_PNG_RGB_CACHE.move_to_end(key)
+            return cached
+    decoded = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+    if decoded is None:
+        raise ValueError("original source render unavailable")
+    rgb_arr = cv2.cvtColor(decoded, cv2.COLOR_BGR2RGB)
+    del decoded
+    rgb_arr.flags.writeable = False
+    with _DECODED_PNG_RGB_CACHE_LOCK:
+        _DECODED_PNG_RGB_CACHE[key] = rgb_arr
+        _DECODED_PNG_RGB_CACHE.move_to_end(key)
+        while len(_DECODED_PNG_RGB_CACHE) > _DECODED_PNG_RGB_CACHE_MAX:
+            _DECODED_PNG_RGB_CACHE.popitem(last=False)
+    return rgb_arr
+
+
 def build_opening_local_g17_wall_shadow(
     source: SourceVisibilityProducer, selector: ObservationSelector,
     *, original_ink_render_cache_shadow: bool = False,
@@ -178,12 +208,8 @@ def build_opening_local_g17_wall_shadow(
                            and math.isclose(p, float(g)*dpi/72.0, rel_tol=0,abs_tol=1e-6)
                            for p,g in zip(receipt.pixel_geometry,observation.geometry))):
             return replace(blocked, reason_codes=("g17_original_pixel_render_receipt_unproven",))
-    def rgb(png):
-        decoded = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
-        if decoded is None:
-            raise ValueError("original source render unavailable")
-        return cv2.cvtColor(decoded, cv2.COLOR_BGR2RGB)
-    image, full = rgb(image_png), rgb(full_png)
+    image = _decode_png_rgb_cached(image_png, digest=image_digest)
+    full = _decode_png_rgb_cached(full_png)
     regions = source._producer.native_page_image_regions(**args)
     flanks = []
     for flank in nomination["source_flank_boxes"]:

@@ -25,7 +25,7 @@ import math
 import os
 import re
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -74,6 +74,7 @@ from pb_live_ceiling_area_customer_projection import (
 from pb_live_opening_customer_projection import project_live_opening_customer_rows
 from pb_customer_output_verification import verify_sealed_customer_output
 from pb_live_floor_finish_area_source_closed_export import (
+    FloorFinishBoundingWallAuthorityIncompleteError,
     seal_live_floor_finish_area_run,
 )
 from pb_migration_contracts import QuantityEvidence, stable_contract_id
@@ -507,7 +508,7 @@ def _write_text_atomic(path: Path, encoded: str) -> None:
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=path.parent,
+            mode="w", encoding="utf-8", newline="\n", dir=path.parent,
             prefix=f".{path.name}.", suffix=".tmp", delete=False,
         ) as writer:
             temporary_path = Path(writer.name)
@@ -523,6 +524,273 @@ def _write_text_atomic(path: Path, encoded: str) -> None:
 def _write_json(path: Path, payload: Any) -> None:
     """Persist an unsealed source-attempt summary without a torn replacement."""
     _write_text_atomic(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+_EXPECTED_FAMILIES_BY_GROUP: dict[str, tuple[str, ...]] = {
+    "floor_area": ("floor_area",),
+    "core": ("wall_net_area", "opening_count", "opening_area", "opening_linear"),
+    "surfaces": ("floor_area", "floor_finish_area", "ceiling_lining"),
+    "all": (
+        "wall_net_area",
+        "opening_count",
+        "opening_area",
+        "opening_linear",
+        "floor_area",
+        "floor_finish_area",
+        "ceiling_lining",
+    ),
+}
+
+
+def _reject_symlink_ancestors(target: Path, *, trusted_root: Path) -> Path:
+    """Resolve ``target`` and require it to stay strictly inside ``trusted_root`` with zero symlinks."""
+    if trusted_root.is_symlink() or not trusted_root.is_dir():
+        raise ValueError("trusted output_dir must be an existing non-symlink directory")
+    resolved_root = trusted_root.resolve(strict=True)
+    # Walk from target up to trusted_root checking every intermediate component.
+    cur = target
+    while True:
+        if cur.is_symlink():
+            raise ValueError(f"unsafe symlink in artifact path: {cur}")
+        if cur == trusted_root:
+            break
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    if not target.is_file():
+        raise ValueError(f"required artifact file missing: {target}")
+    resolved_target = target.resolve(strict=True)
+    try:
+        resolved_target.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("artifact path escapes trusted output_dir") from exc
+    return resolved_target
+
+
+def verify_family_only_floor_area_manifest(
+    summary: Mapping[str, Any],
+    *,
+    output_dir: Path,
+    expected_source_sha256: str,
+    expected_project_id: str,
+    expected_workspace_id: int,
+    expected_revision_id: Optional[str] = None,
+) -> tuple[dict[str, Any], ...]:
+    """Fail-closed consumer verifier for independent family-only ``floor_area`` handoff.
+
+    Requires a caller-owned trusted ``output_dir`` and mandatory authenticated
+    ``expected_source_sha256`` / ``expected_project_id`` / ``expected_workspace_id``
+    context. Resolves and constrains both artifact paths strictly to the
+    canonical filenames under ``output_dir``, rejects ancestor/leaf symlinks,
+    cross-workspace traversal, cross-context substitution, duplicate IDs, and
+    any non-``floor_area`` sealed quantity.
+    """
+    if not isinstance(summary, Mapping):
+        raise TypeError("summary must be a mapping")
+    if not isinstance(output_dir, Path):
+        output_dir = Path(output_dir)
+    if output_dir.is_symlink() or not output_dir.is_dir():
+        raise ValueError("trusted output_dir must be an existing non-symlink directory")
+    clean_expected_sha = str(expected_source_sha256 or "").strip().lower()
+    if len(clean_expected_sha) != 64 or any(c not in "0123456789abcdef" for c in clean_expected_sha):
+        raise ValueError("expected_source_sha256 must be a valid 64-hex SHA-256")
+    clean_project_id = str(expected_project_id or "").strip()
+    if not clean_project_id:
+        raise ValueError("expected_project_id must be a non-empty string")
+    if isinstance(expected_workspace_id, bool) or not isinstance(expected_workspace_id, int) or expected_workspace_id <= 0:
+        raise ValueError("expected_workspace_id must be a positive integer")
+    clean_revision_id = (
+        str(expected_revision_id).strip() if expected_revision_id is not None else None
+    )
+    if expected_revision_id is not None and not clean_revision_id:
+        raise ValueError("expected_revision_id cannot be blank when provided")
+
+    if summary.get("status") != "source_attempt_recorded_unsealed":
+        raise ValueError("family-only verifier requires unsealed whole-project status")
+    if summary.get("customer_rows_verified") is not False:
+        raise ValueError("whole-project customer_rows_verified must be False")
+    if summary.get("combined_run_file") is not None:
+        raise ValueError("whole-project combined_run_file must be None")
+    if summary.get("benchmark_score_granted") is not False:
+        raise ValueError("benchmark_score_granted must be False")
+    if str(summary.get("project_id") or "").strip() != clean_project_id:
+        raise ValueError("summary project_id mismatch against expected_project_id")
+    if summary.get("workspace_id") != expected_workspace_id or isinstance(summary.get("workspace_id"), bool):
+        raise ValueError("summary workspace_id mismatch against expected_workspace_id")
+    summary_sha = str(summary.get("source_sha256") or "").strip().lower()
+    if summary_sha and summary_sha != clean_expected_sha:
+        raise ValueError("summary source_sha256 mismatch against expected_source_sha256")
+
+    family_outputs = summary.get("family_only_verified_outputs")
+    if not isinstance(family_outputs, Mapping):
+        raise ValueError("missing family_only_verified_outputs manifest block")
+    entry = family_outputs.get("floor_area")
+    if not isinstance(entry, Mapping):
+        raise ValueError("missing family_only_verified_outputs['floor_area'] entry")
+
+    if entry.get("family") != "floor_area":
+        raise ValueError("manifest entry family must be 'floor_area'")
+    if entry.get("scope") != "family_only_incomplete_project":
+        raise ValueError("manifest entry scope must be 'family_only_incomplete_project'")
+    if entry.get("verified") is not True:
+        raise ValueError("manifest entry verified must be True")
+    if entry.get("whole_project_verified") is not False:
+        raise ValueError("manifest entry whole_project_verified must be False")
+    if entry.get("benchmark_score_granted") is not False:
+        raise ValueError("manifest entry benchmark_score_granted must be False")
+
+    source_sha = str(entry.get("source_sha256") or "").strip().lower()
+    if source_sha != clean_expected_sha:
+        raise ValueError("manifest entry source_sha256 does not match expected_source_sha256")
+
+    rows_path_raw = entry.get("customer_rows_file")
+    run_path_raw = entry.get("family_run_file")
+    if not isinstance(rows_path_raw, str) or not rows_path_raw.strip():
+        raise ValueError("manifest entry missing customer_rows_file")
+    if not isinstance(run_path_raw, str) or not run_path_raw.strip():
+        raise ValueError("manifest entry missing family_run_file")
+
+    # Constrain both artifacts strictly to canonical paths under trusted output_dir
+    # and reject any ancestor or leaf symlinks or cross-directory traversal.
+    canonical_rows_path = _reject_symlink_ancestors(
+        output_dir / "verified_floor_area_family_customer_rows.json",
+        trusted_root=output_dir,
+    )
+    canonical_run_path = _reject_symlink_ancestors(
+        output_dir / "family_runs" / "floor_area.sealed.json",
+        trusted_root=output_dir,
+    )
+    manifest_rows_path = _reject_symlink_ancestors(Path(rows_path_raw), trusted_root=output_dir)
+    manifest_run_path = _reject_symlink_ancestors(Path(run_path_raw), trusted_root=output_dir)
+    if manifest_rows_path != canonical_rows_path:
+        raise ValueError("manifest customer_rows_file does not match canonical artifact path")
+    if manifest_run_path != canonical_run_path:
+        raise ValueError("manifest family_run_file does not match canonical artifact path")
+
+    raw_rows_bytes = canonical_rows_path.read_bytes()
+    actual_sha = hashlib.sha256(raw_rows_bytes).hexdigest()
+    expected_rows_sha = str(entry.get("customer_rows_sha256") or "").strip().lower()
+    if actual_sha != expected_rows_sha:
+        raise ValueError("customer_rows_file SHA-256 mismatch against manifest")
+
+    rows_loaded = json.loads(raw_rows_bytes.decode("utf-8"))
+    if not isinstance(rows_loaded, list) or not rows_loaded:
+        raise ValueError("customer_rows_file must contain a non-empty JSON list")
+    rows = tuple(rows_loaded)
+    seen_row_qids: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping) or str(row.get("quantity_family", "")).strip() != "floor_area":
+            raise ValueError("customer_rows_file contains non-floor_area row")
+        row_qid = str(row.get("quantity_id", "")).strip()
+        if not row_qid or row_qid in seen_row_qids:
+            raise ValueError("customer_rows_file contains missing or duplicate quantity_id")
+        seen_row_qids.add(row_qid)
+        if "project_id" in row and str(row.get("project_id") or "").strip() != clean_project_id:
+            raise ValueError("customer row project_id mismatch against expected_project_id")
+        if "workspace_id" in row and (
+            row.get("workspace_id") != expected_workspace_id
+            or isinstance(row.get("workspace_id"), bool)
+        ):
+            raise ValueError("customer row workspace_id mismatch against expected_workspace_id")
+        if clean_revision_id is not None and "revision_id" in row:
+            if str(row.get("revision_id") or "").strip() != clean_revision_id:
+                raise ValueError("customer row revision_id mismatch against expected_revision_id")
+
+    from pb_source_closed_run_export import sealed_source_closed_run_from_dict
+
+    floor_run = sealed_source_closed_run_from_dict(
+        json.loads(canonical_run_path.read_text(encoding="utf-8"))
+    )
+    if floor_run.run_id != entry.get("family_run_id"):
+        raise ValueError("family_run_id mismatch against sealed family run")
+    if set(floor_run.source_sha256s) != {source_sha}:
+        raise ValueError("sealed family run source_sha256 envelope mismatch")
+    run_quantities = tuple(getattr(floor_run, "quantities", ()) or ())
+    if not run_quantities:
+        raise ValueError("sealed family run contains no quantities")
+    seen_run_qids: set[str] = set()
+    for q in run_quantities:
+        if str(getattr(q, "family", "")).strip() != "floor_area":
+            raise ValueError("sealed family run contains non-floor_area quantity")
+        qid = str(getattr(q, "quantity_id", "")).strip()
+        if not qid or qid in seen_run_qids:
+            raise ValueError("sealed family run contains missing or duplicate quantity_id")
+        seen_run_qids.add(qid)
+    if clean_revision_id is not None:
+        run_rev = str(getattr(floor_run, "revision_id", "") or "").strip()
+        if run_rev and run_rev != clean_revision_id:
+            raise ValueError("sealed family run revision_id mismatch against expected_revision_id")
+
+    raw_qids = list(entry.get("verified_quantity_ids") or ())
+    if len(raw_qids) != len(set(raw_qids)):
+        raise ValueError("manifest verified_quantity_ids contains duplicate IDs")
+    expected_qids = tuple(sorted(str(q) for q in raw_qids))
+    if tuple(sorted(seen_run_qids)) != expected_qids:
+        raise ValueError("sealed family run quantity IDs do not match manifest verified_quantity_ids")
+
+    verified = verify_sealed_customer_output(floor_run, rows)
+    if (
+        len(rows) != int(entry.get("customer_row_count", -1))
+        or verified.customer_row_count != len(expected_qids)
+        or tuple(sorted(verified.verified_quantity_ids)) != expected_qids
+    ):
+        raise ValueError("family-only floor_area customer row bijection mismatch")
+    return rows
+
+
+def _verify_independent_floor_area_family_customer_projection(
+    *,
+    claim: Any,
+    family_runs: Sequence[tuple[str, SealedSourceClosedRun]],
+    workspace_id: int,
+    project_id: str,
+    source_sha256: str,
+) -> tuple[tuple[dict[str, Any], ...], SealedSourceClosedRun, tuple[str, ...]]:
+    """Verify exact family-only floor_area customer projection against its sealed family run.
+
+    Used strictly when another family abstains and withholds the whole-project
+    combined seal. Enforces:
+    - exactly one sealed ``floor_area`` family run;
+    - exact ``source_sha256`` envelope match;
+    - every sealed quantity belongs to ``floor_area`` with unique IDs;
+    - exact 1:1 bijection via ``verify_sealed_customer_output`` with zero
+      duplicate, extra, missing, or cross-family customer rows.
+    """
+    floor_runs = tuple(run for family, run in family_runs if family == "floor_area")
+    if len(floor_runs) != 1:
+        raise RuntimeError("independent floor_area family seal is ambiguous or missing")
+    floor_run = floor_runs[0]
+    if set(floor_run.source_sha256s) != {source_sha256}:
+        raise RuntimeError("independent floor_area family seal source SHA envelope mismatch")
+    if not floor_run.quantities:
+        raise RuntimeError("independent floor_area family seal has no quantities")
+    if any(str(getattr(q, "family", "")).strip() != "floor_area" for q in floor_run.quantities):
+        raise RuntimeError("independent floor_area family seal contains non-floor_area quantity")
+    quantity_ids = tuple(q.quantity_id for q in floor_run.quantities)
+    if len(set(quantity_ids)) != len(quantity_ids):
+        raise RuntimeError("independent floor_area family seal has duplicate quantity IDs")
+    rows = tuple(
+        project_live_floor_area_customer_rows(
+            claim, workspace_id=workspace_id, project_id=project_id,
+        )
+    )
+    if not rows:
+        raise RuntimeError("independent floor_area customer projection returned no rows")
+    if any(
+        not isinstance(r, Mapping) or str(r.get("quantity_family", "")).strip() != "floor_area"
+        for r in rows
+    ):
+        raise RuntimeError("independent floor_area customer projection contains wrong family row")
+    verified = verify_sealed_customer_output(floor_run, rows)
+    expected_ids = set(quantity_ids)
+    if (
+        len(rows) != len(expected_ids)
+        or verified.customer_row_count != len(expected_ids)
+        or set(verified.verified_quantity_ids) != expected_ids
+    ):
+        raise RuntimeError("independent floor_area family customer projection bijection failed")
+    return rows, floor_run, tuple(sorted(expected_ids))
 
 
 def _write_run(
@@ -717,6 +985,7 @@ def _generate_project_handoff_locked(
     summary: dict[str, Any] = {
         "schema_version": "1.0.0",
         "project_id": project_id,
+        "workspace_id": workspace_id,
         "source_path": str(pdf_path),
         "source_sha256": source_sha256,
         "page_count": page_count,
@@ -812,7 +1081,12 @@ def _generate_project_handoff_locked(
         claim = collect_live_physical_net_wall_claim(
             pdf_path,
             pages=claim_execution_pages,
-            recover_supported_opening_areas=True,
+            # Opening-area recovery replays single-page wall/opening geometry
+            # and is only relevant to opening-bearing families ("all", "core").
+            # Skipping it for "floor_area" and "surfaces" avoids a redundant
+            # full page-decode + raster pixmap pass while holding the primary
+            # claim in memory.
+            recover_supported_opening_areas=(clean_family_group in {"all", "core"}),
             topology_pages=(topology_pages if topology_restricted else None),
             # Core-family execution never activates cross-view room-area
             # measurement. Surface/all execution retains the source-classified
@@ -1005,20 +1279,69 @@ def _generate_project_handoff_locked(
         floor_finish_quantities
     )
     summary["family_counts"]["wall_finish_area"] = len(wall_finish_quantities)
+    floor_finish_family_abstained = False
     if (
         (floor_finish_quantities or disputed_numeric_floor_finish)
         and verified_floor_finish_customer_rows_from_original is None
     ):
-        family_runs.append(
-            (
-                "floor_finish_area",
-                seal_live_floor_finish_area_run(
-                    claim,
-                    workspace_id=int(workspace_id),
-                    project_id=project_id,
-                ),
+        try:
+            family_runs.append(
+                (
+                    "floor_finish_area",
+                    seal_live_floor_finish_area_run(
+                        claim,
+                        workspace_id=int(workspace_id),
+                        project_id=project_id,
+                    ),
+                )
             )
-        )
+        except FloorFinishBoundingWallAuthorityIncompleteError as exc:
+            floor_finish_family_abstained = True
+            affected_ids = sorted(
+                {
+                    str(q.quantity_id)
+                    for q in floor_finish_quantities
+                    if getattr(q, "quantity_id", None)
+                }
+                | ({exc.quantity_id} if exc.quantity_id else set())
+            )
+            wall_status_obj = getattr(claim, "canonical_wall_status", None)
+            room_status_obj = getattr(claim, "canonical_room_status", None)
+            summary.setdefault("family_abstentions", {})["floor_finish_area"] = {
+                "status": "abstained",
+                "reason_code": exc.reason_code,
+                "first_gate": "FLOOR_FINISH_BOUNDING_WALL_AUTHORITY_INCOMPLETE",
+                "failing_quantity_id": exc.quantity_id,
+                "affected_quantity_ids": affected_ids,
+                "room_entity_id": exc.room_entity_id,
+                "missing_bounding_wall_ids": list(exc.missing_bounding_wall_ids),
+                "canonical_wall_status": (
+                    getattr(wall_status_obj, "value", str(wall_status_obj))
+                    if wall_status_obj is not None
+                    else None
+                ),
+                "canonical_room_status": (
+                    getattr(room_status_obj, "value", str(room_status_obj))
+                    if room_status_obj is not None
+                    else None
+                ),
+                "canonical_wall_source_pages": list(
+                    getattr(claim, "canonical_wall_source_pages", ()) or ()
+                ),
+                "canonical_room_source_pages": list(
+                    getattr(claim, "canonical_room_source_pages", ()) or ()
+                ),
+                "unresolved_wall_candidate_count": len(
+                    getattr(claim, "unresolved_wall_candidate_ids", ()) or ()
+                ),
+            }
+            summary["floor_finish_customer_first_gate"] = (
+                "FLOOR_FINISH_BOUNDING_WALL_AUTHORITY_INCOMPLETE"
+            )
+            summary["claim_reason_codes"] = [
+                *summary["claim_reason_codes"],
+                exc.reason_code,
+            ]
 
     if clean_family_group in {"all", "core"}:
         opening_area_quantities = _non_abstained(
@@ -1334,8 +1657,10 @@ def _generate_project_handoff_locked(
     # Project-level reconciliation is another source authority gate. Do not
     # publish even individually valid family files until the complete combined
     # seal passes duplicate, lineage and source-envelope checks.
+    # A typed family-level abstention (e.g. floor-finish bounding wall authority
+    # incomplete) must NEVER publish a partial combined seal or customer approval.
     combined = None
-    if family_runs:
+    if family_runs and not floor_finish_family_abstained:
         try:
             combined = combine_source_closed_runs(
                 tuple(run for _, run in family_runs),
@@ -1404,13 +1729,39 @@ def _generate_project_handoff_locked(
             _write_json(output_dir / "production_summary.json", summary)
             raise
 
+    verified_floor_area_family_only: Optional[
+        tuple[tuple[dict[str, Any], ...], SealedSourceClosedRun, tuple[str, ...]]
+    ] = None
+    floor_area_family_only_error: Optional[str] = None
+    if combined is None and floor_finish_family_abstained and floor_quantities:
+        try:
+            verified_floor_area_family_only = (
+                _verify_independent_floor_area_family_customer_projection(
+                    claim=claim,
+                    family_runs=family_runs,
+                    workspace_id=workspace_id,
+                    project_id=project_id,
+                    source_sha256=source_sha256,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed without blocking unsealed diagnostics
+            floor_area_family_only_error = f"{type(exc).__name__}: {exc}"
+            summary.setdefault("family_only_verified_outputs", {})["floor_area"] = {
+                "family": "floor_area",
+                "scope": "family_only_incomplete_project",
+                "verified": False,
+                "whole_project_verified": False,
+                "benchmark_score_granted": False,
+                "error": floor_area_family_only_error,
+            }
+
     # An independently sealed source-positive floor finish can now carry
     # a separately verified customer receipt. Do not label the entire
     # floor/ceiling/wall/opening project customer-verified from one family.
     # A failure to project a finish must never silently become an approved
     # customer row or block unrelated, already source-sealed families.
     verified_floor_finish_customer_rows = None
-    if floor_finish_quantities:
+    if floor_finish_quantities and not floor_finish_family_abstained:
         finish_runs = tuple(
             run for family, run in family_runs if family == "floor_finish_area"
         )
@@ -1680,6 +2031,38 @@ def _generate_project_handoff_locked(
         summary["combined_run_id"] = combined.run_id
         summary["combined_quantity_count"] = len(combined.quantities)
         summary["status"] = "sealed"
+    elif floor_finish_family_abstained:
+        summary["combined_quantity_count"] = 0
+        summary["combined_run_file"] = None
+        summary["combined_run_id"] = None
+        summary["customer_rows_verified"] = False
+        summary["customer_rows_file"] = None
+        summary["verified_customer_row_count"] = 0
+        summary["benchmark_score_granted"] = False
+        summary["status"] = "source_attempt_recorded_unsealed"
+        if verified_floor_area_family_only is not None:
+            floor_rows, floor_run, floor_qids = verified_floor_area_family_only
+            floor_family_customer_path = (
+                output_dir / "verified_floor_area_family_customer_rows.json"
+            )
+            encoded_rows = json.dumps(list(floor_rows), indent=2, sort_keys=True) + "\n"
+            _write_text_atomic(floor_family_customer_path, encoded_rows)
+            summary.setdefault("family_only_verified_outputs", {})["floor_area"] = {
+                "family": "floor_area",
+                "scope": "family_only_incomplete_project",
+                "project_id": project_id,
+                "workspace_id": workspace_id,
+                "verified": True,
+                "whole_project_verified": False,
+                "benchmark_score_granted": False,
+                "source_sha256": source_sha256,
+                "family_run_id": floor_run.run_id,
+                "family_run_file": str(output_dir / "family_runs" / "floor_area.sealed.json"),
+                "customer_rows_file": str(floor_family_customer_path),
+                "customer_row_count": len(floor_rows),
+                "verified_quantity_ids": list(floor_qids),
+                "customer_rows_sha256": hashlib.sha256(encoded_rows.encode("utf-8")).hexdigest(),
+            }
     else:
         summary["combined_quantity_count"] = 0
         # ABSTAIN with a bounded-source complexity failure is not an empty
@@ -1734,6 +2117,21 @@ def _generate_project_handoff_locked(
         summary["verified_customer_row_count"] = len(verified_partial_customer_rows)
         summary["customer_rows_verified"] = True
         summary["customer_rows_file"] = str(customer_path)
+
+    emitted_families = sorted({family for family, _run in family_runs})
+    expected_families = _EXPECTED_FAMILIES_BY_GROUP.get(clean_family_group, ())
+    unemitted_families = sorted(set(expected_families) - set(emitted_families))
+    all_expected_emitted = (
+        len(unemitted_families) == 0 and not floor_finish_family_abstained
+    )
+    summary["emitted_families"] = emitted_families
+    summary["unemitted_families"] = unemitted_families
+    summary["all_expected_families_emitted"] = all_expected_emitted
+    summary["completeness_status"] = (
+        "complete_requested_families"
+        if all_expected_emitted
+        else "incomplete_unemitted_or_abstained_families"
+    )
     if owner_door_height_approvals is not None:
         # Additive estimator-review lane: runs only after every other output is
         # final, writes only below owner_door_review/, and cannot change any

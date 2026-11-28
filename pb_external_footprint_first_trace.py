@@ -350,10 +350,14 @@ def trace_external_footprint_first(
             pixels = np.frombuffer(raster.samples, dtype=np.uint8).reshape(height, width, 3)
             # Dark solid wall paint only; pale landscape, furniture fills and
             # green exclusion art never define the exterior wall outline.
+            # Exact integer arithmetic (255*27=6885 fits int16) avoids ~96MB float64 intermediates.
             gray = cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY)
-            r, g, b = (pixels[:, :, c].astype(np.int16) for c in range(3))
-            green = (g > r * 1.25) & (g > b * 1.08) & (g > 40)
+            r = pixels[:, :, 0].astype(np.int16)
+            g = pixels[:, :, 1].astype(np.int16)
+            b = pixels[:, :, 2].astype(np.int16)
+            green = (g * 4 > r * 5) & (g * 25 > b * 27) & (g > 40)
             ink = np.where((gray < 125) & ~green, 255, 0).astype(np.uint8)
+            del raster, pixels, gray, r, g, b, green
             # Floor-plan title blocks are commonly printed in the lowest band.
             # This excludes text; never removes physical topological evidence
             # permanently from the original source PDF.

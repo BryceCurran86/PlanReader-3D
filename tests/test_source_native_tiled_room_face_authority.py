@@ -278,3 +278,148 @@ def test_numeric_epsilon_never_allows_a_real_source_ring_overshoot():
               (112, 75), (112, 80), (110, 80), (110, 120.0),
               (50, 120.0), (50, 60.0004)]
     assert a._candidate_ring(_path(points)) is None
+
+
+def test_wired_three_wall_plus_coincident_fixture_boundary_and_off_mode_parity(ocr):
+    """Live find_unique_native_tiled_room_face wires bounded 3-wall + exact coincident fixture edge."""
+    drawings = _fixture(include_wall=False)
+    # 3 structural walls (L, R, T) + exact 0.48pt coincident bottom fixture edge + exterior backing wall at y=125
+    drawings += [
+        _path([(50, 50), (50, 100)], width=0.96),
+        _path([(110, 50), (110, 100)], width=0.96),
+        _path([(50, 50), (110, 50)], width=0.96),
+        _path([(50, 100), (110, 100)], width=0.48),
+        _path([(50, 125), (110, 125)], width=0.96),
+    ]
+    page = _Page(drawings)
+    try:
+        # Off mode preserves strict 4-wall-only behavior
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=2, room_label="ENS",
+            allow_coincident_fixture_boundary=False,
+        ) is None
+        # Default wired mode recovers exact coincident fixture edge (still non-commercial)
+        face = a.find_unique_native_tiled_room_face(
+            page=page, page_number=2, room_label="ENS",
+        )
+        assert isinstance(face, a.NativeTiledRoomFace)
+        assert face.commercial_permission is False
+        assert face.finished_width_pts == 60.0
+        assert face.finished_depth_pts == 50.0
+    finally:
+        page.close()
+
+
+def test_wired_offset_fixture_line_remains_rejected(ocr):
+    """Nearby 0.48pt line offset by 1.5pt (>0.25pt) MUST still abstain."""
+    drawings = _fixture(include_wall=False)
+    drawings += [
+        _path([(50, 50), (50, 100)], width=0.96),
+        _path([(110, 50), (110, 100)], width=0.96),
+        _path([(50, 50), (110, 50)], width=0.96),
+        _path([(50, 101.5), (110, 101.5)], width=0.48),
+        _path([(50, 125), (110, 125)], width=0.96),
+    ]
+    page = _Page(drawings)
+    try:
+        assert a.find_unique_native_tiled_room_face(
+            page=page, page_number=2, room_label="ENS",
+        ) is None
+    finally:
+        page.close()
+
+
+def test_wired_multi_wall_open_room_face_consumer_entrypoint():
+    from pb_source_multi_wall_open_room_face_shadow import (
+        MarkedOpeningOrFinishThresholdInput,
+        SourceWallSegmentInput,
+    )
+    sha = "a" * 64
+    walls = (
+        SourceWallSegmentInput("w1", (0, 0), (80, 0), 1.2, sha, "1", "vp1"),
+        SourceWallSegmentInput("w2", (80, 0), (80, 60), 1.2, sha, "1", "vp1"),
+        SourceWallSegmentInput("w3", (80, 60), (0, 60), 1.2, sha, "1", "vp1"),
+    )
+    thresh = (
+        MarkedOpeningOrFinishThresholdInput("t1", "finish_transition", (0, 60), (0, 0), "wit1", sha, "1", "vp1"),
+    )
+    res = a.compose_multi_wall_open_room_face_evidence(
+        wall_segments=walls, thresholds=thresh, room_label="OPEN_PLAN",
+        room_label_anchor_pts=(40.0, 30.0), source_sha256=sha, page_id="1", viewport_id="vp1",
+    )
+    assert res.resolved is True
+    assert res.commercial_projection_allowed is False
+    assert abs((res.area_pts2 or 0.0) - 4800.0) < 1e-2
+
+
+def test_wired_same_page_scale_shadow_consumer_positive_and_negatives():
+    from dataclasses import replace
+    from pb_source_same_page_figured_scale_shadow import OrthogonalFiguredSpanWitness
+
+    sha = "d" * 64
+    face = a.NativeTiledRoomFace(
+        page_number=2,
+        source_boundary_path_id=101,
+        room_label="BATH",
+        source_bbox_pts=(300.0, 200.0, 380.0, 260.0),
+        finished_width_pts=80.0,
+        finished_depth_pts=60.0,
+        wall_support_source_path_ids=(1, 2, 3, 4),
+        hatch_support_source_path_ids=(5, 6),
+        raster_ocr_render_dpis=(216, 288),
+    )
+    good_witnesses = (
+        OrthogonalFiguredSpanWitness("h1", sha, 2, "vp-plan-2", "x", 3000.0, 85.03937, (10, 11), (100.0, 100.0, 185.0, 110.0)),
+        OrthogonalFiguredSpanWitness("v1", sha, 2, "vp-plan-2", "y", 2400.0, 68.031496, (20, 21), (100.0, 120.0, 110.0, 188.0)),
+    )
+    ok = a.corroborate_native_tiled_room_face_same_page_scale_shadow(
+        face=face,
+        source_sha256=sha,
+        target_viewport_id="vp-plan-2",
+        page_rect_pts=(0.0, 0.0, 842.0, 595.0),
+        target_viewport_bbox_pdf_pts=(40.0, 40.0, 760.0, 540.0),
+        same_page_witnesses=good_witnesses,
+    )
+    assert ok.status == "SHADOW_ROOM_FACE_SCALE_CORROBORATED"
+    assert ok.commercial_projection_allowed is False
+    assert ok.takeoff_eligible is False
+    assert ok.shadow_only is True
+    assert ok.metric_estimate is not None and ok.metric_estimate.area_m2 == pytest.approx(5.973704, rel=1e-4)
+    with pytest.raises(ValueError):
+        replace(ok, commercial_projection_allowed=True)
+
+    # Mixed viewport on same page MUST abstain fail-closed
+    mixed_vp = a.corroborate_native_tiled_room_face_same_page_scale_shadow(
+        face=face,
+        source_sha256=sha,
+        target_viewport_id="vp-plan-2",
+        page_rect_pts=(0.0, 0.0, 842.0, 595.0),
+        same_page_witnesses=(
+            good_witnesses[0],
+            OrthogonalFiguredSpanWitness("v2", sha, 2, "vp-detail-1to20", "y", 2400.0, 68.031496, (22, 23), (100.0, 120.0, 110.0, 188.0)),
+        ),
+    )
+    assert mixed_vp.status == "ABSTAINED"
+    assert "mixed_viewport_witness_scope_conflict" in mixed_vp.reason_codes
+
+    # Short SHA and tolerance > 1% MUST abstain fail-closed
+    short_sha = a.corroborate_native_tiled_room_face_same_page_scale_shadow(
+        face=face,
+        source_sha256="d" * 16,
+        target_viewport_id="vp-plan-2",
+        page_rect_pts=(0.0, 0.0, 842.0, 595.0),
+        same_page_witnesses=good_witnesses,
+    )
+    assert short_sha.status == "ABSTAINED"
+    assert "invalid_scale_input_or_provenance" in short_sha.reason_codes
+
+    loose_tol = a.corroborate_native_tiled_room_face_same_page_scale_shadow(
+        face=face,
+        source_sha256=sha,
+        target_viewport_id="vp-plan-2",
+        page_rect_pts=(0.0, 0.0, 842.0, 595.0),
+        same_page_witnesses=good_witnesses,
+        max_rel_tolerance=0.05,
+    )
+    assert loose_tol.status == "ABSTAINED"
+    assert "scale_tolerance_exceeds_ceiling" in loose_tol.reason_codes

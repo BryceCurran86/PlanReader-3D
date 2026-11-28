@@ -196,3 +196,196 @@ def test_default_collection_never_invokes_page_receipt_reproof(tmp_path, monkeyp
         pytest.fail("default collection cannot reprove or change opening receipts")
     monkeypatch.setattr(append, "recover_source_opening_areas", forbidden)
     assert live.collect_live_physical_net_wall_claim(tmp_path / "not-read.pdf", pages=(0, 1)) is broad
+
+
+def _patch_minimal_recovery_pipeline(monkeypatch, append, source_sha256: str):
+    """Stub SourceVisibilityProducer & downstream composition for unit equivalence tests."""
+    from types import SimpleNamespace
+
+    snapshot = SimpleNamespace(snapshot_id="snap-1")
+    revision = SimpleNamespace(document_id="doc-1", revision_id="rev-1")
+    published = SimpleNamespace(revision=revision, snapshot=snapshot)
+
+    class _FakeProducer:
+        def __init__(self, **kwargs):
+            pass
+
+        def ingest_native_pdf_bytes(self, **kwargs):
+            return published
+
+        def raster_opening_image_placements(self, revision_id, page_id):
+            return (SimpleNamespace(image_id="img-1"),)
+
+        def published_snapshot_for_revision(self, revision_id):
+            return published
+
+    monkeypatch.setattr(append, "SourceVisibilityProducer", _FakeProducer)
+    monkeypatch.setattr(
+        append,
+        "compose_live_wall_opening_authority",
+        lambda **kwargs: SimpleNamespace(
+            physical_opening_authority=SimpleNamespace(),
+            binding_selectors={},
+            opening_host_binding_authority=SimpleNamespace(),
+        ),
+    )
+    monkeypatch.setattr(
+        append,
+        "compose_live_physical_opening_voids",
+        lambda **kwargs: SimpleNamespace(canonical_openings=()),
+    )
+    monkeypatch.setattr(
+        append, "publish_live_opening_area_quantities", lambda voids: (),
+    )
+    monkeypatch.setattr(
+        append, "_append_reproved_areas", lambda baseline, *a, **k: baseline,
+    )
+
+
+def test_recover_skips_page_local_reproof_when_baseline_opening_quantities_empty(
+    tmp_path, monkeypatch, page_claims,
+):
+    import pb_live_append_only_opening_area_composition as append
+    import pb_live_physical_net_wall_integration as live
+
+    _local, broad = page_claims
+    pdf = tmp_path / "same.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    digest = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    empty_broad = replace(
+        broad,
+        canonical_openings=tuple(replace(o, source_sha256=digest) for o in broad.canonical_openings),
+        opening_quantity_evidence=(),
+    )
+    _patch_minimal_recovery_pipeline(monkeypatch, append, digest)
+
+    def forbidden_local(*args, **kwargs):
+        pytest.fail("page-local reproof must be skipped when baseline.opening_quantity_evidence is empty")
+
+    monkeypatch.setattr(live, "_collect_live_physical_net_wall_claim", forbidden_local)
+    telemetry = {}
+    result = append.recover_source_opening_areas(
+        empty_broad,
+        pdf.read_bytes(),
+        page_id="1",
+        producer_version="test-v1",
+        page_local_source_path=pdf,
+        telemetry_sink=telemetry,
+    )
+    assert result == empty_broad
+    assert telemetry["page_local_reproof_executed"] is False
+    assert telemetry["page_local_reproof_skipped_reason"] == "empty_baseline_opening_quantity_evidence"
+
+
+def test_recover_skips_page_local_reproof_when_baseline_has_coupled_receipts(
+    tmp_path, monkeypatch, page_claims,
+):
+    import pb_live_append_only_opening_area_composition as append
+    import pb_live_physical_net_wall_integration as live
+
+    _local, broad = page_claims
+    pdf = tmp_path / "coupled.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    digest = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    coupled_broad = replace(
+        broad,
+        canonical_openings=tuple(replace(o, source_sha256=digest) for o in broad.canonical_openings),
+        quantity_m2=12.5,
+    )
+    _patch_minimal_recovery_pipeline(monkeypatch, append, digest)
+
+    def forbidden_local(*args, **kwargs):
+        pytest.fail("page-local reproof must be skipped when baseline has coupled quantity_m2")
+
+    monkeypatch.setattr(live, "_collect_live_physical_net_wall_claim", forbidden_local)
+    telemetry = {}
+    result = append.recover_source_opening_areas(
+        coupled_broad,
+        pdf.read_bytes(),
+        page_id="1",
+        producer_version="test-v1",
+        page_local_source_path=pdf,
+        telemetry_sink=telemetry,
+    )
+    assert result == coupled_broad
+    assert telemetry["page_local_reproof_executed"] is False
+    assert telemetry["page_local_reproof_skipped_reason"] == "coupled_baseline_receipts_retained_directly"
+
+
+def test_recover_executes_page_local_reproof_when_baseline_has_uncoupled_opening_quantities(
+    tmp_path, monkeypatch, page_claims,
+):
+    import pb_live_append_only_opening_area_composition as append
+    import pb_live_physical_net_wall_integration as live
+
+    from pb_live_opening_area_quantity_publication import _opening_quantity
+
+    local, broad = page_claims
+    pdf = tmp_path / "uncoupled.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    digest = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    broad_openings = tuple(replace(o, source_sha256=digest) for o in broad.canonical_openings)
+    local_openings = tuple(replace(o, source_sha256=digest) for o in local.canonical_openings)
+    broad_aligned = replace(
+        broad,
+        canonical_openings=broad_openings,
+        opening_quantity_evidence=tuple(
+            q for q in (_opening_quantity(o) for o in broad_openings) if q is not None
+        ),
+    )
+    local_aligned = replace(
+        local,
+        canonical_openings=local_openings,
+        opening_quantity_evidence=tuple(
+            q for q in (_opening_quantity(o) for o in local_openings) if q is not None
+        ),
+    )
+    _patch_minimal_recovery_pipeline(monkeypatch, append, digest)
+    calls = []
+
+    def fake_local(*args, **kwargs):
+        calls.append((args, kwargs))
+        return local_aligned
+
+    monkeypatch.setattr(live, "_collect_live_physical_net_wall_claim", fake_local)
+    telemetry = {}
+    result = append.recover_source_opening_areas(
+        broad_aligned,
+        pdf.read_bytes(),
+        page_id="1",
+        producer_version="test-v1",
+        page_local_source_path=pdf,
+        telemetry_sink=telemetry,
+    )
+    assert len(calls) == 1
+    assert telemetry["page_local_reproof_executed"] is True
+    assert telemetry["page_local_reproof_skipped_reason"] is None
+    assert result == append._preserve_page_local_area_receipts(broad_aligned, local_aligned)
+
+
+def test_recover_rejects_mismatched_page_local_source_bytes_even_when_reproof_skipped(
+    tmp_path, monkeypatch, page_claims,
+):
+    import pb_live_append_only_opening_area_composition as append
+    from pb_source_closed_run_export import SourceClosedRunConflictError
+
+    _local, broad = page_claims
+    pdf = tmp_path / "orig.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    other = tmp_path / "tampered.pdf"
+    other.write_bytes(b"%PDF-1.4\n%tampered\n%%EOF\n")
+    digest = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    empty_broad = replace(
+        broad,
+        canonical_openings=tuple(replace(o, source_sha256=digest) for o in broad.canonical_openings),
+        opening_quantity_evidence=(),
+    )
+    _patch_minimal_recovery_pipeline(monkeypatch, append, digest)
+    with pytest.raises(SourceClosedRunConflictError, match="page-local source bytes differ"):
+        append.recover_source_opening_areas(
+            empty_broad,
+            pdf.read_bytes(),
+            page_id="1",
+            producer_version="test-v1",
+            page_local_source_path=other,
+        )

@@ -729,6 +729,7 @@ def _recover_admissible_viewport_lines(
     words: Sequence[_TrustedTextWord],
     viewport: SegmentedViewport,
     render_dpis: tuple[int, int] = RASTER_TEXT_CORROBORATION_DPIS,
+    fail_fast_all_trusted_block_shadow: bool = False,
 ) -> tuple[_TrustedTextWord, ...]:
     """Corroborate exact native lines when per-word OCR remains unresolved.
 
@@ -981,6 +982,8 @@ def _recover_admissible_viewport_lines(
             )
             if reading is None or normalize_reading(reading) != claim:
                 full_line_exact = False
+                if fail_fast_all_trusted_block_shadow:
+                    break
             else:
                 readings.append(reading)
 
@@ -1104,6 +1107,10 @@ def _recover_admissible_viewport_lines(
                 verified_reason = "raster_text_line_word_composite_corroborated"
 
         if not verified:
+            if fail_fast_all_trusted_block_shadow:
+                # All-or-nothing block callers reject whenever any word stays
+                # untrusted; aborting remaining lines preserves exact outcomes.
+                break
             continue
 
         for word in line:
@@ -1382,6 +1389,7 @@ def _recover_native_material_block(
     published: object,
     raster: RasterTextCorroborationProducer,
     block_words: Sequence[_TrustedTextWord],
+    fail_fast_all_trusted_block_shadow: bool = False,
 ) -> tuple[_TrustedTextWord, ...]:
     if not block_words:
         return ()
@@ -1420,6 +1428,7 @@ def _recover_native_material_block(
         words=recovered,
         viewport=viewport,
         render_dpis=_MATERIAL_NATIVE_LINE_OCR_DPIS,
+        fail_fast_all_trusted_block_shadow=fail_fast_all_trusted_block_shadow,
     )
 
 
