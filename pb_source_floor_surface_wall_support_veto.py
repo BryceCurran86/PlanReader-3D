@@ -31,7 +31,9 @@ SCHEMA_VERSION = "1.0.0"
 
 FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT = "floor_surface_zero_physical_wall_support"
 FLOOR_SURFACE_POLYGON_UNAVAILABLE = "floor_surface_polygon_unavailable"
+FLOOR_SURFACE_POLYGON_INVALID_CANNOT_JUDGE = "floor_surface_polygon_invalid_cannot_judge"
 FLOOR_SURFACE_POSITIVE_WALL_SUPPORT = "floor_surface_positive_wall_support"
+FLOOR_SURFACE_CANDIDATE_WALL_EVIDENCE_ONLY = "floor_surface_candidate_wall_evidence_only"
 
 
 @dataclass(frozen=True)
@@ -67,13 +69,34 @@ class FloorSurfaceWallSupportVerdict:
     schema_version: str = SCHEMA_VERSION
 
 
-def _extract_edge_support_totals(predicate_result: Any) -> tuple[int, int, float, float]:
-    """Extract (supported_edges, total_edges, supported_len, total_len) from predicate output.
+def _edge_has_candidate_evidence(edge: Any) -> bool:
+    """Return True if an edge reports wide_candidate or panel_candidate evidence."""
+    for attr in ("wide_candidate", "panel_candidate"):
+        val = edge.get(attr, 0) if isinstance(edge, Mapping) else getattr(edge, attr, 0)
+        if isinstance(val, bool):
+            if val:
+                return True
+        elif isinstance(val, (int, float)):
+            if math.isfinite(val) and float(val) > 1e-6:
+                return True
+        elif val:
+            return True
+    return False
+
+
+def _extract_edge_support_totals(predicate_result: Any) -> tuple[int, int, int, float, float, str]:
+    """Extract (supported_edges, candidate_only_edges, total_edges, supported_len, total_len, reason).
 
     Supports both dataclass/attribute objects and dict-based reports returning
-    ``edges`` where each edge carries ``length`` and ``unsupported`` (matching
+    ``edges`` where each edge carries ``length``, ``unsupported``, and optional
+    ``wide_candidate`` / ``panel_candidate`` fields (matching
     ``pb_finish_face_wall_support_shadow.face_wall_support``).
     """
+    reason = str(
+        predicate_result.get("reason", "")
+        if isinstance(predicate_result, Mapping)
+        else getattr(predicate_result, "reason", "") or ""
+    ).strip()
     edges = (
         predicate_result.get("edges")
         if isinstance(predicate_result, Mapping)
@@ -83,9 +106,10 @@ def _extract_edge_support_totals(predicate_result: Any) -> tuple[int, int, float
         raise ValueError("wall support predicate result missing 'edges'")
     edge_seq = tuple(edges)
     if not edge_seq:
-        return 0, 0, 0.0, 0.0
+        return 0, 0, 0, 0.0, 0.0, reason
 
     supported_edges = 0
+    candidate_only_edges = 0
     supported_len = 0.0
     total_len = 0.0
     for edge in edge_seq:
@@ -104,7 +128,9 @@ def _extract_edge_support_totals(predicate_result: Any) -> tuple[int, int, float
         supported_len += supported
         if supported > 1e-6:
             supported_edges += 1
-    return supported_edges, len(edge_seq), supported_len, total_len
+        elif _edge_has_candidate_evidence(edge):
+            candidate_only_edges += 1
+    return supported_edges, candidate_only_edges, len(edge_seq), supported_len, total_len, reason
 
 
 def evaluate_floor_surface_zero_wall_support_veto(
@@ -167,11 +193,37 @@ def evaluate_floor_surface_zero_wall_support_veto(
             continue
 
         pred_result = wall_support_predicate(poly, drawings, closures=closures)
-        supp_edges, total_edges, supp_len, total_len = _extract_edge_support_totals(pred_result)
+        supp_edges, cand_edges, total_edges, supp_len, total_len, pred_reason = (
+            _extract_edge_support_totals(pred_result)
+        )
         frac = (supp_len / total_len) if total_len > 1e-9 else 0.0
 
-        # Safe negative rule: veto ONLY when every edge has zero wall support.
-        if total_edges == 0 or total_len <= 1e-9 or supp_len <= 1e-6:
+        # Edge case 1 (Claude #7235942026): empty edges / face_polygon_invalid is
+        # a cannot-judge abstention, NOT a zero-wall-support veto.
+        if total_edges == 0 or total_len <= 1e-9:
+            rcodes = (
+                (FLOOR_SURFACE_POLYGON_INVALID_CANNOT_JUDGE, pred_reason)
+                if pred_reason
+                else (FLOOR_SURFACE_POLYGON_INVALID_CANNOT_JUDGE,)
+            )
+            verdicts.append(
+                FloorSurfaceWallSupportVerdict(
+                    surface_entity_id=surf.surface_entity_id,
+                    quantity_id=surf.quantity_id,
+                    status=EvidenceResolutionStatus.ABSTAINED,
+                    vetoed=True,
+                    supported_edge_count=0,
+                    total_edge_count=0,
+                    supported_length_pt=0.0,
+                    total_length_pt=0.0,
+                    supported_fraction=0.0,
+                    reason_codes=rcodes,
+                )
+            )
+        # Edge case 2 (Claude #7235942026): wide_candidate / panel_candidate count
+        # as edge evidence so a room bounded only by white-filled panel walls is
+        # not falsely vetoed as having zero wall evidence.
+        elif supp_len <= 1e-6 and cand_edges == 0:
             verdicts.append(
                 FloorSurfaceWallSupportVerdict(
                     surface_entity_id=surf.surface_entity_id,
@@ -184,6 +236,21 @@ def evaluate_floor_surface_zero_wall_support_veto(
                     total_length_pt=round(total_len, 4),
                     supported_fraction=0.0,
                     reason_codes=(FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,),
+                )
+            )
+        elif supp_len <= 1e-6 and cand_edges > 0:
+            verdicts.append(
+                FloorSurfaceWallSupportVerdict(
+                    surface_entity_id=surf.surface_entity_id,
+                    quantity_id=surf.quantity_id,
+                    status=EvidenceResolutionStatus.CORROBORATED,
+                    vetoed=False,
+                    supported_edge_count=0,
+                    total_edge_count=total_edges,
+                    supported_length_pt=0.0,
+                    total_length_pt=round(total_len, 4),
+                    supported_fraction=0.0,
+                    reason_codes=(FLOOR_SURFACE_CANDIDATE_WALL_EVIDENCE_ONLY,),
                 )
             )
         else:
@@ -205,6 +272,8 @@ def evaluate_floor_surface_zero_wall_support_veto(
 
 
 __all__ = [
+    "FLOOR_SURFACE_CANDIDATE_WALL_EVIDENCE_ONLY",
+    "FLOOR_SURFACE_POLYGON_INVALID_CANNOT_JUDGE",
     "FLOOR_SURFACE_POLYGON_UNAVAILABLE",
     "FLOOR_SURFACE_POSITIVE_WALL_SUPPORT",
     "FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT",
