@@ -31,3 +31,8 @@ list contested candidates beside the unresolved groups (diagnostic only, authori
 
 Re-baseline the membership pin to 189 as candidate-only once the 10 removals are accepted. Do not treat 189 as existence or
 opening counts.
+
+## Follow-up built (28 Nov, CL-R22, report only)
+`PhysicalOpeningAuthority.visible_contested_candidate_groups(selector)` lists the candidates whose every support is
+contested (`contested_every_support`), which the closure records neither as proven nor as unresolved. The closure result,
+IDs, existence, hosts and counts are unchanged. Synthetic tests only; originals not yet read through it.

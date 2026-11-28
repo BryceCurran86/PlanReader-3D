@@ -13,10 +13,10 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R03 cold room / false sales cell | new | validation (trace) | self-intersecting ring under the snap; area on a floor-grid cell (7234165306) | fix after R02 |
 | R04 finish edges on wall ink | C05/C08 | validation | `pb_finish_face_wall_support_shadow` (#4810) rejects the Office/Food Prep/Sales cells; report-only panel candidate; C05 guard (#4810, off) | cold-room ring runs on outer faces (R07) before any veto; signed rows |
 | R05 Office doorway | C08 | validation | `door_jamb_returns` (main, #4763) closes the real Office (92% wall support); union shadow (#4810) keeps WSH/DRY | MAX: is the ring builder the surface source for finish rows |
-| R06 Food Prep open plan | C22 | validation | open-plan ring shadow (main `a05df3bb5`, runtime #4561) | real threshold and finish ownership with AG evidence |
+| R06 Food Prep open plan | C22 | missing (boundary) | the open-plan module only audits; no ring holds the label | threshold and finish-extent evidence from AG (finishes plan) |
 | R07 inside-face rings and ids | C06–C08 | validation | ring builder gives Cold Room, Freezer and Office inside-face rings (28 Nov); ring-wall identity map (#4810); viewport wall links (main #4780, off) | panel walls (MAX); edge-to-wall links without choosing |
 | R08 source-lineage identity | new | validation | `pb_wall_lineage_identity_shadow` (#4810 `1675267bb`); offline: whole chains not enough for hosts | jamb-piece identity design if MAX wants it |
-| R09 viewport crossing | C04 | validation | page wall scopes crop at the viewport boundary (main) | audit crossing-primitive provenance |
+| R09 viewport crossing | C04 | validation | crossing primitives are left out of a viewport scope with a receipt, not clipped (main) | census of wall-like crossings on originals before any clip |
 | R10 external footprint first | C09 | validation | footprint-first traces in the live claim, inside-face envelope (main `e1cbd4cb5`, #4549); edge support (main #4650, off) | original proof across plan styles |
 | R11 garage closure | C10 | validation | `pb_source_garage_door_footprint_continuity` and envelope (main) | original proof |
 | R12 party walls | C11 | validation | dual-dwelling and shared-envelope shadows (main `e18553a1c`) | no dual-dwelling original proven |
@@ -29,7 +29,7 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R19 3Laurel openings | C18 | missing (binding) | internal door census (main #4637/#4639); unique-swing host module only on the 11-15 3Laurel branches (`4aba3c8e8`, `63d6e6295`), not on main | 18 internal items unbound; door donor pieces B–E |
 | R20 opening widths and heights | C19 | validation | figured-label opening quantities (live); schedule binding (#4810 C01) | schedule/elevation reconciliation with AG |
 | R21 jamb caps and returns | C20 | validation | `jamb_caps_must_be_wall_ends` and returns (main #4763, off) | originals positives/negatives |
-| R22 Lot16 stub candidates | C21 | proven (diagnostic) / missing (recovery) | one rule explains 125 → 189 (`claude_lot16_candidate_reconciliation_20261127.md`) | member evidence recovery |
+| R22 Lot16 stub candidates | C21 | proven (diagnostic) / validation (retention) | one rule explains 125 → 189; contested candidates now retained for audit (`visible_contested_candidate_groups`, synthetic) | read them on the originals |
 | R23 Lot16 raster wall lineage | C26 | validation | paint lineage classifier (#4810) | room edges by source |
 | R24 holes and exclusions | C23 | validation | `pb_room_face_hole_report_shadow` (#4810) | classify with AG semantics |
 | R25 Q5446 finished faces | C24 | validation | finished interior face recovery shadow (main `a05df3bb5`) | BATH/LIVING on the original |

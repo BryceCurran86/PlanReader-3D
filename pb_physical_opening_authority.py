@@ -1881,6 +1881,12 @@ class PhysicalOpeningAuthority:
             tuple[str, str, str, str, str],
             tuple[tuple[str, str, tuple[str, ...]], ...],
         ] = {}
+        # Observability ONLY: candidates whose every support was contested, so the
+        # closure lists them neither as proven nor as unresolved. Never authority.
+        self._native_contested_candidate_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[tuple[str, str, tuple[str, ...]], ...],
+        ] = {}
         self._visible_viewport_candidate_membership_cache: dict[
             tuple[str, str, str, str, str],
             dict[str, tuple[CandidateSemanticOpening, ...]],
@@ -1981,6 +1987,7 @@ class PhysicalOpeningAuthority:
             "_visible_candidate_cache",
             "_visible_candidate_membership_cache",
             "_native_raw_candidate_support_cache",
+            "_native_contested_candidate_cache",
             "_visible_viewport_candidate_membership_cache",
             "_visible_existence_cache",
             "_visible_disposition_cache",
@@ -4484,8 +4491,10 @@ class PhysicalOpeningAuthority:
         # hypothesis opposed by complete annotation evidence remains unresolved
         # in closure; retain its raw support instead of silently discarding it.
         proven_supports = []
+        contested: list[tuple[str, str, tuple[str, ...]]] = []
         for candidate in promotable:
             support = frozenset(candidate.source_observation_ids)
+            listed = False
             for observation_id in candidate.source_observation_ids:
                 existence = self.prove_existence(
                     replace(selector, observation_id=observation_id)
@@ -4497,6 +4506,7 @@ class PhysicalOpeningAuthority:
                     == support
                 ):
                     proven_supports.append(support)
+                    listed = True
                     break
                 if (
                     existence.candidate is not None
@@ -4504,6 +4514,9 @@ class PhysicalOpeningAuthority:
                 ):
                     raw_candidates[candidate.candidate_id] = support
                     raw_patterns[candidate.candidate_id] = candidate.structural_pattern
+                    listed = True
+            if not listed:
+                contested.append((candidate.candidate_id, candidate.structural_pattern, tuple(sorted(support))))
         typed_non_plan_supports = tuple(
             frozenset(candidate.source_observation_ids)
             for candidate in proven
@@ -4532,6 +4545,7 @@ class PhysicalOpeningAuthority:
         # A diagnostic may subsequently reauthenticate this grouping without
         # re-running a different detector. This does not make incomplete raw
         # candidates physically real, resolved or countable.
+        self._native_contested_candidate_cache[self._visible_page_candidate_key(seed)] = tuple(sorted(set(contested)))
         self._native_raw_candidate_support_cache[
             self._visible_page_candidate_key(seed)
         ] = tuple(sorted(
@@ -4720,6 +4734,31 @@ class PhysicalOpeningAuthority:
                 structural_pattern=pattern,
             )
             for candidate_id, source_ids, aperture, pattern in sorted(items)
+        )
+
+    def visible_contested_candidate_groups(
+        self, selector: ObservationSelector,
+    ) -> tuple[dict[str, object], ...]:
+        """Report only: candidates the closure lists nowhere because every support is contested.
+
+        Retention, never authority: no existence, host, count or ID changes, and
+        the closure result itself is untouched.
+        """
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        closure = self.assess_visible_candidate_closure(selector)
+        source = self._resolve_visible_cached(selector)
+        if (closure.status is not EvidenceResolutionStatus.CORROBORATED
+                or source.status is not EvidenceResolutionStatus.CORROBORATED
+                or source.observation is None):
+            raise RuntimeError("contested candidate original scope unavailable")
+        groups = self._native_contested_candidate_cache.get(self._visible_page_candidate_key(source.observation))
+        if groups is None:
+            raise RuntimeError("contested candidate membership unavailable")
+        return tuple(
+            dict(candidate_id=candidate_id, source_observation_ids=list(observation_ids),
+                 candidate_status="contested_every_support", structural_pattern=pattern)
+            for candidate_id, pattern, observation_ids in groups
         )
 
     @staticmethod
