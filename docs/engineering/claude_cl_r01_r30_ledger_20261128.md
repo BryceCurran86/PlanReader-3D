@@ -15,7 +15,7 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R05 Office doorway | C08 | validation | `door_jamb_returns` (main, #4763) closes the real Office (92% wall support); union shadow (#4810) keeps WSH/DRY | MAX: is the ring builder the surface source for finish rows |
 | R06 Food Prep open plan | C22 | missing (boundary) | the open-plan module only audits; no ring holds the label | threshold and finish-extent evidence from AG (finishes plan) |
 | R07 inside-face rings and ids | C06–C08 | validation | ring builder gives Cold Room, Freezer and Office inside-face rings (28 Nov); ring-wall identity map (#4810); viewport wall links (main #4780, off) | panel walls (MAX); edge-to-wall links without choosing |
-| R08 source-lineage identity | new | validation | `pb_wall_lineage_identity_shadow` (#4810 `1675267bb`); offline: whole chains not enough for hosts | jamb-piece identity design if MAX wants it |
+| R08 source-lineage identity | new | validation | `pb_wall_lineage_identity_shadow` (#4810); offline: whole chains not enough for hosts; report-only host identity from the pieces at the opening (`c137a06c3`, synthetic) | measure on originals; MAX's decision before any use |
 | R09 viewport crossing | C04 | validation | crossing primitives are left out of a viewport scope with a receipt, not clipped (main) | census of wall-like crossings on originals before any clip |
 | R10 external footprint first | C09 | validation | footprint-first traces in the live claim, inside-face envelope (main `e1cbd4cb5`, #4549); edge support (main #4650, off) | original proof across plan styles |
 | R11 garage closure | C10 | validation | `pb_source_garage_door_footprint_continuity` and envelope (main) | original proof |
