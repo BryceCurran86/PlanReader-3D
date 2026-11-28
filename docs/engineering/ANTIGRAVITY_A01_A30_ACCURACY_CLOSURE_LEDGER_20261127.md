@@ -73,3 +73,14 @@
 
 ### B. `A05` Sheet-7 Cap/Token Association Diagnosis (`#7224267927`)
 - Sheet 7 (`107,402` line segments, `559` native spans / `1,545` words, rotated 90°) has `8` linear-dimension spans (`21` words: `13` edge/title strip, `8` interior) and `2` scale-ratio tokens. All `8/8` match `18` parallel axes (`17/18` have `>=2` perpendicular junctions, `9/18` have `>=2` crossing diagonal slashes), but `0/18` pass `compile_native_dimension_cap_components`'s split-half-tick endpoint check and `0/18` have coincident crossing slash+cap — fails closed honestly (`dimension_witnesses_unavailable`, `requires_typed_negative_ink_guard=True`). Never used to unblock non-wall lines.
+
+### C. Q5446 & Acacia Source Evidence Handoff Specs for MAX Integration (`#7232924376`)
+- **Q5446 (`A06` Outlined-Vector Captions)**:
+  - `pb_page_title_authority.resolve_document` (RapidOCR title-block label binding) returns `0/10` title-block-bound titles because Q5446's sheet titles are outlined-vector in-drawing captions.
+  - Available opt-in AG source helpers ready for MAX integration:
+    1. `pb_source_floor_plan_page_scope.py`: `allow_corroborated_ocr_titles: bool = False` fallback (default off, 39/39 unit tests).
+    2. `pb_source_vector_outlined_text_ocr_shadow.py`: `classify_outlined_caption_view_type(...)` requiring multi-DPI agreement (`shadow_only=True`, `commercial_authority_granted=False`).
+- **Acacia (`A06`/`A25` Source-Set Admission)**:
+  - `pb_source_floor_plan_page_scope.py:build_source_set_admission_packet(...)` classifies Acacia `p1=register` (`not_floor_plan_document_header`), `p2=unproven`, emitting `has_finish_specification_source=False`, `finish_specification_status="abstained_no_finish_specification_source"` cleanly with zero fabricated finish specs.
+- **Hardened Family-Only Consumer Verifier (`20e1ecd83` / `40c5dae4d`)**:
+  - `tools/run_source_closed_project_handoff.py:verify_family_only_floor_area_manifest(summary, *, output_dir, expected_source_sha256, expected_project_id, expected_workspace_id, expected_revision_id=None)` enforces trusted `output_dir`, ancestor/leaf symlink rejection (`_reject_symlink_ancestors`), canonical path confinement, LF-exact raw-byte SHA-256 verification, cross-context checks, duplicate-ID rejection, and non-`floor_area` seal rejection (51 passed, 5 skipped).
