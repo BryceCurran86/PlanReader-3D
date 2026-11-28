@@ -97,3 +97,43 @@ def test_bounded_ocr_budget_fails_closed_when_exhausted() -> None:
     assert res.ocr_calls_attempted == 2
     assert res.ocr_calls_skipped_fail_fast == 3
     assert res.reason_codes == ("targeted_ocr_budget_exhausted",)
+
+
+def test_recover_native_material_block_fail_fast_shadow_default_off_and_wired() -> None:
+    """Verify _recover_native_material_block wires default-off fail_fast_all_trusted_block_shadow."""
+    import inspect
+    import pb_source_material_semantic_authority as mat
+
+    sig_block = inspect.signature(mat._recover_native_material_block)
+    sig_lines = inspect.signature(mat._recover_admissible_viewport_lines)
+    assert sig_block.parameters["fail_fast_all_trusted_block_shadow"].default is False
+    assert sig_lines.parameters["fail_fast_all_trusted_block_shadow"].default is False
+
+    # All-trusted native block returns identically with zero OCR regardless of flag.
+    trusted_word = mat._TrustedTextWord(
+        observation_id="obs-1",
+        page_id="1",
+        source_partition_id="p1",
+        text="FINISHES",
+        bbox=(10.0, 10.0, 60.0, 20.0),
+        block_no=0,
+        line_no=0,
+        word_no=0,
+        trusted=True,
+        reason_codes=(),
+    )
+    out_off = mat._recover_native_material_block(
+        source=None,  # type: ignore[arg-type]
+        published=None,
+        raster=None,  # type: ignore[arg-type]
+        block_words=(trusted_word,),
+        fail_fast_all_trusted_block_shadow=False,
+    )
+    out_on = mat._recover_native_material_block(
+        source=None,  # type: ignore[arg-type]
+        published=None,
+        raster=None,  # type: ignore[arg-type]
+        block_words=(trusted_word,),
+        fail_fast_all_trusted_block_shadow=True,
+    )
+    assert out_off == out_on == (trusted_word,)
