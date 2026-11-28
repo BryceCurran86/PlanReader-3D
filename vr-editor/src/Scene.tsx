@@ -1184,8 +1184,8 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         if(wall&&aimed){
           const result=aimOpening(wall,aimed.point,"door",build.current.buildSizes,newPlacementId("sliding-door"));
           if(!result||result.error){reportTool(result?.error??"Aim at a clear portion of the draft wall.");return;}
-          const mechanism=item.visual.style==="cavity"?"cavity":item.visual.style==="barn"?"barn":"sliding";
-          const opening={...result.opening,doorMechanism:mechanism as "cavity"|"barn"|"sliding"};
+          const mechanism=item.visual.style==="cavity"?"cavity":item.visual.style==="barn"?"barn":item.visual.style==="stacker"?"stacker":item.visual.style==="wide-stacker"?"wide-stacker":"sliding";
+          const opening={...result.opening,doorMechanism:mechanism as "cavity"|"barn"|"sliding"|"stacker"|"wide-stacker"};
           const next={...wall,openings:[...wall.openings,opening]};
           if(!validEditedWall(next)){reportTool("Sliding door needs clear adjacent wall space for its travel. Choose a narrower door or another location.");return;}
           build.current.onBuildAction({kind:"adjust",previous:wall,wall:next});
@@ -1277,12 +1277,14 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
       if(multiSelect||resize.current.projection||elevatedReturn||!leaf.parent||!leaf.userData.localDoorMotion)return false;
       const key=doorKey(leaf.parent.userData.proposalId,leaf.userData.catalogueDoorLeaf);
       const opening=!openDoors.has(key);
-      const motion=leaf.userData.localDoorMotion as LocalDoorMotion;
+      for(const panel of leaf.parent.children){if(!(panel instanceof THREE.Mesh)||panel.userData.catalogueDoorLeaf!==leaf.userData.catalogueDoorLeaf||!panel.userData.localDoorMotion)continue;
+      const motion=panel.userData.localDoorMotion as LocalDoorMotion;
       const pivot=new THREE.Vector3(...motion.pivot);
-      leaf.quaternion.setFromAxisAngle(new THREE.Vector3(...motion.axis),opening?motion.angle:0);
-      leaf.position.copy(pivot).sub(pivot.clone().applyQuaternion(leaf.quaternion));
-      if(opening)leaf.position.add(new THREE.Vector3(...motion.translation));
-      leaf.updateMatrixWorld(true);
+      panel.quaternion.setFromAxisAngle(new THREE.Vector3(...motion.axis),opening?motion.angle:0);
+      panel.position.copy(pivot).sub(pivot.clone().applyQuaternion(panel.quaternion));
+      if(opening)panel.position.add(new THREE.Vector3(...motion.translation));
+      panel.updateMatrixWorld(true);}
+
       const next=new Set(openDoors);
       if(opening)next.add(key);else next.delete(key);
       openDoors=next;
