@@ -15,7 +15,7 @@ export interface WallAdditionSketch {
   heightM:number;
 }
 export type DoorHardwareFinish="chrome"|"matte-black"|"brushed-brass"|"brushed-nickel";
-export type DoorMechanism="swing"|"sliding"|"garage";
+export type DoorMechanism="swing"|"sliding"|"garage"|"cavity"|"barn";
 export interface WallAdditionOpening {
   openingId:string;
   offsetM:number;
