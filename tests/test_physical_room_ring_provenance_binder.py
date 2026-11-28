@@ -13,6 +13,7 @@ from pb_source_physical_room_ring_provenance_binder import (
     NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL,
     ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED,
     PHYSICAL_ROOM_RING_PROVENANCE_REBOUND,
+    RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS,
     RoomProvenanceBindingCandidate,
     bind_room_provenance_to_physical_rings_shadow,
 )
@@ -200,4 +201,72 @@ def test_ambiguous_overlapping_physical_rings_fail_closed_with_conflict() -> Non
     assert bindings[0].reason_codes == (
         FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
         AMBIGUOUS_MULTIPLE_PHYSICAL_ROOM_RINGS_FOR_LABEL,
+    )
+
+
+def test_multi_room_open_plan_shell_ring_is_rejected_while_single_room_ring_binds() -> None:
+    # Mimics real Sheet-7 discovery: giant open-plan shell ring encloses multiple
+    # distinct room labels (open zone + adjacent zone), while single enclosed room
+    # ring contains only its own label.
+    single_room_ring = SimpleNamespace(
+        record_id="ring_single_enclosed",
+        source_sha256=SHA,
+        page_index=6,
+        polygon_pdf_pts=PHYSICAL_RING,
+        area_pt2=28197.7,
+        wall_edge_count=10,
+        closure_edge_count=1,
+        bounding_closure_ids=("c_door_1",),
+        bounding_wall_path_indices=(1, 2, 3),
+    )
+    giant_shell_ring = SimpleNamespace(
+        record_id="ring_open_plan_shell",
+        source_sha256=SHA,
+        page_index=6,
+        polygon_pdf_pts=((200.0, 0.0), (1200.0, 0.0), (1200.0, 1000.0), (200.0, 1000.0)),
+        area_pt2=1000000.0,
+        wall_edge_count=40,
+        closure_edge_count=9,
+        bounding_closure_ids=("c1", "c2", "c3"),
+        bounding_wall_path_indices=(10, 11, 12),
+    )
+
+    c_single = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_grid_single", "q_single", GRID_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(25.0, 25.0),
+        explicit_area_m2=9.05352,
+    )
+    c_open_zone = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_grid_open", "q_open_zone", OPEN_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(315.0, 25.0),
+        explicit_area_m2=13.270425,
+    )
+    bindings = bind_room_provenance_to_physical_rings_shadow(
+        candidates=(c_single, c_open_zone),
+        physical_rings=(single_room_ring, giant_shell_ring),
+        drawings=(),
+        wall_support_predicate=_wall_predicate,
+        expected_document_id="doc1",
+        expected_revision_id="rev1",
+        expected_source_sha256=SHA,
+        page_room_label_anchors=(
+            (6, "lbl_single", (25.0, 25.0)),
+            (6, "lbl_open_zone", (315.0, 25.0)),
+            (6, "lbl_adjacent_zone", (450.0, 250.0)),
+        ),
+    )
+    by_qid = {b.quantity_id: b for b in bindings}
+
+    assert by_qid["q_single"].withheld is False
+    assert by_qid["q_single"].bound_ring_record_id == "ring_single_enclosed"
+    assert by_qid["q_single"].explicit_area_m2 == 9.05352
+
+    assert by_qid["q_open_zone"].withheld is True
+    assert by_qid["q_open_zone"].status is EvidenceResolutionStatus.ABSTAINED
+    assert by_qid["q_open_zone"].bound_ring_record_id is None
+    assert by_qid["q_open_zone"].reason_codes == (
+        FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
+        RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS,
     )

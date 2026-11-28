@@ -42,6 +42,7 @@ SCHEMA_VERSION = "1.0.0"
 ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED = "original_surface_wall_supported_retained"
 PHYSICAL_ROOM_RING_PROVENANCE_REBOUND = "physical_room_ring_provenance_rebound"
 NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL = "no_qualifying_physical_room_ring_for_label"
+RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS = "ring_contains_multiple_distinct_room_labels"
 AMBIGUOUS_MULTIPLE_PHYSICAL_ROOM_RINGS_FOR_LABEL = (
     "ambiguous_multiple_physical_room_rings_for_label"
 )
@@ -138,6 +139,7 @@ def bind_room_provenance_to_physical_rings_shadow(
     expected_revision_id: str,
     expected_source_sha256: str,
     closures: Sequence[Any] = (),
+    page_room_label_anchors: Sequence[tuple[int, str, tuple[float, float]]] = (),
 ) -> tuple[PhysicalRoomRingProvenanceBinding, ...]:
     """Bind explicit-area, floor-finish, and RCP provenance to wall-supported physical rings.
 
@@ -265,11 +267,32 @@ def bind_room_provenance_to_physical_rings_shadow(
             continue
 
         matching_rings: list[tuple[Any, float]] = []
+        multi_label_shell_rejected = False
+        # Build all OTHER room-label anchors on the same page so a giant multi-room
+        # open-plan shell ring enclosing >=2 distinct room labels cannot be mistaken
+        # for a single room's physical boundary.
+        other_anchors: list[tuple[float, float]] = [
+            other.room_label_anchor_pdf_pt
+            for other in candidates
+            if other.page_index == cand.page_index
+            and other.surface.surface_entity_id != surf.surface_entity_id
+            and len(other.room_label_anchor_pdf_pt) == 2
+        ]
+        for lbl_page, _lbl_id, lbl_pt in page_room_label_anchors:
+            if lbl_page != cand.page_index or len(lbl_pt) != 2:
+                continue
+            if math.hypot(lbl_pt[0] - anchor[0], lbl_pt[1] - anchor[1]) <= 1.0:
+                continue
+            other_anchors.append(lbl_pt)
+
         for ring, ring_poly in scoped_rings:
             ring_page = _ring_attr(ring, "page_index", None)
             if ring_page != cand.page_index:
                 continue
             if not _point_in_polygon(anchor, ring_poly):
+                continue
+            if any(_point_in_polygon(other_pt, ring_poly) for other_pt in other_anchors):
+                multi_label_shell_rejected = True
                 continue
             # Verify the candidate ring itself passes the exact same wall_support_predicate!
             ring_surface = FloorSurfaceWallSupportInput(
@@ -296,6 +319,17 @@ def bind_room_provenance_to_physical_rings_shadow(
 
         if not matching_rings:
             # Open-plan / unenclosed zone (e.g., Food Prep): keep strictly withheld.
+            abstain_reasons = (
+                (
+                    FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
+                    RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS,
+                )
+                if multi_label_shell_rejected
+                else (
+                    FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
+                    NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL,
+                )
+            )
             results.append(
                 PhysicalRoomRingProvenanceBinding(
                     original_surface_entity_id=surf.surface_entity_id,
@@ -315,10 +349,7 @@ def bind_room_provenance_to_physical_rings_shadow(
                     rcp_ceiling_material=None,
                     rcp_ceiling_height_mm=None,
                     rcp_ceiling_evidence_ids=(),
-                    reason_codes=(
-                        FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
-                        NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL,
-                    ),
+                    reason_codes=abstain_reasons,
                 )
             )
             continue
@@ -387,6 +418,7 @@ __all__ = [
     "NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL",
     "ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED",
     "PHYSICAL_ROOM_RING_PROVENANCE_REBOUND",
+    "RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS",
     "PhysicalRoomRingProvenanceBinding",
     "RoomProvenanceBindingCandidate",
     "SCHEMA_VERSION",
