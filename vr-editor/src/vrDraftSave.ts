@@ -11,6 +11,8 @@ import { getCatalogueItem } from "./itemCatalogue.ts";
 import { scopeKey } from "./reviewDraft.ts";
 import type { SceneManifest } from "./types.ts";
 import {isWallAssembly} from "./wallProfiles.ts";
+import {readSlabs} from "./independentSlabs.ts";
+import type {IndependentSlab} from "./independentSlabs.ts";
 import {validSiteBounds,validFence} from "./siteFence.ts";
 import type {FenceSettings,SiteBounds} from "./siteFence.ts";
 
@@ -104,20 +106,20 @@ function readItems(value:unknown,key:string):PlacedItem[] {
   });
 }
 export type SavedSite={bounds:SiteBounds|null;fence:FenceSettings};
-export type RestoredVrDraft = {build:BuildState;itemDraft:ItemDraft;site?:SavedSite};
+export type RestoredVrDraft = {build:BuildState;itemDraft:ItemDraft;site?:SavedSite;slabs:IndependentSlab[]};
 function readSite(raw:unknown):SavedSite|undefined{
  if(raw===undefined)return undefined;
  if(!record(raw)||!(raw.bounds===null||record(raw.bounds)&&validSiteBounds(raw.bounds as SiteBounds))||!record(raw.fence)||!validFence(raw.fence as FenceSettings))throw Error("Invalid local property settings");
  const b=raw.bounds as SiteBounds|null,f=raw.fence as FenceSettings;
  return {bounds:b?{minX:b.minX,maxX:b.maxX,minZ:b.minZ,maxZ:b.maxZ}:null,fence:{style:f.style,heightM:f.heightM,color:f.color}};
 }
-export function saveVrReview(scene:SceneManifest,build:BuildState,items:ItemDraft|null,site?:SavedSite):string {
+export function saveVrReview(scene:SceneManifest,build:BuildState,items:ItemDraft|null,site?:SavedSite,slabs:readonly IndependentSlab[]=[]):string {
   const key=scopeKey(scene);
   return JSON.stringify({format:"planreader-local-vr-review",schema:1,
     previewOnly:true,commercialPublicationAllowed:false,source:identity(scene),
     sourceKey:key,exportedAt:new Date().toISOString(),
     geometry:{walls:build.walls,ceilings:build.ceilings},
-    ...(site?{site:readSite(site)}:{}),
+    ...(site?{site:readSite(site)}:{}),slabs:readSlabs(slabs),
     history:build.history.slice(-50),future:(build.future??[]).slice(-50),
     catalogue:items?.sourceKey===key ? {
       items:items.items,history:items.history.slice(-50),future:(items.future??[]).slice(-50)
@@ -145,6 +147,6 @@ export function restoreVrReview(scene:SceneManifest,data:unknown):RestoredVrDraf
   const items=readItems(catalogue.items,scopeKey(scene));
   const itemHistory=catalogue.history.map(x=>readItems(x,scopeKey(scene)));
   const itemFuture=catalogue.future.map(x=>readItems(x,scopeKey(scene)));
-  return {...(data.site!==undefined?{site:readSite(data.site)}:{}),build:{...EMPTY_BUILD,...geometry,history:past,future:ahead,tool:null,start:null},
+  return {slabs:readSlabs(data.slabs,levels),...(data.site!==undefined?{site:readSite(data.site)}:{}),build:{...EMPTY_BUILD,...geometry,history:past,future:ahead,tool:null,start:null},
     itemDraft:{...emptyItemDraft(scopeKey(scene)),items,history:itemHistory,future:itemFuture}};
 }
