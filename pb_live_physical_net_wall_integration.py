@@ -445,6 +445,7 @@ def _collect_live_physical_net_wall_claim(
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
     viewport_wall_identity_links: bool = False,
+    floor_grid_cell_veto_shadow: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -503,6 +504,8 @@ def _collect_live_physical_net_wall_claim(
         raise ValueError(
             "layered wall end stroke closures need layered dark painted wall source"
         )
+    if type(floor_grid_cell_veto_shadow) is not bool:
+        raise ValueError("floor grid cell veto shadow must be an explicit boolean")
     native_text_kwargs = {
         **({"source_native_finish_text_shadow": True}
            if source_native_finish_text_shadow else {}),
@@ -674,6 +677,10 @@ def _collect_live_physical_net_wall_claim(
         **({"viewport_wall_identity_links": True}
            if viewport_wall_identity_links else {}),
     )
+    floor_grid_withheld: tuple = ()
+    if floor_grid_cell_veto_shadow:
+        from pb_floor_grid_cell_veto_shadow import veto_floor_grid_cell_rooms
+        canonical_rooms, floor_grid_withheld = veto_floor_grid_cell_rooms(canonical_rooms, payload)
     canonical_space_core = compose_live_canonical_spaces(canonical_rooms)
     canonical_floors = compose_live_canonical_floor_surfaces(
         canonical_rooms
@@ -1298,6 +1305,7 @@ def _collect_live_physical_net_wall_claim(
             )
 
     surface_pipeline_diagnostics = {
+        **({"floor_grid_cell_veto": floor_grid_withheld} if floor_grid_cell_veto_shadow else {}),
         "source_green_hatched_physical_rooms_count": len(green_hatch_witnesses),
         "ordinary_hatched_ceiling_excluded_quantity_ids": tuple(
             q.quantity_id for q in ceiling_lining_quantity_evidence
@@ -1631,6 +1639,7 @@ def collect_live_physical_net_wall_claim(
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
     viewport_wall_identity_links: bool = False,
+    floor_grid_cell_veto_shadow: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1686,6 +1695,8 @@ def collect_live_physical_net_wall_claim(
         raise ValueError(
             "layered wall end stroke closures need layered dark painted wall source"
         )
+    if type(floor_grid_cell_veto_shadow) is not bool:
+        raise ValueError("floor grid cell veto shadow must be an explicit boolean")
     recovery_page_id = None
     if recover_additional_opening_areas or recover_supported_opening_areas:
         with fitz.open(pdf_path) as doc:
@@ -1731,6 +1742,8 @@ def collect_live_physical_net_wall_claim(
            if layered_wall_end_stroke_closures else {}),
         **({"viewport_wall_identity_links": True}
            if viewport_wall_identity_links else {}),
+        **({"floor_grid_cell_veto_shadow": True}
+           if floor_grid_cell_veto_shadow else {}),
     )
     if recovery_page_id is None:
         return claim
