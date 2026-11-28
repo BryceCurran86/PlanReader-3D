@@ -23,6 +23,7 @@ export function localNavigationWalls(wall:WallVisual,openDoors:ReadonlySet<strin
   if(o.openingKind!=="passage"&&!(door&&(open||!showDoors)))continue;
   if(o.offsetM>end)walls.push({start:at(end),end:at(o.offsetM),halfThickness});
   end=o.offsetM+o.widthM;
+  if(open&&showDoors&&(motion?.kind==="stacker"||motion?.kind==="wide-stacker"))walls.push({start:at(end-o.widthM/(motion.kind==="stacker"?3:4)),end:at(end),halfThickness});
   if(open&&showDoors&&motion?.kind==="swing")walls.push(doorSwingSegment(wall,o.offsetM,o.widthM,motion.angle));
  }
  if(end<length)walls.push({start:at(end),end:wall.end,halfThickness});
