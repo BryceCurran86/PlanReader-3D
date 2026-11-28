@@ -1481,15 +1481,15 @@ def _jamb_cap_closed(
     station_tol = max(_STROKE_PAIR_FACE_PT, thickness)
     max_cap_extent = max(_WALL_END_SUPPORT_SPAN, thickness + 2.0 * _STROKE_PAIR_FACE_PT)
 
-    def caps(station: float) -> list[int]:
-        # (index, along_lo, along_hi, perp_station)
-        pieces: list[tuple[int, float, float, float]] = []
+    def caps(station: float) -> Optional[tuple[float, set[tuple[int, int]]]]:
+        # ((native path, primitive), along_lo, along_hi, perp_station)
+        pieces: list[tuple[tuple[int, int], float, float, float]] = []
         for index, row in _source_rows(drawings, all_ink=all_ink):
             if row.get("fill") is not None or not _visible_source_stroke_paint(row):
                 continue
             if wall_depth is not None and _source_wall_ink_role(row) != _ROLE_WALL_SUPPORT:
                 continue
-            for item in row.get("items", ()):
+            for item_index, item in enumerate(row.get("items", ())):
                 if item[0] != "l":
                     continue
                 (ax, ay), (bx, by) = _xy(item[1]), _xy(item[2])
@@ -1515,14 +1515,14 @@ def _jamb_cap_closed(
                 # Keep pieces that overlap the host band; union may finish coverage.
                 if hi < gap.band[0] - _STROKE_PAIR_FACE_PT or lo > gap.band[1] + _STROKE_PAIR_FACE_PT:
                     continue
-                pieces.append((index, lo, hi, perp))
+                pieces.append(((index, item_index), lo, hi, perp))
         if not pieces:
-            return []
+            return None
         # Inset jambs and face-end returns can both sit inside station_tol.
         # Cluster by perpendicular station first so a through-jamb is not
         # merged with unrelated face returns at the run end.
         pieces.sort(key=lambda item: (item[3], item[1], item[2], item[0]))
-        station_groups: list[list[tuple[int, float, float]]] = []
+        station_groups: list[list[tuple[tuple[int, int], float, float]]] = []
         group_perp: list[float] = []
         for index, lo, hi, perp in pieces:
             if group_perp and abs(perp - group_perp[-1]) <= _STROKE_PAIR_CLUSTER_PT:
@@ -1535,10 +1535,10 @@ def _jamb_cap_closed(
         # track/hardware notch inside the host band. Merge within one station
         # cluster so the union can still cover the wall thickness.
         merge_tol = _STROKE_PAIR_CLUSTER_PT * 2.0
-        covering: list[tuple[float, set[int]]] = []
+        covering: list[tuple[float, set[tuple[int, int]]]] = []
         for group_index, group in enumerate(station_groups):
             group = sorted(group, key=lambda item: (item[1], item[2], item[0]))
-            components: list[tuple[float, float, set[int]]] = []
+            components: list[tuple[float, float, set[tuple[int, int]]]] = []
             for index, lo, hi in group:
                 if components and lo <= components[-1][1] + merge_tol:
                     prev_lo, prev_hi, prev_used = components[-1]
@@ -1549,11 +1549,11 @@ def _jamb_cap_closed(
                 if (
                     lo - _STROKE_PAIR_FACE_PT <= gap.band[0]
                     and hi + _STROKE_PAIR_FACE_PT >= gap.band[1]
-                    and 1 <= len(used) <= 2
+                    and 1 <= len({path_index for path_index, _ in used}) <= 2
                 ):
                     covering.append((group_perp[group_index], used))
         if not covering:
-            return []
+            return None
         # Prefer the covering cluster nearest the geometric gap end. A second
         # through-jamb only a face away (common CAD double-line) abstains when
         # equally near; an inset return farther away loses to the end station.
@@ -1562,15 +1562,19 @@ def _jamb_cap_closed(
         if len(covering) > 1:
             second_perp, _second_used = covering[1]
             if abs(abs(second_perp - station) - abs(best_perp - station)) <= _STROKE_PAIR_FACE_PT:
-                return []
-        return sorted(best_used)
+                return None
+        return best_perp, best_used
 
     low, high = caps(gap.lo), caps(gap.hi)
-    if not (1 <= len(low) <= 2 and 1 <= len(high) <= 2):
+    if low is None or high is None:
         return None
-    if set(low) & set(high):
+    low_station, low_used = low
+    high_station, high_used = high
+    # Distinct physical jamb primitives, even when a CAD exporter batches
+    # both into one native path. Never reuse a primitive or station.
+    if high_station - low_station <= _STROKE_PAIR_CLUSTER_PT or low_used & high_used:
         return None
-    return tuple(sorted(set(low) | set(high)))
+    return tuple(sorted({path_index for path_index, _ in low_used | high_used}))
 
 
 def _swing_leaf_span(arc: Mapping[str, Any]) -> Optional[tuple[bool, float, float, float]]:
