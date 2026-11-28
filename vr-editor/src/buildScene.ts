@@ -6,7 +6,7 @@ import {
 } from "./buildPlacement.ts";
 import type { BuildAction, BuildHit, BuildSizes, BuildState, CeilingDraft, PlanPoint, PlacedWall, WallSnapOptions, WallVisual } from "./buildPlacement.ts";
 import type { WallAdditionOpening } from "./wallAdditionProtocol.ts";
-import {localDoorMotion} from "./localDoorMotion.ts";
+import {localDoorMotion,stackerPanels} from "./localDoorMotion.ts";
 import { exactDraftOpening } from "./vrDraftGeometry.ts";
 import { connectedWallEdit } from "./connectedWallEdit.ts";
 import type { MenuLayout } from "./catalogueMenu";
@@ -162,6 +162,8 @@ export function displayWallDraft(wall: WallVisual,textures?:WallTextureLibrary,j
       for(const detail of windowDetailVisual(wall,opening))group.add(detail);
     }
     if (opening.openingKind === "door") {
+      const panels=stackerPanels(wall,opening);
+      if(panels.length){for(const p of panels){const slab=nominalDoorSlab(wall,{...opening,offsetM:p.offsetM,widthM:p.widthM});if(!slab)continue;slab.position.addScaledVector(normal,p.track);slab.updateMatrix();slab.geometry.applyMatrix4(slab.matrix);slab.position.set(0,0,0);slab.quaternion.identity();slab.scale.set(1,1,1);slab.userData.catalogueDoorLeaf=opening.openingId;slab.userData.localDoorMotion={...localDoorMotion(wall,opening,0),translation:p.translation};slab.castShadow=true;slab.receiveShadow=true;group.add(slab);}continue;}
       const leaf: number[] = [];
       panel(points, leaf);
       addMesh(leaf, 0xe4e1d8, 1, false, opening.openingId);
