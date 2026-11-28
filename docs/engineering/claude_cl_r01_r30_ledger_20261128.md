@@ -38,3 +38,8 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R28 donors and preview wiring | C27/C28 | validation | donor audit; preview chord wiring (main #4772/#4773), piece cache and review recalculation (#4810); 28 Nov branch sweep: door stack is open #4665 | MAX wires the app callback; #4665 decision |
 | R29 geometry runtime | C29 | release | speed work on #4810: four originals 2101 → 1624 s, all outputs identical, memory at or below main | merge |
 | R30 consolidated #4810 | C30 | release (pending) | #4810 draft | combined release with MAX |
+
+Test sweep (28 Nov, `b3a65ed10`): the 75 test files behind R09–R25 (footprint, garage, dwellings, doorways, angled
+doors, window and opening census, jamb caps, holes, finished faces, hardening, closures): 2,659 passed, 38 skipped, 5
+failures that are this Windows machine's environment, in code unchanged on this branch (2 want an original at its
+repository path, 3 need symlink rights or Linux file behaviour).
