@@ -14,6 +14,7 @@ from pb_source_physical_room_ring_provenance_binder import (
     ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED,
     PHYSICAL_ROOM_RING_PROVENANCE_REBOUND,
     RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS,
+    RING_STATUS_NOT_CANDIDATE,
     RoomProvenanceBindingCandidate,
     bind_room_provenance_to_physical_rings_shadow,
 )
@@ -70,6 +71,7 @@ def test_false_cell_rebinds_to_unique_wall_supported_ring_while_open_zone_stays_
         record_id="layered_wall_doorway_room_ring_demo_enclosed",
         source_sha256=SHA,
         page_index=6,
+        status=EvidenceResolutionStatus.CANDIDATE,
         polygon_pdf_pts=PHYSICAL_RING,
         area_pt2=28800.0,
         wall_edge_count=10,
@@ -162,6 +164,7 @@ def test_ambiguous_overlapping_physical_rings_fail_closed_with_conflict() -> Non
         record_id="ring_1",
         source_sha256=SHA,
         page_index=6,
+        status=EvidenceResolutionStatus.CANDIDATE,
         polygon_pdf_pts=PHYSICAL_RING,
         area_pt2=28800.0,
         wall_edge_count=8,
@@ -173,6 +176,7 @@ def test_ambiguous_overlapping_physical_rings_fail_closed_with_conflict() -> Non
         record_id="ring_2",
         source_sha256=SHA,
         page_index=6,
+        status=EvidenceResolutionStatus.CANDIDATE,
         polygon_pdf_pts=PHYSICAL_RING,
         area_pt2=28800.0,
         wall_edge_count=8,
@@ -212,6 +216,7 @@ def test_multi_room_open_plan_shell_ring_is_rejected_while_single_room_ring_bind
         record_id="ring_single_enclosed",
         source_sha256=SHA,
         page_index=6,
+        status=EvidenceResolutionStatus.CANDIDATE,
         polygon_pdf_pts=PHYSICAL_RING,
         area_pt2=28197.7,
         wall_edge_count=10,
@@ -223,6 +228,7 @@ def test_multi_room_open_plan_shell_ring_is_rejected_while_single_room_ring_bind
         record_id="ring_open_plan_shell",
         source_sha256=SHA,
         page_index=6,
+        status=EvidenceResolutionStatus.CANDIDATE,
         polygon_pdf_pts=((200.0, 0.0), (1200.0, 0.0), (1200.0, 1000.0), (200.0, 1000.0)),
         area_pt2=1000000.0,
         wall_edge_count=40,
@@ -270,3 +276,90 @@ def test_multi_room_open_plan_shell_ring_is_rejected_while_single_room_ring_bind
         FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
         RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS,
     )
+
+
+def test_abstained_and_conflict_rings_are_rejected_even_with_supported_edges() -> None:
+    # Claude #7236597561 & #7236809130 exact synthetic probe: an ABSTAINED ring
+    # with 1 of 4 edges supported must NEVER be bound as corroborated.
+    abstained_ring = SimpleNamespace(
+        record_id="ring_abstained_open_gap",
+        source_sha256=SHA,
+        page_index=6,
+        status=EvidenceResolutionStatus.ABSTAINED,
+        polygon_pdf_pts=PHYSICAL_RING,
+        area_pt2=28800.0,
+        wall_edge_count=4,
+        closure_edge_count=1,
+        bounding_closure_ids=("c1",),
+        bounding_wall_path_indices=(1, 2),
+    )
+    cand = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_grid", "q_abstained_probe", GRID_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(25.0, 25.0),
+        explicit_area_m2=9.05352,
+    )
+    bindings = bind_room_provenance_to_physical_rings_shadow(
+        candidates=(cand,),
+        physical_rings=(abstained_ring,),
+        drawings=(),
+        wall_support_predicate=_wall_predicate,
+        expected_document_id="doc1",
+        expected_revision_id="rev1",
+        expected_source_sha256=SHA,
+    )
+    assert len(bindings) == 1
+    assert bindings[0].withheld is True
+    assert bindings[0].status is EvidenceResolutionStatus.ABSTAINED
+    assert bindings[0].bound_ring_record_id is None
+    assert bindings[0].reason_codes == (
+        FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
+        RING_STATUS_NOT_CANDIDATE,
+    )
+
+
+def test_ring_wall_support_check_receives_only_rings_own_closures() -> None:
+    # Claude #7236597561: wall_support_predicate for a candidate ring must receive
+    # strictly that ring's own bounding_closure_ids, not unrelated page closures.
+    seen_closure_ids: list[tuple[str, ...]] = []
+
+    def _capturing_pred(poly, drawings, closures=()):
+        if poly == PHYSICAL_RING:
+            seen_closure_ids.append(tuple(c.closure_id for c in closures))
+        return _wall_predicate(poly, drawings, closures=closures)
+
+    ring = SimpleNamespace(
+        record_id="ring_own_closure",
+        source_sha256=SHA,
+        page_index=6,
+        status=EvidenceResolutionStatus.CANDIDATE,
+        polygon_pdf_pts=PHYSICAL_RING,
+        area_pt2=28197.7,
+        wall_edge_count=10,
+        closure_edge_count=1,
+        bounding_closure_ids=("cl_mine",),
+        bounding_wall_path_indices=(1, 2),
+    )
+    cand = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_grid", "q_closure_scope", GRID_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(25.0, 25.0),
+        explicit_area_m2=9.05352,
+    )
+    all_closures = (
+        SimpleNamespace(closure_id="cl_mine"),
+        SimpleNamespace(closure_id="cl_other_room"),
+    )
+    bindings = bind_room_provenance_to_physical_rings_shadow(
+        candidates=(cand,),
+        physical_rings=(ring,),
+        drawings=(),
+        wall_support_predicate=_capturing_pred,
+        expected_document_id="doc1",
+        expected_revision_id="rev1",
+        expected_source_sha256=SHA,
+        closures=all_closures,
+    )
+    assert bindings[0].withheld is False
+    assert bindings[0].bound_ring_record_id == "ring_own_closure"
+    assert seen_closure_ids == [("cl_mine",)]

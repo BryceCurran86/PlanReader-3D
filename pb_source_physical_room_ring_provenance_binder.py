@@ -42,6 +42,7 @@ SCHEMA_VERSION = "1.0.0"
 ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED = "original_surface_wall_supported_retained"
 PHYSICAL_ROOM_RING_PROVENANCE_REBOUND = "physical_room_ring_provenance_rebound"
 NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL = "no_qualifying_physical_room_ring_for_label"
+RING_STATUS_NOT_CANDIDATE = "ring_status_not_candidate"
 RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS = "ring_contains_multiple_distinct_room_labels"
 AMBIGUOUS_MULTIPLE_PHYSICAL_ROOM_RINGS_FOR_LABEL = (
     "ambiguous_multiple_physical_room_rings_for_label"
@@ -129,6 +130,36 @@ def _ring_attr(ring: Any, name: str, default: Any = None) -> Any:
     return getattr(ring, name, default)
 
 
+def _ring_status_is_admissible(ring: Any) -> bool:
+    """Require explicit CANDIDATE (or CORROBORATED) status; reject ABSTAINED/CONFLICT/missing."""
+    raw = _ring_attr(ring, "status", None)
+    if raw in (EvidenceResolutionStatus.CANDIDATE, EvidenceResolutionStatus.CORROBORATED):
+        return True
+    if isinstance(raw, str) and raw.strip().lower() in ("candidate", "corroborated"):
+        return True
+    return False
+
+
+def _closures_for_ring(ring: Any, all_closures: Sequence[Any]) -> tuple[Any, ...]:
+    """Scope closures passed to wall_support_predicate strictly to the ring's own closure IDs."""
+    if not all_closures:
+        return ()
+    ring_cids = frozenset(
+        str(c) for c in (_ring_attr(ring, "bounding_closure_ids", ()) or ()) if str(c)
+    )
+    if not ring_cids:
+        return ()
+    matched: list[Any] = []
+    any_has_id = False
+    for cl in all_closures:
+        cid = _ring_attr(cl, "closure_id", None) or _ring_attr(cl, "record_id", None)
+        if cid is not None:
+            any_has_id = True
+            if str(cid) in ring_cids:
+                matched.append(cl)
+    return tuple(matched) if any_has_id else tuple(all_closures)
+
+
 def bind_room_provenance_to_physical_rings_shadow(
     *,
     candidates: Sequence[RoomProvenanceBindingCandidate],
@@ -163,7 +194,10 @@ def bind_room_provenance_to_physical_rings_shadow(
     )
 
     # Pre-validate candidate rings for scope & positive wall enclosure.
-    scoped_rings: list[tuple[Any, tuple[tuple[float, float], ...]]] = []
+    # Keep status flag so rings containing a room label with non-CANDIDATE status
+    # (e.g., ABSTAINED open_wall_gap_unresolved) are explicitly rejected with
+    # RING_STATUS_NOT_CANDIDATE rather than silently bound.
+    scoped_rings: list[tuple[Any, tuple[tuple[float, float], ...], bool]] = []
     for ring in physical_rings:
         ring_sha = str(_ring_attr(ring, "source_sha256", "") or "").strip()
         if ring_sha != expected_source_sha256:
@@ -173,7 +207,7 @@ def bind_room_provenance_to_physical_rings_shadow(
         poly = tuple(_ring_attr(ring, "polygon_pdf_pts", ()) or ())
         if wall_edges <= 0 or not wall_paths or len(poly) < 3:
             continue
-        scoped_rings.append((ring, poly))
+        scoped_rings.append((ring, poly, _ring_status_is_admissible(ring)))
 
     results: list[PhysicalRoomRingProvenanceBinding] = []
     for cand, base in zip(candidates, base_verdicts):
@@ -268,6 +302,7 @@ def bind_room_provenance_to_physical_rings_shadow(
 
         matching_rings: list[tuple[Any, float]] = []
         multi_label_shell_rejected = False
+        non_candidate_status_rejected = False
         # Build all OTHER room-label anchors on the same page so a giant multi-room
         # open-plan shell ring enclosing >=2 distinct room labels cannot be mistaken
         # for a single room's physical boundary.
@@ -285,16 +320,21 @@ def bind_room_provenance_to_physical_rings_shadow(
                 continue
             other_anchors.append(lbl_pt)
 
-        for ring, ring_poly in scoped_rings:
+        for ring, ring_poly, ring_status_ok in scoped_rings:
             ring_page = _ring_attr(ring, "page_index", None)
             if ring_page != cand.page_index:
                 continue
             if not _point_in_polygon(anchor, ring_poly):
                 continue
+            if not ring_status_ok:
+                non_candidate_status_rejected = True
+                continue
             if any(_point_in_polygon(other_pt, ring_poly) for other_pt in other_anchors):
                 multi_label_shell_rejected = True
                 continue
-            # Verify the candidate ring itself passes the exact same wall_support_predicate!
+            # Verify the candidate ring itself passes the exact same wall_support_predicate
+            # using strictly that ring's own doorway closures.
+            ring_closures_for_check = _closures_for_ring(ring, closures)
             ring_surface = FloorSurfaceWallSupportInput(
                 surface_entity_id=str(_ring_attr(ring, "record_id", "")),
                 quantity_id=surf.quantity_id,
@@ -312,24 +352,21 @@ def bind_room_provenance_to_physical_rings_shadow(
                 expected_document_id=expected_document_id,
                 expected_revision_id=expected_revision_id,
                 expected_source_sha256=expected_source_sha256,
-                closures=closures,
+                closures=ring_closures_for_check,
             )[0]
             if not ring_verdict.vetoed:
                 matching_rings.append((ring, ring_verdict.supported_fraction))
 
         if not matching_rings:
             # Open-plan / unenclosed zone (e.g., Food Prep): keep strictly withheld.
-            abstain_reasons = (
-                (
-                    FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
-                    RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS,
-                )
-                if multi_label_shell_rejected
-                else (
-                    FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
-                    NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL,
-                )
-            )
+            extra_reasons: list[str] = [FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT]
+            if non_candidate_status_rejected:
+                extra_reasons.append(RING_STATUS_NOT_CANDIDATE)
+            if multi_label_shell_rejected:
+                extra_reasons.append(RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS)
+            if len(extra_reasons) == 1:
+                extra_reasons.append(NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL)
+            abstain_reasons = tuple(extra_reasons)
             results.append(
                 PhysicalRoomRingProvenanceBinding(
                     original_surface_entity_id=surf.surface_entity_id,
@@ -419,6 +456,7 @@ __all__ = [
     "ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED",
     "PHYSICAL_ROOM_RING_PROVENANCE_REBOUND",
     "RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS",
+    "RING_STATUS_NOT_CANDIDATE",
     "PhysicalRoomRingProvenanceBinding",
     "RoomProvenanceBindingCandidate",
     "SCHEMA_VERSION",
