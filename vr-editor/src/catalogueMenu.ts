@@ -1,3 +1,4 @@
+import type {FenceSettings,FenceStyle} from "./siteFence.ts";
 import { activeStart, BUILD_TOOLS } from "./buildPlacement.ts";
 import {wallAngleDegrees} from "./buildPlacement.ts";
 import type { BuildAction, BuildState, PlacedWall, WallAxis, WallRotationPivot } from "./buildPlacement.ts";
@@ -37,6 +38,7 @@ export type MenuAction =
   | { area: "footprint"; reset?: boolean }
   | {area:"footprint-size";axis:"x"|"z";delta:number}
   | {area:"slab";mm?:number}
+  | {area:"fence";style?:FenceStyle;heightM?:number;color?:string;close?:boolean}
   | { area: "history"; action: HistoryAction }
   | { area: "level"; id: string }
   | { area: "done" }
@@ -64,6 +66,7 @@ export type MenuLayout = { title: string; width: number; height: number;
 export type NumericDraftField = "angle" | "length" | "height" | "x" | "z" |
   "opening-offset" | "opening-width" | "opening-height" | "opening-sill";
 export type QuestMenuState = {
+  fenceTools?:boolean;fence?:FenceSettings;hasSite?:boolean;
   simpleHome?:boolean;outdoor?:boolean;quality?:"performance"|"balanced"|"high";finishContext?:FinishContext|null;finishGroup?:CatalogueGroup|null;finishPage?:number;activeFinishId?:string;hoverContext?:boolean;slabMm?:number;slabTools?:boolean;
   rotationPivot?:WallRotationPivot; connectedRotation?:boolean; angleTools?:boolean; feedback?:string;
   selectedWall: PlacedWall | null; gridM: 0.05 | 0.1 | 0.25;
@@ -154,6 +157,17 @@ export function buildMenuLayout(
     add("Close",702,394,210,65,{area:"finish",action:"close"});
     const extra=contextRows(484);
     return {buttons,title:contextTitle(c),width:936,height:512+extra,note:quest.hoverContext?"Aim at this toolbox to choose; point back at the object to grab it.":"Choose a category. Existing fixtures retain their position."};
+  }
+  if(quest?.fenceTools&&quest.fence){
+    const f=quest.fence;
+    const styles=[["Timber","timber"],["COLORBOND","colorbond"],["Exposed blockwork","block"],["Rendered blockwork","rendered"]] as const;
+    styles.forEach(([label,style],i)=>add(label,24+(i%2)*460,88+Math.floor(i/2)*78,440,68,{area:"fence",style},{active:f.style===style,disabled:!quest.hasSite}));
+    add("Height −100 mm",24,250,440,68,{area:"fence",heightM:Math.max(.6,Math.round((f.heightM-.1)*10)/10)},{disabled:!quest.hasSite||f.heightM<=.6});
+    add("Height +100 mm",484,250,440,68,{area:"fence",heightM:Math.min(3,Math.round((f.heightM+.1)*10)/10)},{disabled:!quest.hasSite||f.heightM>=3});
+    const colours=[["Charcoal","#42484a"],["Natural timber","#a47b54"],["Grey","#969894"],["Cream","#e7ddc7"]] as const;
+    colours.forEach(([label,color],i)=>add(label,24+(i%2)*460,328+Math.floor(i/2)*78,440,68,{area:"fence",color},{active:f.color===color,swatch:parseInt(color.slice(1),16),disabled:!quest.hasSite}));
+    add("Back",24,490,900,68,{area:"fence",close:true});
+    return {buttons,title:"PROPERTY FENCE · "+Math.round(f.heightM*1000)+" mm",width:936,height:620,note:quest.hasSite?"Visual boundary only · choose material, height and colour.":"Create a manual site boundary in desktop property settings first."};
   }
   if(quest?.slabTools){
     const mm=quest.slabMm??0;
@@ -477,6 +491,7 @@ export function buildMenuLayout(
   if (quest?.compact) {
     const compact: {label:string;action:MenuAction;disabled?:boolean}[]=[
       {label:"Build tools",action:questAction("compact")},
+      {label:"Property fence",action:{area:"fence"}},
       {label:"Drag speed: "+(quest.dragGain??1)+"×",action:questAction("drag-gain")},
       {label:"Home",action:questAction("home")},
       {label:"Recenter",action:questAction("recenter")},
@@ -512,6 +527,7 @@ export function buildMenuLayout(
   if (quest) {
     actions.push(
       {label:"Compact",target:questAction("compact")},
+      {label:"Property fence",target:{area:"fence"}},
       {label:"Drag speed: "+(quest.dragGain??1)+"×",target:questAction("drag-gain")},
       {label:"Home",target:questAction("home")},
       {label:"Wall construction",target:questAction("wall-profiles")},

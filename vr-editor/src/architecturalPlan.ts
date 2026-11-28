@@ -86,6 +86,7 @@ export function architecturalPlan(scene:SceneManifest,build:Pick<BuildState,"wal
    if(o.openingKind==="window"){
     line(p(o.offsetM,-t*.35),p(cursor,-t*.35),"window");line(p(o.offsetM,t*.35),p(cursor,t*.35),"window");
    }else if(o.openingKind==="door"){
+    if(o.doorMechanism&&o.doorMechanism!=="swing"){line(p(o.offsetM,-t*.35),p(cursor,-t*.35),"door");line(p(o.offsetM,t*.35),p(cursor,t*.35),"door");continue;}
     // Draft hinged leaf is illustrated; swing side is not an approved design.
     line(p(o.offsetM,0),p(o.offsetM,o.widthM),"door");
     for(let i=0;i<12;i++){
