@@ -10,7 +10,9 @@ import pytest
 
 from pb_bounded_wall_equivalence_shadow import (
     AMBIGUITY_BLOCKER,
+    CONFLICT_BLOCKER,
     COVERED_FACE,
+    KEPT_CONFLICT,
     KEPT_DIRECT,
     KEPT_NO_BODY,
     KEPT_NON_WALL,
@@ -29,9 +31,11 @@ from pb_migration_contracts import EvidenceResolutionStatus
 from pb_physical_wall_candidate_authority import (
     PhysicalWallCandidateProducer,
     PhysicalWallCandidateSelector,
+    _apply_trusted_relation_overrides,
     _decision_scope_id,
 )
 from pb_physical_wall_identity import (
+    PhysicalEquivalenceClass,
     PhysicalWallIdentity,
     resolve_physical_wall_equivalence,
 )
@@ -206,6 +210,31 @@ def test_bodies_come_from_painted_pairs_with_their_paths():
     [found] = source_wall_bodies(drawings)
     assert found.horizontal and found.across == pytest.approx((60.0, 64.0)) and found.path_indices == {0, 1}
     assert run([h("a", 60.0, [0], 50.0, 250.0), h("far", 150.0, [5], 50.0, 250.0)], [found])[3] == ("a",)
+
+
+def _conflicted(identities, overrides):
+    return _apply_trusted_relation_overrides(identities, resolve_physical_wall_equivalence(identities), overrides,
+                                             allow_proven_same_over_distinct=True)
+
+
+SAME, DISTINCT = PhysicalEquivalenceClass.SAME_PHYSICAL_WALL, PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
+
+
+def test_a_component_wide_conflict_does_not_block_a_wall_outside_the_contradiction():
+    identities = [h("p", 0.0, [1]), h("q", 3.0, [2]), h("r", 6.0, [3]), h("far", 200.0, [4])]
+    given = _conflicted(identities, {("p", "q"): SAME, ("q", "r"): SAME, ("p", "r"): DISTINCT})
+    assert given.blockers_for("far") == (CONFLICT_BLOCKER,) and given.representative_wall_ids == ()
+    bodies = [body(0.0, 3.0, {1, 2}), body(6.0, 9.0, {3}), body(200.0, 203.0, {4})]
+    _result, counts, released = release_bounded_equivalence(identities, given, bodies)
+    assert released == ("far",) and counts[KEPT_CONFLICT] >= 2
+
+
+def test_faces_the_source_calls_distinct_stay_blocked():
+    identities = [h("a", 0.0, [1]), h("b", 3.0, [2]), h("x", 200.0, [3]), h("y", 203.0, [4])]
+    given = _conflicted(identities, {("a", "b"): DISTINCT, ("x", "y"): SAME})
+    assert CONFLICT_BLOCKER in given.blockers_for("a")
+    _result, counts, released = release_bounded_equivalence(identities, given, [body(0.0, 3.0, {1, 2})])
+    assert released == () and counts[KEPT_CONFLICT] == 2
 
 
 def _pdf():

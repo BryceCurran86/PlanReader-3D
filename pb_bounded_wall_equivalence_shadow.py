@@ -1,14 +1,15 @@
 """Default-off experiment (MAX 7240613240): bounded physical-wall equivalence.
 
-The baseline abstains a whole connected component when any pair in it is ambiguous, and without a trusted scale
-every parallel overlapping pair competes, so one component can hold most of a sheet. This rule releases an
-ambiguity-only abstention only when a wall body the drawing itself paints owns the wall and no DIRECT competitor
+The baseline abstains a whole connected component when any pair in it is ambiguous (or, after trusted overrides,
+when any two of its members are also recorded distinct), and without a trusted scale every parallel overlapping pair
+competes, so one component can hold most of a sheet. This rule releases such a component-wide abstention only when a wall body the drawing itself paints owns the wall and no DIRECT competitor
 exists. A competitor is direct when it shares a source primitive, lies in another viewport or level,
 is not straight, or claims the same stretch of wall (overlaps along it) while coming within the two bodies' combined
 thickness (an unowned competitor counts the wall's own thickness twice). Walls owned by one body over the same
 stretch are its faces or copies: one representative at most, with those pairs recorded as the same wall. Typed
 non-wall candidates (floor-grid lattice) neither compete nor get released. Walls without a body, with several bodies
-or from rasters stay abstained, and nothing is ever demoted. See
+or from rasters stay abstained, as does a wall whose own same-wall group contains a distinct pair, and nothing is
+ever demoted. See
 docs/engineering/claude_bounded_wall_equivalence_note_20261129.md.
 """
 from __future__ import annotations
@@ -35,6 +36,8 @@ from pb_physical_wall_identity import (
 
 BOUNDED_EQUIVALENCE_VERSION = "bounded-wall-equivalence-1.0.0"
 AMBIGUITY_BLOCKER = "ambiguous_physical_wall_equivalence"
+CONFLICT_BLOCKER = "conflicting_physical_wall_equivalence"
+_COMPONENT_BLOCKERS = frozenset({AMBIGUITY_BLOCKER, CONFLICT_BLOCKER})
 RELEASED = "released_body_owned_without_direct_competitor"
 KEPT_DIRECT = "direct_competitor"
 KEPT_NO_BODY = "no_owning_source_body"
@@ -44,6 +47,7 @@ KEPT_OTHER = "other_blocker"
 KEPT_NON_WALL = "typed_non_wall"
 KEPT_PARTIAL_FACES = "body_faces_cover_different_stretches"
 KEPT_PUBLISHED_FACE = "body_stretch_already_published"
+KEPT_CONFLICT = "direct_same_distinct_conflict"
 COVERED_FACE = "covered_by_released_representative"
 _TOL = _EQUIVALENCE_LATERAL_TOL_PT
 _COVER = 0.9
@@ -174,6 +178,25 @@ def _same_stretch(cluster: Sequence[str], by_id) -> bool:
     return all(_overlap(a, b) >= _COVER * max(a[1] - a[0], b[1] - b[0]) for a in spans for b in spans)
 
 
+def _contradicted_same_groups(same: dict[str, set[str]], distinct: dict[str, set[str]]) -> set[str]:
+    """Walls whose connected same-wall group also records two of its members as distinct."""
+    seen: set[str] = set()
+    found: set[str] = set()
+    for start in sorted(same):
+        if start in seen:
+            continue
+        group, pending = set(), [start]
+        while pending:
+            current = pending.pop()
+            if current not in group:
+                group.add(current)
+                pending.extend(same.get(current, ()))
+        seen |= group
+        if any(distinct.get(wall_id, set()) & group for wall_id in group):
+            found |= group
+    return found
+
+
 def release_bounded_equivalence(
     identities: Sequence[PhysicalWallIdentity | None],
     equivalence: PhysicalWallEquivalenceResolution,
@@ -191,18 +214,22 @@ def release_bounded_equivalence(
     owners = {wall_id: _owners(identity, bodies) for wall_id, identity in by_id.items() if identity.usable}
     partners: dict[str, set[str]] = {}
     same: dict[str, set[str]] = {}
+    distinct: dict[str, set[str]] = {}
+    tables = {PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value: partners,
+              PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value: same,
+              PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS.value: distinct}
     for left, right, classification in equivalence.pair_classifications:
-        target = (partners if classification == PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE.value
-                  else same if classification == PhysicalEquivalenceClass.SAME_PHYSICAL_WALL.value else None)
+        target = tables.get(classification)
         if target is not None:
             target.setdefault(left, set()).add(right)
             target.setdefault(right, set()).add(left)
     abstained = set(equivalence.abstained_wall_ids)
     published = set(equivalence.representative_wall_ids)
+    contradicted = _contradicted_same_groups(same, distinct)
 
-    def ambiguity_only(wall_id: str) -> bool:
-        return (wall_id in abstained and by_id[wall_id].usable
-                and set(equivalence.blockers_for(wall_id)) == {AMBIGUITY_BLOCKER})
+    def component_blocked(wall_id: str) -> bool:
+        blockers = set(equivalence.blockers_for(wall_id))
+        return wall_id in abstained and by_id[wall_id].usable and bool(blockers) and blockers <= _COMPONENT_BLOCKERS
 
     counts: dict[str, int] = {}
 
@@ -215,7 +242,7 @@ def release_bounded_equivalence(
         if wall_id not in non_wall and len(owners.get(wall_id, ())) == 1:
             grouped.setdefault(owners[wall_id][0], []).append(wall_id)
     for wall_id in sorted(abstained):
-        if wall_id not in by_id or not ambiguity_only(wall_id):
+        if wall_id not in by_id or not component_blocked(wall_id):
             count(KEPT_OTHER)
         elif wall_id in non_wall:
             count(KEPT_NON_WALL)
@@ -225,16 +252,18 @@ def release_bounded_equivalence(
     released: dict[str, list[str]] = {}
     for body, members in sorted(grouped.items(), key=lambda item: (item[0].horizontal, item[0].across, item[0].along)):
         for cluster in _face_clusters(members, by_id):
-            waiting = sum(1 for w in cluster if ambiguity_only(w))
+            waiting = sum(1 for w in cluster if component_blocked(w))
             if not waiting:
                 continue
             inside = set(cluster)
             if inside & published:
                 outcome = KEPT_PUBLISHED_FACE
-            elif not all(ambiguity_only(w) for w in cluster):
+            elif not all(component_blocked(w) for w in cluster):
                 outcome = KEPT_OTHER
             elif not _same_stretch(cluster, by_id):
                 outcome = KEPT_PARTIAL_FACES
+            elif inside & contradicted or any(distinct.get(w, set()) & inside for w in cluster):
+                outcome = KEPT_CONFLICT
             elif any(same.get(w, set()) - inside for w in cluster):
                 outcome = KEPT_SAME
             elif any(

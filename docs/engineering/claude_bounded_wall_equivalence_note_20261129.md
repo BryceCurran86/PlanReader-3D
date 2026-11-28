@@ -24,11 +24,17 @@ by it and those pairs as the same wall. Faces covering different stretches, or a
 nothing.
 
 ## Synthetic proof
-28 tests: chain A-B-C (only the far wall releases), two unpainted lines, cavity and narrow leaves, thick neighbours,
+30 tests: chain A-B-C (only the far wall releases), two unpainted lines, cavity and narrow leaves, thick neighbours,
 shared paint, other viewport, junctions and end-to-end pieces, two faces and duplicates (exactly one), a rival beside
 one face, partial faces, already published, grid typed or not, raster/several/partial/foreign bodies, order and input
 checks, painted bodies from a page, and the real producer and composer (default off, one face of the free wall, the
-option refused with another wall scope option). 20 single-line mutants caught.
+option refused with another wall scope option). 24 single-line mutants caught.
+
+## Component-wide conflict (found by the first original run)
+After the trusted overrides, any two members of one component recorded distinct make the whole component
+"conflicting" when it holds any same pair; on the first plan every wall of the 2,383-wall component carries that
+mark. It is released on the same terms, except for walls whose own connected same-wall group contains a distinct
+pair, or faces the source records as distinct (`direct_same_distinct_conflict`).
 
 ## Authority boundaries
 Equivalence is a publication gate: releasing walls can change host binding and downstream quantities, so the option
