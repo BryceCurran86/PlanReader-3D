@@ -310,3 +310,75 @@ def test_a06_outlined_body_tolerates_small_logo_image_but_rejects_full_page_scan
         assert a1.outlined_text_suspected is False
     finally:
         doc.close()
+
+
+def test_a06_per_viewport_outlined_caption_association_mixed_sheet_and_xref_rejection() -> None:
+    from pb_source_vector_outlined_text_ocr_shadow import (
+        AgreedOutlinedTextToken,
+        OutlinedViewportRegionSpec,
+        associate_outlined_captions_to_viewports_shadow,
+    )
+
+    sha = "c" * 64
+
+    def _tok(txt: str, x0: float, y0: float, x1: float, y1: float) -> AgreedOutlinedTextToken:
+        return AgreedOutlinedTextToken(
+            normalized_text=txt,
+            raw_texts=(txt, txt),
+            source_sha256=sha,
+            page_index=3,
+            bbox_pdf_pts=(x0, y0, x1, y1),
+            agreement_dpis=(144, 216),
+            agreement_ratio=1.0,
+            mean_confidence=0.95,
+        )
+
+    vps = (
+        OutlinedViewportRegionSpec("vp_top", 3, (20.0, 20.0, 700.0, 260.0)),
+        OutlinedViewportRegionSpec("vp_bottom", 3, (20.0, 300.0, 700.0, 560.0)),
+    )
+    tokens = (
+        # Top viewport: genuine ELEVATION caption + cross-reference prose ("REFER TO FLOOR PLAN")
+        _tok("NORTH", 100.0, 240.0, 150.0, 255.0),
+        _tok("ELEVATION", 155.0, 240.0, 230.0, 255.0),
+        _tok("REFER", 400.0, 100.0, 440.0, 112.0),
+        _tok("TO", 445.0, 100.0, 460.0, 112.0),
+        _tok("FLOOR", 465.0, 100.0, 505.0, 112.0),
+        _tok("PLAN", 510.0, 100.0, 545.0, 112.0),
+        # Bottom viewport: genuine SECTION caption
+        _tok("SECTION", 100.0, 540.0, 160.0, 555.0),
+        _tok("A-A", 165.0, 540.0, 195.0, 555.0),
+    )
+
+    res = associate_outlined_captions_to_viewports_shadow(
+        tokens=tokens,
+        viewport_regions=vps,
+        expected_source_sha256=sha,
+        page_index=3,
+    )
+    assert res.is_mixed_sheet is True
+    assert res.shadow_only is True
+    assert res.commercial_projection_allowed is False
+    assert res.rejected_cross_reference_texts == ("REFER TO FLOOR PLAN",)
+    by_vp = {v.viewport_id: v for v in res.viewports}
+    assert by_vp["vp_top"].status == "CORROBORATED"
+    assert by_vp["vp_top"].view_type == "elevation"
+    assert by_vp["vp_top"].rejected_cross_reference_texts == ("REFER TO FLOOR PLAN",)
+    assert by_vp["vp_bottom"].status == "CORROBORATED"
+    assert by_vp["vp_bottom"].view_type == "section"
+
+    # Single viewport containing two non-xref conflicting captions must fail closed with CONFLICT
+    conflict_tokens = (
+        _tok("FLOOR", 100.0, 100.0, 145.0, 115.0),
+        _tok("PLAN", 150.0, 100.0, 190.0, 115.0),
+        _tok("ROOF", 100.0, 150.0, 140.0, 165.0),
+        _tok("PLAN", 145.0, 150.0, 185.0, 165.0),
+    )
+    res_conf = associate_outlined_captions_to_viewports_shadow(
+        tokens=conflict_tokens,
+        viewport_regions=(OutlinedViewportRegionSpec("vp_single", 3, (20.0, 20.0, 400.0, 400.0)),),
+        expected_source_sha256=sha,
+        page_index=3,
+    )
+    assert res_conf.viewports[0].status == "CONFLICT"
+    assert res_conf.viewports[0].view_type == "unproven"

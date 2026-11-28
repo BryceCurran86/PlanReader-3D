@@ -542,6 +542,266 @@ def classify_outlined_caption_view_type(
     )
 
 
+_CROSS_REFERENCE_PREFIX_RE = re.compile(
+    r"\b(?:REFER(?:\s+TO)?|SEE|AS\s+PER|PER|SHOWN\s+ON|DETAIL\s+ON|NOTE\s+ON)\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class OutlinedViewportRegionSpec:
+    """Bounded source viewport region on a sheet for per-viewport caption association."""
+
+    viewport_id: str
+    page_index: int
+    bbox_pdf_pts: tuple[float, float, float, float]
+
+
+@dataclass(frozen=True)
+class ViewportOutlinedCaptionAssociation:
+    """Source-bound per-viewport outlined caption verdict (never whole-page winner)."""
+
+    viewport_id: str
+    page_index: int
+    source_sha256: str
+    status: str  # "CORROBORATED" | "CONFLICT" | "ABSTAINED"
+    view_type: str
+    matched_view_types: tuple[str, ...]
+    supporting_texts: tuple[str, ...]
+    supporting_bboxes_pdf_pts: tuple[tuple[float, float, float, float], ...]
+    rejected_cross_reference_texts: tuple[str, ...]
+    reason_codes: tuple[str, ...]
+    commercial_projection_allowed: bool = False
+    shadow_only: bool = True
+    schema_version: str = SHADOW_SCHEMA_VERSION
+
+
+@dataclass(frozen=True)
+class SheetPerViewportOutlinedCaptionResult:
+    """Per-viewport outlined caption association across one sheet (supports mixed sheets)."""
+
+    page_index: int
+    source_sha256: str
+    is_mixed_sheet: bool
+    viewports: tuple[ViewportOutlinedCaptionAssociation, ...]
+    unassigned_caption_texts: tuple[str, ...]
+    rejected_cross_reference_texts: tuple[str, ...]
+    reason_codes: tuple[str, ...]
+    commercial_projection_allowed: bool = False
+    shadow_only: bool = True
+    schema_version: str = SHADOW_SCHEMA_VERSION
+
+
+def _group_outlined_tokens_to_lines_with_bboxes(
+    tokens: Sequence[AgreedOutlinedTextToken],
+) -> list[tuple[str, tuple[float, float, float, float]]]:
+    """Group multi-DPI agreed tokens on the same visual row into (text, merged_bbox)."""
+    ordered = sorted(tokens, key=lambda t: (round(t.bbox_pdf_pts[1] / 10.0), t.bbox_pdf_pts[0]))
+    out: list[tuple[str, tuple[float, float, float, float]]] = []
+    cur_y: float | None = None
+    cur_parts: list[str] = []
+    cur_boxes: list[tuple[float, float, float, float]] = []
+    for tok in ordered:
+        y = float(tok.bbox_pdf_pts[1])
+        if cur_y is None or abs(y - cur_y) <= 10.0:
+            cur_parts.append(tok.normalized_text)
+            cur_boxes.append(tok.bbox_pdf_pts)
+            if cur_y is None:
+                cur_y = y
+        else:
+            out.append((
+                " ".join(cur_parts),
+                (
+                    min(b[0] for b in cur_boxes),
+                    min(b[1] for b in cur_boxes),
+                    max(b[2] for b in cur_boxes),
+                    max(b[3] for b in cur_boxes),
+                ),
+            ))
+            cur_y = y
+            cur_parts = [tok.normalized_text]
+            cur_boxes = [tok.bbox_pdf_pts]
+    if cur_parts:
+        out.append((
+            " ".join(cur_parts),
+            (
+                min(b[0] for b in cur_boxes),
+                min(b[1] for b in cur_boxes),
+                max(b[2] for b in cur_boxes),
+                max(b[3] for b in cur_boxes),
+            ),
+        ))
+    return out
+
+
+def _bbox_center_in_viewport(
+    line_bbox: tuple[float, float, float, float],
+    vp_bbox: tuple[float, float, float, float],
+    *,
+    caption_below_margin_pts: float = 12.0,
+) -> bool:
+    cx = 0.5 * (line_bbox[0] + line_bbox[2])
+    cy = 0.5 * (line_bbox[1] + line_bbox[3])
+    vx0, vy0, vx1, vy1 = vp_bbox
+    return (vx0 <= cx <= vx1) and (vy0 <= cy <= vy1 + max(0.0, float(caption_below_margin_pts)))
+
+
+def associate_outlined_captions_to_viewports_shadow(
+    *,
+    tokens: Sequence[AgreedOutlinedTextToken],
+    viewport_regions: Sequence[OutlinedViewportRegionSpec],
+    expected_source_sha256: str,
+    page_index: int,
+    caption_below_margin_pts: float = 12.0,
+) -> SheetPerViewportOutlinedCaptionResult:
+    """Associate multi-DPI outlined captions to bounded viewports (MAX #7241230504).
+
+    - Preserves separate view regions on mixed sheets (never forces a whole-page winner).
+    - Rejects cross-reference prose (e.g. ``SEE ELEVATIONS``, ``REFER TO SECTION A-A``).
+    - Enforces exact ``source_sha256`` + ``page_index`` + ``len(agreement_dpis) >= 2``.
+    - Rejects captions claimed by multiple overlapping viewports as ambiguous.
+    - Strictly ``shadow_only=True``, ``commercial_projection_allowed=False``.
+    """
+    clean_sha = str(expected_source_sha256 or "").strip()
+    scoped_tokens = [
+        t
+        for t in tokens
+        if len(t.agreement_dpis) >= 2
+        and t.normalized_text
+        and t.page_index == page_index
+        and str(t.source_sha256 or "").strip() == clean_sha
+    ]
+    scoped_vps = [vp for vp in viewport_regions if vp.page_index == page_index]
+    if not scoped_vps:
+        return SheetPerViewportOutlinedCaptionResult(
+            page_index=page_index,
+            source_sha256=clean_sha,
+            is_mixed_sheet=False,
+            viewports=(),
+            unassigned_caption_texts=(),
+            rejected_cross_reference_texts=(),
+            reason_codes=("no_viewport_regions_provided",),
+        )
+
+    lines_with_boxes = _group_outlined_tokens_to_lines_with_bboxes(scoped_tokens)
+    per_vp_matches: dict[str, list[tuple[str, str, tuple[float, float, float, float]]]] = {
+        vp.viewport_id: [] for vp in scoped_vps
+    }
+    per_vp_xrefs: dict[str, list[str]] = {vp.viewport_id: [] for vp in scoped_vps}
+    unassigned: list[str] = []
+    all_xrefs: list[str] = []
+
+    for line_text, line_bbox in lines_with_boxes:
+        matched_vt: str | None = None
+        for vt, pattern in _OUTLINED_CAPTION_PATTERNS:
+            if pattern.search(line_text):
+                matched_vt = vt
+                break
+        if matched_vt is None:
+            continue
+
+        owners = [
+            vp.viewport_id
+            for vp in scoped_vps
+            if _bbox_center_in_viewport(
+                line_bbox,
+                vp.bbox_pdf_pts,
+                caption_below_margin_pts=caption_below_margin_pts,
+            )
+        ]
+        if _CROSS_REFERENCE_PREFIX_RE.search(line_text):
+            all_xrefs.append(line_text)
+            if len(owners) == 1:
+                per_vp_xrefs[owners[0]].append(line_text)
+            continue
+
+        if len(owners) == 1:
+            per_vp_matches[owners[0]].append((matched_vt, line_text, line_bbox))
+        else:
+            unassigned.append(line_text)
+
+    vp_results: list[ViewportOutlinedCaptionAssociation] = []
+    corroborated_types: set[str] = set()
+    for vp in scoped_vps:
+        hits = per_vp_matches[vp.viewport_id]
+        xrefs = tuple(per_vp_xrefs[vp.viewport_id])
+        if not hits:
+            rcodes = (
+                ("outlined_caption_cross_reference_rejected", "no_outlined_view_caption_in_viewport")
+                if xrefs
+                else ("no_outlined_view_caption_in_viewport",)
+            )
+            vp_results.append(
+                ViewportOutlinedCaptionAssociation(
+                    viewport_id=vp.viewport_id,
+                    page_index=page_index,
+                    source_sha256=clean_sha,
+                    status="ABSTAINED",
+                    view_type="unproven",
+                    matched_view_types=(),
+                    supporting_texts=(),
+                    supporting_bboxes_pdf_pts=(),
+                    rejected_cross_reference_texts=xrefs,
+                    reason_codes=rcodes,
+                )
+            )
+            continue
+        distinct_vts = tuple(sorted({h[0] for h in hits}))
+        texts = tuple(h[1] for h in hits)
+        boxes = tuple(h[2] for h in hits)
+        if len(distinct_vts) > 1:
+            vp_results.append(
+                ViewportOutlinedCaptionAssociation(
+                    viewport_id=vp.viewport_id,
+                    page_index=page_index,
+                    source_sha256=clean_sha,
+                    status="CONFLICT",
+                    view_type="unproven",
+                    matched_view_types=distinct_vts,
+                    supporting_texts=texts,
+                    supporting_bboxes_pdf_pts=boxes,
+                    rejected_cross_reference_texts=xrefs,
+                    reason_codes=("conflicting_outlined_view_captions_in_viewport",),
+                )
+            )
+            continue
+        corroborated_types.add(distinct_vts[0])
+        vp_results.append(
+            ViewportOutlinedCaptionAssociation(
+                viewport_id=vp.viewport_id,
+                page_index=page_index,
+                source_sha256=clean_sha,
+                status="CORROBORATED",
+                view_type=distinct_vts[0],
+                matched_view_types=distinct_vts,
+                supporting_texts=texts,
+                supporting_bboxes_pdf_pts=boxes,
+                rejected_cross_reference_texts=xrefs,
+                reason_codes=("outlined_viewport_caption_corroborated",),
+            )
+        )
+
+    is_mixed = len(corroborated_types) > 1
+    sheet_reasons = (
+        ("mixed_sheet_per_viewport_captions_resolved",)
+        if is_mixed
+        else (
+            ("per_viewport_captions_resolved",)
+            if corroborated_types
+            else ("no_viewport_caption_corroborated",)
+        )
+    )
+    return SheetPerViewportOutlinedCaptionResult(
+        page_index=page_index,
+        source_sha256=clean_sha,
+        is_mixed_sheet=is_mixed,
+        viewports=tuple(vp_results),
+        unassigned_caption_texts=tuple(unassigned),
+        rejected_cross_reference_texts=tuple(all_xrefs),
+        reason_codes=sheet_reasons,
+    )
+
+
 def classify_page_in_drawing_outlined_captions_shadow(
     page: Any,
     *,
