@@ -285,17 +285,18 @@ export function App() {
   const catalogue = catalogueSession?.scene === manifest ? catalogueSession : null;
   const recoveryKey=manifest?"planreader-vr-recovery:"+scopeKey(manifest):null;
   const recoveryDraft=catalogue?.draft??null;
+  const savedSite=siteStore?.scene===manifest?siteStore:undefined;
   useEffect(()=>{
     if(!manifest||recoveryScene!==manifest||!recoveryKey)return;
     const timer=window.setTimeout(()=>{
       try{
-        const saved=saveVrReview(manifest,buildState,recoveryDraft);
+        const saved=saveVrReview(manifest,buildState,recoveryDraft,savedSite);
         if(new Blob([saved]).size>3*1024*1024)throw Error("Recovery limit exceeded");
         localStorage.setItem(recoveryKey,saved);
       }catch{setVrDraftStatus("Automatic local recovery could not save; export a draft manually.");}
     },750);
     return ()=>window.clearTimeout(timer);
-  },[manifest,recoveryScene,recoveryKey,buildState,recoveryDraft]);
+  },[manifest,recoveryScene,recoveryKey,buildState,recoveryDraft,savedSite]);
   function restoreRecovery(){
     if(!manifest||!recoveryKey)return;
     try{
@@ -304,6 +305,7 @@ export function App() {
       if(new Blob([saved]).size>3*1024*1024)throw Error("Recovery file exceeds the safe limit.");
       const restored=restoreVrReview(manifest,JSON.parse(saved));
       setPlaced({scene:manifest,build:restored.build});
+      setSiteStore(restored.site?{scene:manifest,...restored.site}:null);
       setCatalogueSession({scene:manifest,itemId:null,turn:0,draft:restored.itemDraft});
       setLastEdit("draw");setRecoveryScene(manifest);
       setVrDraftStatus("Recovered local draft. Automatic local recovery enabled.");
@@ -378,7 +380,7 @@ export function App() {
   function exportLocalVrDraft() {
     if(!manifest)return;
     try {
-      const text=saveVrReview(manifest,buildState,catalogue?.draft??null);
+      const text=saveVrReview(manifest,buildState,catalogue?.draft??null,savedSite);
       const blob=new Blob([text],{type:"application/json"});
       const url=URL.createObjectURL(blob);
       const anchor=document.createElement("a");
@@ -403,6 +405,7 @@ export function App() {
         throw Error("The open source scene changed. Reopen this draft against its original snapshot.");
       const restored=restoreVrReview(source,data);
       setPlaced({scene:source,build:restored.build});
+      setSiteStore(restored.site?{scene:source,...restored.site}:null);
       setCatalogueSession({scene:source,itemId:null,turn:0,draft:restored.itemDraft});
       setLastEdit("draw");
       setVrDraftStatus("Review-only draft reopened for the exact original source snapshot. No customer records changed.");
@@ -826,7 +829,7 @@ export function App() {
             <label>Fence style <select value={fence.style} onChange={e=>editSite(siteBounds,{...fence,style:e.currentTarget.value as FenceStyle})}>{FENCE_STYLES.map(style=><option key={style} value={style}>{({timber:"Timber",colorbond:"COLORBOND",block:"Exposed blockwork",rendered:"Rendered blockwork"})[style]}</option>)}</select></label>
             <label>Fence height (m)<input type="number" min=".6" max="3" step=".1" key={fence.heightM} defaultValue={fence.heightM} onBlur={e=>editSite(siteBounds,{...fence,heightM:e.currentTarget.valueAsNumber})}/></label>
             <label>Fence colour<input type="color" value={fence.color} onChange={e=>editSite(siteBounds,{...fence,color:e.currentTarget.value})}/></label>
-            <p>Visual only; no structural specification or certified quantities. Session settings are not included in saved draft files.</p>
+            <p>Visual only; no structural specification or certified quantities. Property settings are included in local draft exports and recovery.</p>
           </details>
           {buildLevel && <LocalOutlinePanel key={scopeKey(manifest)+":"+buildLevel}
             walls={buildState.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest))}
@@ -864,7 +867,7 @@ export function App() {
               <SceneView manifest={manifest} isSceneLoading={()=>pendingLoad.current!==null} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                outdoor={outdoor} onOutdoor={setOutdoor} siteBounds={siteBounds} fence={fence} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
+                outdoor={outdoor} onOutdoor={setOutdoor} siteBounds={siteBounds} fence={fence} onFence={next=>editSite(siteBounds,next)} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
