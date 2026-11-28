@@ -41,6 +41,9 @@ _THOUSANDS_RE = re.compile(r"(?<!\d)(\d{1,2}),(\d{3})(?!\d)")
 
 _THICKNESS_RE = re.compile(
     r"\b(?P<mm>\d{1,2}(?:\.\d)?)\s*mm\s+"
+    r"(?:(?:standard|wr|mr|fr|wet\s+area|water\s*[-]?\s*resistant|"
+    r"moisture\s*[-]?\s*resistant|fire\s*[-]?\s*rated|impact\s*[-]?\s*resistant|"
+    r"acoustic|compressed|glazed)\s+){0,2}"
     r"(?P<material>plasterboard|gyprock|villaboard|fibre\s+cement|fc\s+sheet|"
     r"ceramic\s+tile(?:s)?|porcelain\s+tile(?:s)?|tile(?:s)?|render|cement\s+render|"
     r"plywood|mdf|timber\s+lining|acoustic\s+panel|compressed\s+fc)\b",
@@ -65,10 +68,14 @@ _PARTIAL_HEIGHT_M_RE = re.compile(
 
 _EXTERNAL_MATERIAL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("face_brick", re.compile(r"\bface\s+brick(?:work)?\b", re.IGNORECASE)),
+    ("brick_veneer", re.compile(r"\bbrick\s+veneer\b", re.IGNORECASE)),
     ("bagged_painted_brick", re.compile(r"\bbagged\s*(?:&|and)\s*painted\s+brick(?:work)?\b", re.IGNORECASE)),
     ("rendered_masonry", re.compile(r"\b(?:cement\s+)?rendered\s+(?:brick(?:work)?|block(?:work)?|masonry)\b", re.IGNORECASE)),
-    ("metal_cladding", re.compile(r"\b(?:colorbond|metal|corrugated|standing\s+seam)\s+(?:wall\s+)?cladding\b", re.IGNORECASE)),
-    ("fibre_cement_cladding", re.compile(r"\b(?:fibre\s+cement|fc|james\s+hardie|scyon|linea)\s+(?:wall\s+)?(?:cladding|weatherboard|sheet(?:ing)?)\b", re.IGNORECASE)),
+    ("acrylic_textured_render", re.compile(r"\b(?:acrylic|textured|sand\s+finish)\s+render\b", re.IGNORECASE)),
+    ("aac_panel_cladding", re.compile(r"\b(?:aac|autoclaved\s+aerated\s+concrete|hebel)\s+(?:panel(?:s)?|cladding|wall(?:s)?)\b", re.IGNORECASE)),
+    ("precast_concrete", re.compile(r"\bprecast\s+concrete\b", re.IGNORECASE)),
+    ("metal_cladding", re.compile(r"\b(?:colorbond|metal|steel|corrugated|standing\s+seam|ribbed)\s+(?:wall\s+|sheet\s+)?cladding\b", re.IGNORECASE)),
+    ("fibre_cement_cladding", re.compile(r"\b(?:fibre\s+cement|compressed\s+fc|fc|james\s+hardie|scyon|linea|axon|stria|matrix)\s+(?:wall\s+)?(?:cladding|weatherboard|sheet(?:ing)?|panel(?:s)?)\b", re.IGNORECASE)),
     ("timber_weatherboard", re.compile(r"\b(?:timber\s+)?weatherboard(?:s)?\b", re.IGNORECASE)),
     ("aluminium_cladding", re.compile(r"\balumin(?:i)?um\s+(?:composite\s+)?cladding\b", re.IGNORECASE)),
 )

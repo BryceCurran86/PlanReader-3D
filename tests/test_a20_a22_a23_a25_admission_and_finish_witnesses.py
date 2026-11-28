@@ -1,8 +1,6 @@
 """A20/A22/A23/A25 tests: multi-sheet source admission packet, finish thickness, wall extent, and elevation material witnesses."""
 from __future__ import annotations
 
-import fitz
-
 from pb_migration_contracts import EvidenceResolutionStatus
 from pb_source_finish_specification_witness_shadow import (
     extract_external_elevation_material_witness,
@@ -108,3 +106,32 @@ def test_a23_external_elevation_material_scope_and_revision_guards() -> None:
         expected_revision_id="rev-2",
     )
     assert wrong_rev.status == EvidenceResolutionStatus.CONFLICT
+
+
+def test_a20_finish_thickness_with_generic_grade_modifiers() -> None:
+    wr = extract_finish_thickness_witness("10mm WR PLASTERBOARD TO WET AREAS")
+    assert wr.status == EvidenceResolutionStatus.CORROBORATED
+    assert wr.thickness_mm == 10.0
+    assert wr.material_label == "plasterboard"
+
+    fr = extract_finish_thickness_witness("13mm FIRE-RATED PLASTERBOARD")
+    assert fr.status == EvidenceResolutionStatus.CORROBORATED
+    assert fr.thickness_mm == 13.0
+    assert fr.material_label == "plasterboard"
+
+    conflict = extract_finish_thickness_witness("10mm WR PLASTERBOARD / 13mm FIRE-RATED PLASTERBOARD")
+    assert conflict.status == EvidenceResolutionStatus.CONFLICT
+
+
+def test_a23_external_elevation_additional_generic_cladding_classes() -> None:
+    res = extract_external_elevation_material_witness(
+        text="BRICK VENEER BASE WITH ACRYLIC RENDER AND PRECAST CONCRETE PANEL",
+        view_type="elevation",
+        document_id="doc-2",
+        revision_id="rev-1",
+        source_sha256="f" * 64,
+        expected_revision_id="rev-1",
+    )
+    assert res.status == EvidenceResolutionStatus.CORROBORATED
+    assert res.materials == ("brick_veneer", "acrylic_textured_render", "precast_concrete")
+    assert res.commercial_authority_granted is False
