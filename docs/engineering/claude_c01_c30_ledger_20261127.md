@@ -30,7 +30,7 @@ drawings only). Nothing here is merged; MAX owns merge, pins and official scorin
 | C23 holes, shafts, exclusions | PARTIAL | report | lists enclosed loops and net area; does not classify them |
 | C24 inside-face room polygons | NOT STARTED | | |
 | C25 curved/angled/stepped walls | PARTIAL | synthetic | curved walls are never candidates (only straight segments are extracted) |
-| C26 vector/raster corroboration | PARTIAL | opt-in | letters drawn over pictures became walls (Lot16); the opt-in filter passed 65 signed rows but lost genuine picture walls (WC, LINEN) so it is NOT safe; next: detect on the images-only render |
+| C26 vector/raster corroboration | PARTIAL | opt-in | letters drawn over pictures became walls (Lot16); the first filter lost genuine picture walls (removed); `raster_picture_detection_shadow` detects on the images-only render (synthetic; originals replay pending) |
 | C27 donor recovery | PARTIAL | report | `claude_donor_audit_c27_20261127.md`; nothing ported |
 | C28 preview/review app routes | NOT STARTED | | |
 | C29 performance | NOT STARTED | | |
