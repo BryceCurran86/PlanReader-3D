@@ -9,6 +9,8 @@ import { safeDrafts } from "./reviewDraft";
 import type { DraftHistory, WallDraft } from "./reviewDraft";
 import { maxRenderPixelRatio, mayRenderWallFace, shadowMapSize, VISUAL_PRESETS,realismBudget,adaptiveRenderQuality,architecturalShadowExtent } from "./visualRealism";
 import {createMaterialDetailLibrary,physicalUV} from "./materialDetail";
+import {createIndependentSlabs} from "./independentSlabs";
+import type {IndependentSlab} from "./independentSlabs";
 import {createSiteFence} from "./siteFence";
 import type {FenceSettings,SiteBounds} from "./siteFence";
 import {neutralStudioTexture} from "./neutralStudioTexture";
@@ -109,6 +111,7 @@ type Props = {
   onCycleStudy: (objectId: string) => void;
   outdoor:boolean;
   siteBounds:SiteBounds|null;
+  independentSlabs:readonly IndependentSlab[];
   fence:FenceSettings;
   onFence:(fence:FenceSettings)=>void;
   onOutdoor:(enabled:boolean)=>void;
@@ -276,7 +279,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,siteBounds,fence,onFence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell,slabMm,onSlab, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,siteBounds,independentSlabs,fence,onFence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell,slabMm,onSlab, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneLoading=useRef(isSceneLoading);sceneLoading.current=isSceneLoading;
@@ -313,8 +316,8 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
   moveSettings.current = { moveMode, wallMoveState, onMoveDelta };
   const sessionReportCallback = useRef(onPcVrSessionReport);
   sessionReportCallback.current = onPcVrSessionReport;
-  const visualSettings = useRef({ outdoor,onOutdoor,siteBounds,fence,onFence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture });
-  visualSettings.current = { outdoor,onOutdoor,siteBounds,fence,onFence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture };
+  const visualSettings = useRef({ outdoor,onOutdoor,siteBounds,independentSlabs,fence,onFence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture });
+  visualSettings.current = { outdoor,onOutdoor,siteBounds,independentSlabs,fence,onFence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const mappedDrafts=useMemo(()=>new Map<string,WallDraft>((draftState?safeDrafts(draftState,manifest):[])
@@ -333,6 +336,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
     scene.background = new THREE.Color(initialPreset.background);
     const environment=createOutdoorEnvironment(scene);
     const siteFence=createSiteFence(scene);
+    const slabsView=createIndependentSlabs(scene);
     const ambient = new THREE.HemisphereLight(
       initialPreset.ambientSky, initialPreset.ambientGround, initialPreset.ambientIntensity,
     );
@@ -2342,6 +2346,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
       environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z,photographicSky);
       const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
       siteFence.update(visualSettings.current.siteBounds,visualSettings.current.fence,outdoor);
+      slabsView.update(visualSettings.current.independentSlabs,interaction.current.level);
       if(gardenBounds&&shadowHouseBounds!==gardenBounds){shadowHouseBounds=gardenBounds;lightCenter.set((gardenBounds.minX+gardenBounds.maxX)/2,1.2,(gardenBounds.minZ+gardenBounds.maxZ)/2);const extent=architecturalShadowExtent(gardenBounds.maxX-gardenBounds.minX,gardenBounds.maxZ-gardenBounds.minZ);const sc=sunlight.shadow.camera;sc.left=sc.bottom=-extent;sc.right=sc.top=extent;sc.near=.5;sc.far=80;sc.updateProjectionMatrix();sunlight.target.position.copy(lightCenter);scene.add(sunlight.target);sunlight.position.set(...VISUAL_PRESETS[activeMood].sunPosition).add(lightCenter);shadowKey=[];}
       const nextMaterialKey=[activeQuality,lastAddedWall,currentShell,itemControls.current.items,currentStage,construction.current.layers,renderer.xr.isPresenting];
       if(!nextMaterialKey.every((v,i)=>v===materialBudgetKey[i])){
@@ -2629,7 +2634,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         }
       });
       disposedScene=true;outdoorHdr?.dispose();
-      roughTile.dispose();wallTextures.dispose();details.dispose();environment.dispose();siteFence.dispose();environmentMap.dispose();
+      roughTile.dispose();wallTextures.dispose();details.dispose();environment.dispose();siteFence.dispose();slabsView.dispose();environmentMap.dispose();
       buildOverlay.dispose();
       planOverview.dispose();
       presentationFloor.geometry.dispose();
