@@ -56,6 +56,12 @@ def test_unclear_ownership_abstains(labels, entries, expected):
     assert all(v["status"] is Status.ABSTAINED and v["wall_support"] is None for v in result.values())
 
 
+def test_an_ambiguous_label_still_counts_against_its_rings():
+    nested = ((60.0, 60.0), (110.0, 60.0), (110.0, 110.0), (60.0, 110.0))
+    result = labelled_ring_ownership({"A": (140, 140), "B": (80, 80)}, [entry(ROOM), entry(nested)], DRAWN)
+    assert result["B"]["reason"] == REASON_SEVERAL_RINGS and result["A"]["reason"] == REASON_SHARED_RING
+
+
 def test_order_and_inputs():
     labels = {"B": (250, 100), "A": (100, 100)}
     entries = [entry(OTHER), entry(ROOM)]

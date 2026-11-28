@@ -33,10 +33,11 @@ def labelled_ring_ownership(
     shapes = [Polygon(entry["polygon_pdf_pts"]) for entry in candidates]
     holders = {label: [i for i, shape in enumerate(shapes) if shape.contains(Point(*point))]
                for label, point in sorted(labels.items())}
+    # Every label a ring contains counts, even one that is ambiguous itself: a ring holding two labels owns neither.
     crowd: dict[int, int] = {}
     for found in holders.values():
-        if len(found) == 1:
-            crowd[found[0]] = crowd.get(found[0], 0) + 1
+        for index in found:
+            crowd[index] = crowd.get(index, 0) + 1
     result = {}
     for label, found in holders.items():
         if not found:
