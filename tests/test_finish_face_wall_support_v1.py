@@ -375,3 +375,38 @@ def test_real_builder_rings_with_their_doorway_closures_are_supported():
     assert len(rings) == 2 and built.closures
     for ring in rings:
         assert face_wall_support(ring.polygon_pdf_pts, drawings, built.closures)["status"] is CANDIDATE
+
+
+# Panel candidate: a white-filled strip drawn on both long sides (8.6 pt, too thick to count as a pair).
+PANEL_OUTER = ((41.4, 41.4), (172.6, 41.4), (172.6, 172.6), (41.4, 172.6))
+PANEL_BARS = [(41.4, 41.4, 172.6, 50), (41.4, 164, 172.6, 172.6), (41.4, 50, 50, 164), (164, 50, 172.6, 164)]
+PANEL_LINES = _loop(list(PANEL_OUTER)) + _loop(list(FACE))
+
+
+def _panel(face_lines=PANEL_LINES, bars=PANEL_BARS, **options):
+    _data, drawings, face = _draw(face_lines, bars, fill=WHITE, **options)
+    return _support(face, drawings)
+
+
+@pytest.mark.parametrize("options", [{}, {"turn": True}, {"shift": (213.5, 91.25)}, {"reverse": True}, {"split": True}],
+                         ids=["plain", "turned", "shifted", "reversed", "split"])
+def test_white_panel_walls_are_reported_as_candidates_and_never_counted(options):
+    result = _panel(**options)
+    assert result["status"] is ABSTAINED and result["unsupported_share"] > 0.99
+    assert result["panel_candidate_share"] > 0.9
+
+
+@pytest.mark.parametrize("lines,bars", [
+    (_loop(list(FACE)), PANEL_BARS),  # a mask: only the near side is drawn
+    (PANEL_LINES, [(50, 50, 70, 58.6)]),  # a short box (equipment): shorter than three times its thickness
+    (_loop([(30, 30), (184, 30), (184, 184), (30, 184)]) + _loop(list(FACE)),
+     [(30, 30, 184, 50), (30, 164, 184, 184), (30, 50, 50, 164), (164, 50, 184, 164)]),  # 20 pt: too thick
+], ids=["one_side", "short_box", "too_thick"])
+def test_look_alikes_are_not_panel_candidates(lines, bars):
+    assert _panel(lines, bars)["panel_candidate_share"] == 0.0
+
+
+def test_a_strip_inside_the_room_is_not_a_panel_wall_of_it():
+    inside = _loop([(58.6, 58.6), (155.4, 58.6), (155.4, 155.4), (58.6, 155.4)]) + _loop(list(FACE))
+    bars = [(50, 50, 164, 58.6), (50, 155.4, 164, 164), (50, 58.6, 58.6, 155.4), (155.4, 58.6, 164, 155.4)]
+    assert _panel(inside, bars)["panel_candidate_share"] == 0.0

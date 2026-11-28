@@ -60,3 +60,15 @@ quarter turn, drawing order and segment splitting; determinism and no mutation. 
 
 ## Must not influence
 Any expected area, room list or quantity; no sheet-, project- or room-specific value. All thresholds are the builder's.
+
+## Panel candidate (28 Nov, report only, CL-R04)
+Design before change: some thick walls are drawn as white-filled strips (opaque white fill) between two lines of one
+ink. `panel_candidate` marks edge stretches where such a strip, a wall's thickness wide (1.2–14 pt, the builder's
+limits), at least three times as long and drawn along both long sides (corners excepted), lies outside the edge. It is
+never counted as support; the existing rules and statuses are unchanged. Synthetic: panel-walled room reported (turned,
+shifted, reversed, split); a one-sided mask, a short box, a 20 pt strip and a strip inside the room are not.
+
+Original (counts only): the plan sheet has 129 such strips (123 in black), 6 of them floating inside a room outline. 13 touch
+the cold-room outline (68% of it) and none touch the Office, Food Prep or Sales cells. But today's cold-room ring runs
+along the outer face of several of those walls (the strip lies inside the outline), so the candidate adds nothing there:
+the ring is not an inside-face ring. That belongs to the ring work (CL-R07), not to support.

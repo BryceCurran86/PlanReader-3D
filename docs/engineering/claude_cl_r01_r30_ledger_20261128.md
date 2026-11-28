@@ -11,7 +11,7 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R01 C03 default off | C03 | proven | #4810 `c216571f6`: W2 Lot16/Maryborough and full page byte-identical to main (7235084128) | none unless a relevant change |
 | R02 face-aware W2 snap | new | failed | `order-free-snap-1.1.0` (`4fc2d178d`): Lot16 named rooms kept, shuffle invariant; Maryborough sheet 7 gives no rooms | find the first face-ownership gate that fails sheet 7 |
 | R03 cold room / false sales cell | new | validation (trace) | self-intersecting ring under the snap; area on a floor-grid cell (7234165306) | fix after R02 |
-| R04 finish edges on wall ink | C05/C08 | validation | `pb_finish_face_wall_support_shadow` (#4810) rejects the Office/Food Prep cells; C05 guard (#4810, off) | wire into the finish route; signed rows |
+| R04 finish edges on wall ink | C05/C08 | validation | `pb_finish_face_wall_support_shadow` (#4810) rejects the Office/Food Prep/Sales cells; report-only panel candidate; C05 guard (#4810, off) | cold-room ring runs on outer faces (R07) before any veto; signed rows |
 | R05 Office doorway | C08 | validation | `door_jamb_returns` (main, #4763) closes the real Office; union shadow (#4810) keeps WSH/DRY | route wiring with conflicts abstaining |
 | R06 Food Prep open plan | C22 | validation | open-plan ring shadow (main `a05df3bb5`, runtime #4561) | real threshold and finish ownership with AG evidence |
 | R07 inside-face rings and ids | C06–C08 | validation | ring builder; ring-wall identity map (#4810); viewport wall links (main #4780, off) | disambiguate edge-to-wall links without choosing |

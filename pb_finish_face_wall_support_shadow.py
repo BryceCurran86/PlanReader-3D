@@ -30,6 +30,7 @@ from pb_layered_wall_doorway_room_ring_shadow import (
 from pb_migration_contracts import EvidenceResolutionStatus
 
 PAIRED, FILLED, CLOSURE, WALL_END, WIDE = "paired", "filled", "closure", "wall_end", "wide_candidate"
+PANEL = "panel_candidate"  # a white-filled strip drawn on both long sides: reported, never counted as support
 _AROUND_PT = 2.0 * _DARK_FILL_THICK_MAX + _STROKE_PAIR_CLUSTER_PT  # search radius: a wide pair plus its hatch check
 _BLACK = (0.0, 0.0, 0.0)
 
@@ -50,13 +51,17 @@ def _near(row: Mapping[str, Any], region: tuple[float, float, float, float]) -> 
 def _ink_near(drawings: Sequence[Any], region: tuple[float, float, float, float]):
     """Visible wall-eligible paint near the face: horizontal and vertical lines per ink colour, and the fills.
 
-    Fills are recoloured black only so the builder's bar collector accepts them; list positions are kept."""
+    Fills are recoloured black only so the builder's bar collector accepts them; list positions are kept. Opaque white
+    rectangles are returned separately for the panel candidate."""
     inks: dict[tuple[float, ...], list[tuple[bool, float, float, float]]] = {}
     fills: list[dict | None] = [None] * len(drawings)
+    whites: list[tuple[float, float, float, float]] = []
     for index, row in enumerate(drawings):
         if not (isinstance(row, Mapping) and row.get("items") and _near(row, region)):
             continue
         stroke, fill = row.get("color"), row.get("fill")
+        if fill is not None and _paper_white(fill) and _opaque(row):
+            whites.extend(tuple(float(v) for v in tuple(item[1])) for item in row["items"] if item[0] == "re")
         if fill is not None and not _paper_white(fill):
             if not _owner_excluded_green_ink(fill) and _opaque(row):
                 fills[index] = {**row, "color": None, "fill": _BLACK, "layer": ""}
@@ -71,7 +76,35 @@ def _ink_near(drawings: Sequence[Any], region: tuple[float, float, float, float]
                     lines.append((True, (ay + by) / 2.0, min(ax, bx), max(ax, bx)))
                 elif abs(ax - bx) <= 1e-3 and abs(by - ay) > NOISE_PT:
                     lines.append((False, (ax + bx) / 2.0, min(ay, by), max(ay, by)))
-    return dict(sorted(inks.items())), fills
+    return dict(sorted(inks.items())), fills, whites
+
+
+def _drawn_share(lines, horizontal: bool, position: float, lo: float, hi: float) -> float:
+    spans = sorted((max(a, lo), min(b, hi)) for is_horizontal, perp, a, b in lines
+                   if is_horizontal == horizontal and abs(perp - position) <= _STROKE_PAIR_CLUSTER_PT
+                   and min(b, hi) > max(a, lo))
+    covered, reach = 0.0, lo
+    for a, b in spans:
+        covered += max(0.0, b - max(a, reach))
+        reach = max(reach, b)
+    return covered / (hi - lo)
+
+
+def _panel_bands(whites, inks) -> list[tuple[bool, float, float, float, float]]:
+    """White strips a wall's thickness wide, at least three times as long, drawn in one ink along both long sides."""
+    bands = []
+    for x0, y0, x1, y1 in whites:
+        horizontal = (x1 - x0) >= (y1 - y0)
+        thick, span = (y1 - y0, x1 - x0) if horizontal else (x1 - x0, y1 - y0)
+        if not (_STROKE_PAIR_THICK_MIN <= thick <= _DARK_FILL_THICK_MAX and span >= 3.0 * thick):
+            continue
+        low, high = (y0, y1) if horizontal else (x0, x1)
+        start, end = (x0, x1) if horizontal else (y0, y1)
+        # At a corner the inner line stops a thickness short of the strip's end, so the ends are not asked for.
+        if any(all(_drawn_share(lines, horizontal, side, start + thick, end - thick) >= 0.9 for side in (low, high))
+               for lines in inks.values()):
+            bands.append((horizontal, low, high, start, end))
+    return bands
 
 
 def _faces(lines, horizontal: bool, line: float, outward: float, start: float, end: float,
@@ -214,8 +247,9 @@ def face_wall_support(polygon: Sequence[tuple[float, float]], drawings: Sequence
     if len(points) < 3 or not room.is_valid or room.area <= 0.0:
         return {"status": EvidenceResolutionStatus.ABSTAINED, "reason": "face_polygon_invalid", "edges": []}
     x0, y0, x1, y1 = room.bounds
-    inks, fills = _ink_near(drawings, (x0 - _AROUND_PT, y0 - _AROUND_PT, x1 + _AROUND_PT, y1 + _AROUND_PT))
+    inks, fills, whites = _ink_near(drawings, (x0 - _AROUND_PT, y0 - _AROUND_PT, x1 + _AROUND_PT, y1 + _AROUND_PT))
     bars = _collect_dark_painted_source_wall_strips(fills)
+    panels = _panel_bands(whites, inks)
     found = []
     for a, b in zip(points, points[1:] + points[:1]):
         length = math.dist(a, b)
@@ -223,7 +257,8 @@ def face_wall_support(polygon: Sequence[tuple[float, float]], drawings: Sequence
         vertical = abs(a[0] - b[0]) <= NOISE_PT * 2 < abs(a[1] - b[1])
         stretches: dict[str, list[tuple[float, float]]] = {PAIRED: [], FILLED: [], CLOSURE: []}
         support: list[tuple[float, float, float, tuple | None]] = []  # (from, to, wall thickness there, ink)
-        edge = {"length": length, "axis": None, "support": support, "stretches": stretches, "ends": [], "wide": []}
+        edge = {"length": length, "axis": None, "support": support, "stretches": stretches, "ends": [], "wide": [],
+                "panels": []}
         if horizontal or vertical:
             along, across = (0, 1) if horizontal else (1, 0)
             line = (a[across] + b[across]) / 2.0
@@ -252,6 +287,11 @@ def face_wall_support(polygon: Sequence[tuple[float, float]], drawings: Sequence
                 if abs(near_face - line) <= _STROKE_PAIR_CLUSTER_PT and (span := clip(*strip.span())) is not None:
                     stretches[FILLED].append(span)
                     support.append((*span, high - low, None))
+            for is_horizontal, low, high, band_start, band_end in panels:
+                near_face = high if room_above else low  # as for a filled bar: the strip lies outside the line
+                if (is_horizontal == horizontal and abs(near_face - line) <= _STROKE_PAIR_CLUSTER_PT
+                        and (span := clip(band_start, band_end)) is not None):
+                    edge["panels"].append(span)
             for closure in closures:
                 if closure.horizontal == horizontal and (closure.band[0] - _STROKE_PAIR_CLUSTER_PT <= line
                                                          <= closure.band[1] + _STROKE_PAIR_CLUSTER_PT):
@@ -266,11 +306,13 @@ def face_wall_support(polygon: Sequence[tuple[float, float]], drawings: Sequence
         every = [span for spans in stretches.values() for span in spans] + edge["ends"]
         covered, longest_gap = _union_length(every, length)
         wide = _union_length(every + edge["wide"], length)[0] - covered  # only what the rules above leave bare
+        panel = _union_length(every + edge["panels"], length)[0] - covered
         edges.append({
             "length": length,
             **{kind: _union_length(spans, length)[0] for kind, spans in stretches.items()},
             WALL_END: _union_length(edge["ends"], length)[0],
             WIDE: max(0.0, wide),
+            PANEL: max(0.0, panel),
             "unsupported": max(0.0, length - covered),
             "longest_gap": longest_gap,
         })
@@ -282,4 +324,5 @@ def face_wall_support(polygon: Sequence[tuple[float, float]], drawings: Sequence
         "edges": edges,
         "unsupported_share": sum(edge["unsupported"] for edge in edges) / total if total else 1.0,
         "wide_candidate_share": sum(edge[WIDE] for edge in edges) / total if total else 0.0,
+        "panel_candidate_share": sum(edge[PANEL] for edge in edges) / total if total else 0.0,
     }
