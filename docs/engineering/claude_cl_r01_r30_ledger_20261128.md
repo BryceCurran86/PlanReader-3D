@@ -25,8 +25,8 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R15 angled/mirrored doors | C14 | validation | `angled_opening_precision_shadow` (#4810, off); originals additive only | signed parity; two Maryborough candidates unproven |
 | R16 cavity sliders and robes | C15 | validation | cavity slider jamb shadows and internal door census (main `353902bbb`, #4637/#4639) | push/pull vs slider on originals |
 | R17 exterior window hosts | C16 | validation | window footprint continuity and external opening census (main `e0130c180`) | sill/head handoff from AG |
-| R18 corner stacker and external doors | C17 | missing (donor) | stacker readiness shadow (main); #4751 reconciliation (`4d6a87e46`, `4aba3c8e8`, `63d6e6295`) not merged | port and verify the donor |
-| R19 3Laurel openings | C18 | missing (binding) | internal door census (main #4637/#4639) | 18 internal items unbound; door donor pieces B–E |
+| R18 corner stacker and external doors | C17 | missing (donor) | stacker readiness shadow (main); draft #4751 (MAX branch: 7 production lines re-applying the #4522 corner-frame change) not merged | MAX to say who ports it (host/frame also listed in MAX's lane) |
+| R19 3Laurel openings | C18 | missing (binding) | internal door census (main #4637/#4639); unique-swing host module only on the 11-15 3Laurel branches (`4aba3c8e8`, `63d6e6295`), not on main | 18 internal items unbound; door donor pieces B–E |
 | R20 opening widths and heights | C19 | validation | figured-label opening quantities (live); schedule binding (#4810 C01) | schedule/elevation reconciliation with AG |
 | R21 jamb caps and returns | C20 | validation | `jamb_caps_must_be_wall_ends` and returns (main #4763, off) | originals positives/negatives |
 | R22 Lot16 stub candidates | C21 | proven (diagnostic) / missing (recovery) | one rule explains 125 → 189 (`claude_lot16_candidate_reconciliation_20261127.md`) | member evidence recovery |
