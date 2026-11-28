@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import fitz
 import pytest
+from test_live_physical_net_wall_integration import _two_room_cross_view_area_pdf
 
 from pb_floor_grid_cell_veto_shadow import (
     REASON_FLOOR_GRID_CELL,
@@ -96,3 +97,25 @@ def test_live_claim_is_unchanged_unless_asked(tmp_path):
     assert len(on.canonical_floors) == len(after) and not {f.room_entity_id for f in on.canonical_floors} & withheld
     with pytest.raises(ValueError):
         collect_live_physical_net_wall_claim(path, pages=(0,), floor_grid_cell_veto_shadow=1)
+
+
+def test_withheld_cells_get_no_room_area_entry_and_other_rows_stay(tmp_path):
+    document = fitz.open(stream=_two_room_cross_view_area_pdf(), filetype="pdf")
+    page = document[0]
+    for x in (170.0, 190.0, 210.0, 230.0):  # tiles in the second room only; the office with its printed size stays clean
+        page.draw_line((x, 50.0), (x, 150.0), color=GREY, width=0.24)
+    for y in (70.0, 90.0, 110.0, 130.0):
+        page.draw_line((150.0, y), (250.0, y), color=GREY, width=0.24)
+    path = tmp_path / "tiled_cross_view.pdf"
+    path.write_bytes(document.tobytes())
+    document.close()
+    claims = [collect_live_physical_net_wall_claim(path, pages=(0,), room_area_support_pages=(1,),
+                                                   **({"floor_grid_cell_veto_shadow": True} if on else {}))
+              for on in (False, True)]
+    off, on = claims
+    withheld = on.surface_pipeline_diagnostics["floor_grid_cell_veto"]
+    assert withheld and all(r["source_room_face_record_id"] for r in withheld)
+    assert len(off.room_area_quantity_evidence) == len(off.canonical_rooms)
+    assert len(on.room_area_quantity_evidence) == len(on.canonical_rooms)
+    firm = [[round(float(q.value), 2) for q in c.room_area_quantity_evidence if not q.abstained] for c in claims]
+    assert firm == [[8.64], [8.64]]

@@ -48,6 +48,7 @@ def veto_floor_grid_cell_rooms(composition: Any, source_bytes: bytes) -> tuple[A
                     removed.add(id(room))
                     withheld.append({
                         "canonical_room_id": room.canonical_room_id, "page_id": page_id,
+                        "source_room_face_record_id": str(getattr(room, "source_room_face_record_id", "") or ""),
                         "status": EvidenceResolutionStatus.ABSTAINED.value, "reason": REASON_FLOOR_GRID_CELL,
                         "floor_grid_outline_share": round(share, 4), "floor_grid_lattice_ids": evidence,
                     })

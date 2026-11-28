@@ -681,6 +681,7 @@ def _collect_live_physical_net_wall_claim(
     if floor_grid_cell_veto_shadow:
         from pb_floor_grid_cell_veto_shadow import veto_floor_grid_cell_rooms
         canonical_rooms, floor_grid_withheld = veto_floor_grid_cell_rooms(canonical_rooms, payload)
+    floor_grid_record_ids = frozenset(record["source_room_face_record_id"] for record in floor_grid_withheld)
     canonical_space_core = compose_live_canonical_spaces(canonical_rooms)
     canonical_floors = compose_live_canonical_floor_surfaces(
         canonical_rooms
@@ -1135,7 +1136,11 @@ def _collect_live_physical_net_wall_claim(
             if not explicit_by_face_id and scale_calibration is None:
                 continue
 
+            floor_grid_faces = tuple(
+                record.face_id for record in room_scope.records
+                if record.record_id in floor_grid_record_ids)
             bridge = build_source_room_area_bridge(
+                **({"withheld_room_refs": floor_grid_faces} if floor_grid_faces else {}),
                 room_face_authority=room_face_authority,
                 selector=selector,
                 context=context,
