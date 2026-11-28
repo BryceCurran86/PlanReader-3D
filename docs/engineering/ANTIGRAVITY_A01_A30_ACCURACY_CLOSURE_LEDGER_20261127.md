@@ -82,5 +82,39 @@
     2. `pb_source_vector_outlined_text_ocr_shadow.py`: `classify_outlined_caption_view_type(...)` requiring multi-DPI agreement (`shadow_only=True`, `commercial_authority_granted=False`).
 - **Acacia (`A06`/`A25` Source-Set Admission)**:
   - `pb_source_floor_plan_page_scope.py:build_source_set_admission_packet(...)` classifies Acacia `p1=register` (`not_floor_plan_document_header`), `p2=unproven`, emitting `has_finish_specification_source=False`, `finish_specification_status="abstained_no_finish_specification_source"` cleanly with zero fabricated finish specs.
-- **Hardened Family-Only Consumer Verifier (`20e1ecd83` / `40c5dae4d`)**:
-  - `tools/run_source_closed_project_handoff.py:verify_family_only_floor_area_manifest(summary, *, output_dir, expected_source_sha256, expected_project_id, expected_workspace_id, expected_revision_id=None)` enforces trusted `output_dir`, ancestor/leaf symlink rejection (`_reject_symlink_ancestors`), canonical path confinement, LF-exact raw-byte SHA-256 verification, cross-context checks, duplicate-ID rejection, and non-`floor_area` seal rejection (51 passed, 5 skipped).
+- **Hardened Family-Only Consumer Verifier (`20e1ecd83` / `40c5dae4d` / `d26fffeee`)**:
+  - `tools/run_source_closed_project_handoff.py:verify_family_only_floor_area_manifest(summary, *, output_dir, expected_source_sha256, expected_project_id, expected_workspace_id, expected_revision_id=None)` enforces trusted `output_dir`, ancestor/leaf symlink rejection (`_reject_symlink_ancestors`), canonical path confinement, LF-exact raw-byte SHA-256 verification, cross-context checks, duplicate-ID rejection, and non-`floor_area` seal rejection (51 passed, 5 skipped). **Live-verified PASS on exact head `d26fffeee` (`#7235299139`)**.
+
+---
+
+## Section D — AG-R03: 7-Target Maryborough Per-Row Historical Provenance Ledger (`mbp-saved-evidence`, `cf556f74c02c558f`)
+
+| # | Family | Value | Historical Quantity ID (`mbp-saved-evidence`) | Historical Viewport & Entity | Provenance Classification | Current Generic Live Status (`d26fffeee`) & First Gate |
+|---:|---|---:|---|---|---|---|
+| 1 | `floor_area` | `25.37875 m2` | `floor_area_quantity_db4d6a02e6183bbbf1b2` | `view_p7_2` / `physical_room_floor_surface_4bca8579...` | **SIGNED & LIVE-REPRODUCED** (`documented_dimension` / 2 `cross_view_native_dimension_*` anchors) | **LIVE VERIFIED** (`floor_area_quantity_9e0f557b...`, `qty_cc714a2e...`, `45` evidence IDs, hardened verifier PASS `#7235299139`) |
+| 2 | `floor_area` | `9.05352 m2` | `floor_area_quantity_de0a7ed7e9c306f6e533` | `view_p7_2` / `physical_room_floor_surface_980b1ad9...` | **SIGNED & LIVE-REPRODUCED** (`documented_dimension` / 2 `cross_view_native_dimension_*` anchors) | **LIVE VERIFIED** (`floor_area_quantity_5a88dc2e...`, `qty_79f29234...`, `12` evidence IDs, hardened verifier PASS `#7235299139`) |
+| 3 | `floor_area` | `13.270425 m2` | `floor_area_quantity_e56c0138490c06d35f1d` | `view_p7_2` / `physical_room_floor_surface_10d0d5dd...` | **SIGNED & LIVE-REPRODUCED** (`documented_dimension` / 2 `cross_view_native_dimension_*` anchors) | **LIVE VERIFIED** (`floor_area_quantity_f9c08506...`, `qty_ca917c9e...`, `16` evidence IDs, hardened verifier PASS `#7235299139`) |
+| 4 | `floor_finish_area` | `9.05352 m2` | `qty_floor_finish_area_55a7a4376380ff03391290c9286c6a99` | `VIEWPORT_P07_A110_PLAN` / `live_physical_room_9eea8a32...` | **HISTORICAL SIGNED VIA QUARANTINED LEGACY VIEWPORT** (prohibited job-scoped wall synthesis) | **ABSTAINED** (`FloorFinishBoundingWallAuthorityIncompleteError`; `0/22` outline edges have wall ink per Claude `#7224247937`) |
+| 5 | `floor_finish_area` | `13.270425 m2` | `qty_floor_finish_area_9e275239226b0b4adfb7a6190df0c3ae` | `VIEWPORT_P07_A110_PLAN` / `live_physical_room_7f9fb479...` | **HISTORICAL SIGNED VIA QUARANTINED LEGACY VIEWPORT** (prohibited job-scoped wall synthesis) | **ABSTAINED** (`FloorFinishBoundingWallAuthorityIncompleteError`; Food Prep open-plan belongs to Claude C22) |
+| 6 | `ceiling_lining` | `9.05352 m2` | `ceiling_lining_quantity_3eab504d04ac01b1a08f197b3c9a58e7` | `VIEWPORT_P07_A110_PLAN` / `live_physical_room_9eea8a32...` | **HISTORICAL SIGNED VIA QUARANTINED LEGACY VIEWPORT** (prohibited job-scoped issuer) | **UNEMITTED** (`CrossViewCeilingFinishProducer.publish()` same-`block_no` gate; awaits generic RCP bubble-to-room correspondence `A12`/MAX `#4594`) |
+| 7 | `ceiling_lining` | `13.270425 m2` | `ceiling_lining_quantity_1ebaadadfe6e4affe2378f330373c633` | `VIEWPORT_P07_A110_PLAN` / `live_physical_room_7f9fb479...` | **HISTORICAL SIGNED VIA QUARANTINED LEGACY VIEWPORT** (prohibited job-scoped issuer) | **UNEMITTED** (`CrossViewCeilingFinishProducer.publish()` same-`block_no` gate; awaits generic RCP bubble-to-room correspondence `A12`/MAX `#4594`) |
+
+---
+
+## Section E — Revised No-Rework `AG-R01–R20` Delta Closure Inventory (per Owner Correction `#7235118617`)
+
+- **Implemented & Live-Proven (Closed — No Rework)**:
+  - **R01** (`d26fffeee`, `#7235299139`): Hardened `verify_family_only_floor_area_manifest` passed live (`disk_sha_equals_manifest_sha=True`, `3` rows, unsealed whole-project flags).
+  - **R02** (`d26fffeee`, `#7235299139`): All 3 plain `floor_area` rows proven via independent `documented_dimension` / `figured_dimension` (2 `cross_view_native_dimension_*` anchors each, `resolved_scale_id=None`), exact `physical_room_floor_surface_*` entity IDs, not drafting cells.
+  - **R03** (Section D above): 7-target Maryborough per-row historical provenance ledger distinguishing signed live-reproduced (`3/7`) vs quarantined legacy viewport (`4/7` abstained/unemitted by generic gates).
+  - **R16** (`9942eef89`, `1e3f6e18c`): `A02/A03` generic viewport scoping (`topology_pages=(6,)` on Maryborough, `130/130` tests) + `A27` all 4 `#4755` shadow consumer bridges fail-closed (`104/104` tests).
+- **Implemented — Validation / Shadow / Integration Handoff Pending (No Rework of Existing Code)**:
+  - **R04** (`A05`): `pb_source_dimension_witness_scale_shadow.py` built (`27/27` tests, `requires_typed_negative_ink_guard=True`); sheet-7 cap/tick diagnosis complete (`#7224267927`, `0/18` native split-half ticks); never used to unblock false walls.
+  - **R07** (`A14–A16/A24`), **R13** (`A07–A10`), **R14** (`A11/A21`), **R15** (`A20/A22/A23`): All implemented & unit-tested (`36/36`, `183/183`, `187/187`, `58/58`, `35/35`, `38/38`); original-drawing integration awaits MAX issuer wiring.
+  - **R09** (`A06` Q5446), **R12** (`A04/A25` Acacia): Opt-in OCR title fallback (`6bebb3f8d`, `39/39`), outlined-caption shadow (`26db7f1b4`), and `SourceSetAdmissionPacket` (`f230c1a83`) implemented & handed off to MAX integration (Section C).
+  - **R17** (`faaf7b728`, `40c5dae4d`, `ce70ce693`): Native-first classifier + default-off fail-fast live wiring + end-to-end `_recover_admissible_viewport_lines` equivalence tests (`8/8`); original OCR parity test remains before any default promotion.
+  - **R18** (`2204df463`, `94bbcb5b1`, `55155deb1`): Opening-recovery family gate, no-op reproof skip + staged GC release (`203/203`), pre-allocation display-list eviction + OOM fallback (`70/70`), measured `922.8s / 3,996 MB` vs `2,169.6s / 9,553 MB` profile.
+- **Genuinely Missing / Cross-Agent Blocked**:
+  - **R05** (`A12` generic RCP bubble-to-room correspondence), **R06** (`A13` FT2/FT3 cross-sheet finish + Claude real wall/ring identity), **R08** (`A17` floor finish continuity / Claude C22), **R10/R11** (`A18/A19` Q5446 BATH/LIVING + Claude physical faces).
+- **Release-Only (Final Gate)**:
+  - **R19–R20**: Combined `#4807 + #4810 + #4806` source/customer validation on latest `main` + final consolidated `#4807` release packet (owned with MAX/Claude; MAX owns residual hosted CI retirement & unchanged `frozen120`).
