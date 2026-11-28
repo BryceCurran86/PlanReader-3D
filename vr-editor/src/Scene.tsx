@@ -110,6 +110,7 @@ type Props = {
   outdoor:boolean;
   siteBounds:SiteBounds|null;
   fence:FenceSettings;
+  onFence:(fence:FenceSettings)=>void;
   onOutdoor:(enabled:boolean)=>void;
   mood: LightingMood;
   onMood:(mood:LightingMood)=>void;
@@ -275,7 +276,7 @@ function labelSprite(value: string): THREE.Sprite {
   return sprite;
 }
 
-export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,siteBounds,fence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell,slabMm,onSlab, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
+export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels, onLevel, mode, canUndo, canRedo, onHistory, onDone, onToolMessage, toolFeedback, selectedId, draftPickKind, draftSelection, onDraftSelection, onSelect, draftState, onCycleStudy, outdoor,onOutdoor,siteBounds,fence,onFence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture, onPcVrSessionReport, moveMode, wallMoveState, onMoveDelta, addedWallSketch, addedWallSketches, buildState, buildLevel, buildSizes, stage, onStage, liningBoard,onLiningBoard,layers, onLayers, allDimensions, onAllDimensions, shell,slabMm,onSlab, footprint, onBuildAction, onBuildHint, onBuildSizes, catalogue, teleportMode, teleportAvailable, onTeleportToggle,
   onExportLocalDraft, onReviewLocalWall, onTeleportMessage, budget }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneLoading=useRef(isSceneLoading);sceneLoading.current=isSceneLoading;
@@ -312,8 +313,8 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
   moveSettings.current = { moveMode, wallMoveState, onMoveDelta };
   const sessionReportCallback = useRef(onPcVrSessionReport);
   sessionReportCallback.current = onPcVrSessionReport;
-  const visualSettings = useRef({ outdoor,onOutdoor,siteBounds,fence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture });
-  visualSettings.current = { outdoor,onOutdoor,siteBounds,fence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture };
+  const visualSettings = useRef({ outdoor,onOutdoor,siteBounds,fence,onFence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture });
+  visualSettings.current = { outdoor,onOutdoor,siteBounds,fence,onFence,mood, onMood, previewLights, onPreviewLights, quality,onQuality, detail, inspection, cameraRequest, captureSerial, onCapture };
   const picked = useRef(selectedId);
   picked.current = selectedId;
   const mappedDrafts=useMemo(()=>new Map<string,WallDraft>((draftState?safeDrafts(draftState,manifest):[])
@@ -443,7 +444,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
     // Only a layout actually displayed can authorize a menu action.
     let displayedMenuLayout: ReturnType<typeof menuLayout> | null = null;
     let stickNeedsNeutral=false,menuFocus=-1,menuStickArmed=true,menuStickFocus=false;
-    const closeTools=()=>{if(automaticContext)hoverDwell.dismiss(contextTargetKey(finishContext));automaticContext=false;toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;slabTools=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
+    const closeTools=()=>{if(automaticContext)hoverDwell.dismiss(contextTargetKey(finishContext));automaticContext=false;toolsOpen=false;displayedMenuLayout=null;menuPose=null;stickNeedsNeutral=true;menuFocus=-1;menuStickArmed=false;menuStickFocus=false;radial=false;simpleHome=true;finishContext=null;finishGroup=null;finishPage=0;layersOpen=false;wallProfilesOpen=false;helpOpen=false;budgetOpen=false;slabTools=false;fenceTools=false;stageMenuOpen=false;angleTools=false;openingTools=false;numberPad=null;deleteArmed=false;itemBrowser=EMPTY_ITEM_BROWSER;buildOverlay.hideMenu();};
     function toggleTools(contextual=false){
       if(!renderer.xr.isPresenting)return;
       toolsOpen=!toolsOpen;
@@ -460,7 +461,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
       }
       else closeTools();
     }
-    let budgetOpen=false,budgetPage=0,slabTools=false;
+    let budgetOpen=false,budgetPage=0,slabTools=false,fenceTools=false;
     let compactMenu = true;
     let overviewOpen=false;
     let elevatedReturn: NavOffset|null=null;
@@ -529,7 +530,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         construction.current.stage, stageMenuOpen, {
           available: !!resize.current.box, enabled: resize.current.enabled, changed: !!resize.current.projection,
         }, interaction.current, {
-          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext:liveContext,finishGroup,finishPage,activeFinishId,hoverContext:automaticContext,slabMm:construction.current.slabMm,slabTools,
+          simpleHome,outdoor:visualSettings.current.outdoor,quality:visualSettings.current.quality,finishContext:liveContext,finishGroup,finishPage,activeFinishId,hoverContext:automaticContext,slabMm:construction.current.slabMm,slabTools,fenceTools,fence:visualSettings.current.fence,hasSite:!!visualSettings.current.siteBounds,
            selectedWall: selectedDraftWall(), rotationPivot, connectedRotation, angleTools, feedback:interaction.current.toolFeedback, gridM: snapGrid, axis: snapAxis,
           nudgeM: nudgeStep, pinned: panelPinned, help: helpOpen, deleteArmed,
           compact: compactMenu, openingTools, openingIndex, numeric: numberPad,
@@ -563,6 +564,7 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         if((choice.action==="move"||choice.action==="stretch")&&target?.kind==="ceiling"&&ceiling){contextDragTarget={kind:"ceiling",id:ceiling.proposalId};updateDraftSelection(ceiling.proposalId);build.current.onBuildAction({kind:"tool",tool:choice.action});closeTools();reportTool("Aim at selected ceiling, hold trigger and drag.");return;}
         reportTool("This object is not editable in the current design.");return;
       }
+      if(choice.area==="fence"){if(choice.close){fenceTools=false;return;}if(!choice.style&&choice.heightM===undefined&&!choice.color){fenceTools=true;return;}if(!visualSettings.current.siteBounds)return;const current=visualSettings.current.fence;visualSettings.current.onFence({...current,...(choice.style?{style:choice.style}:{}),...(choice.heightM!==undefined?{heightM:choice.heightM}:{}),...(choice.color?{color:choice.color}:{})});return;}
       if(choice.area==="slab"){if(choice.mm===undefined){slabTools=!slabTools;return;}construction.current.onSlab(choice.mm);return;}
       if(choice.area==="footprint-size"){const b=resize.current.box;if(!b||!resize.current.enabled)return;resize.current.onResize(resizeFromDimensions(b,footprintWidth(b)+(choice.axis==="x"?choice.delta:0),footprintDepth(b)+(choice.axis==="z"?choice.delta:0),"centre"));return;}
       if(choice.area==="items"&&choice.action.kind==="edit-fixture"){
