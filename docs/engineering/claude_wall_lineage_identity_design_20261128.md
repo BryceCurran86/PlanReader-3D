@@ -57,5 +57,11 @@ Observed while building: intersections can yield -0.0, and `stable_contract_id` 
 Not changed here (it would rename walls). Shadow check (MAX 7235189680): on saved Maryborough and Lot16 sheet-3 walls no
 path touches a zero coordinate, none carries -0.0 and normalising adds no collisions, so no change is proposed.
 
+## Host identity at the opening (28 Nov, report only)
+Because chains change with the snap, `host_jamb_identity` names for each host member wall only its one long piece
+that ends at the opening's own source geometry (within the snap tolerance); none or several, a shared piece or members
+in different viewports veto the whole identity. Synthetic: survives a chain growing away from the opening; originals not
+yet measured.
+
 ## Not authority
 No wall, host, opening, measurement or quantity authority; no threshold other than the existing snap tolerance.

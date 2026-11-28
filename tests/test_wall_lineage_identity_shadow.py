@@ -11,8 +11,11 @@ from pb_wall_lineage_identity_shadow import (
     MISSING_EDGE,
     MISSING_PIECE,
     MISSING_SOURCE,
+    NO_JAMB_PIECE,
     NO_LONG_PIECE,
+    SEVERAL_JAMB_PIECES,
     SHARED_PIECE,
+    host_jamb_identity,
     wall_lineage_identities,
 )
 from pb_wall_room_topology_junction_classifier import classify_junctions
@@ -142,3 +145,59 @@ def test_a_graph_without_retained_pieces_is_refused():
         wall_lineage_identities([], {"edges": []}, tolerance_pt=2.5)
     with pytest.raises(ValueError):
         wall_lineage_identities([], fake_graph({}), tolerance_pt=float("nan"))
+
+
+# Host identity at the opening: a gap from x=100 to x=130 between two wall pieces, with jamb segments at both sides.
+GAP = [(100.0, -3.0, 100.0, 3.0), (130.0, -3.0, 130.0, 3.0)]
+LEFT = {"points": (40.0, 0.0, 100.0, 0.0), "source_primitive_ids": ("n1",)}
+RIGHT = {"points": (130.0, 0.0, 200.0, 0.0), "source_primitive_ids": ("n2",)}
+
+
+def host(pieces, left=("l",), right=("r",), segments=GAP):
+    members = [fake_wall("left", *left), fake_wall("right", *right)]
+    return host_jamb_identity(members, fake_graph(pieces), segments, tolerance_pt=2.5)
+
+
+def test_the_host_identity_survives_a_chain_that_grows_away_from_the_opening():
+    short = host({"l": LEFT, "r": RIGHT})
+    grown = host({"l": LEFT, "r": RIGHT, "far": {"points": (200.0, 0.0, 300.0, 0.0), "source_primitive_ids": ("n3",)}},
+                 right=("r", "far"))
+    assert short["identity"] is not None and short["identity"] == grown["identity"]
+    assert short["replaces_existing_identity"] is False and short["vetoes"] == {}
+
+
+def test_another_piece_at_the_jamb_is_another_host():
+    other = {"points": (45.0, 0.0, 100.0, 0.0), "source_primitive_ids": ("n1",)}
+    assert host({"l": LEFT, "r": RIGHT})["identity"] != host({"l": other, "r": RIGHT})["identity"]
+
+
+@pytest.mark.parametrize("pieces,left,expected", [
+    ({"l": {"points": (40.0, 0.0, 90.0, 0.0), "source_primitive_ids": ("n1",)}, "r": RIGHT}, ("l",), NO_JAMB_PIECE),
+    ({"l": LEFT, "r": RIGHT, "up": {"points": (100.0, 0.0, 100.0, 60.0), "source_primitive_ids": ("n4",)}}, ("l", "up"),
+     SEVERAL_JAMB_PIECES),
+], ids=["none_at_opening", "two_at_opening"])
+def test_an_unclear_member_vetoes_the_whole_host(pieces, left, expected):
+    result = host(pieces, left=left)
+    assert result["identity"] is None and result["vetoes"] == {"left": expected}
+
+
+def test_both_members_on_one_piece_is_vetoed():
+    shared = {"points": (100.0, 0.0, 130.0, 0.0), "source_primitive_ids": ("n1",)}
+    result = host({"l": shared, "r": dict(shared)})
+    assert result["identity"] is None and set(result["vetoes"].values()) == {SHARED_PIECE}
+
+
+def test_no_opening_geometry_gives_no_identity():
+    assert host({"l": LEFT, "r": RIGHT}, segments=[])["identity"] is None
+
+
+def test_members_from_two_viewports_get_no_identity():
+    members = [fake_wall("left", "l"),
+               SimpleNamespace(candidate_id="right", viewport_id="vp2", face_a_segment_ids=("r",), face_b_segment_ids=None)]
+    result = host_jamb_identity(members, fake_graph({"l": LEFT, "r": RIGHT}), GAP, tolerance_pt=2.5)
+    assert result["identity"] is None and result["vetoes"] == {}
+
+
+def test_a_piece_beyond_the_jamb_line_is_not_at_the_opening():
+    above = {"points": (40.0, 20.0, 100.0, 20.0), "source_primitive_ids": ("n9",)}
+    assert host({"l": above, "r": RIGHT})["vetoes"] == {"left": NO_JAMB_PIECE}
