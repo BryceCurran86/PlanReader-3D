@@ -47,3 +47,28 @@ def test_existing_source_firm_customer_floor_unchanged():
     rows = _customer(_quantity())
     assert len(rows) == 1
     assert rows[0]["quantity_id"] == _quantity().quantity_id
+
+
+@pytest.mark.parametrize("scope", [None, "", "REVIEW", "EXCLUSION", False, 5])
+def test_explicit_unknown_original_floor_inclusion_is_never_assumed_positive(scope):
+    q = _quantity()
+    source = replace(
+        q, metadata={**dict(q.metadata), "inclusion_status": scope},
+    )
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="customer_source_inclusion_scope_unresolved") as raised:
+        _customer(source)
+    # Existing floor-first error routing and shared source-policy audit are
+    # both retained. Neither is a quantity/customer permission.
+    assert "floor_finish_source_inclusion_scope_unresolved" in str(raised.value)
+
+
+@pytest.mark.parametrize("denied", [None, 0, "false"])
+def test_explicit_unknown_commercial_floor_permission_does_not_become_true(denied):
+    q = _quantity()
+    source = replace(
+        q, metadata={**dict(q.metadata), "commercial_projection_allowed": denied},
+    )
+    with pytest.raises(SourceClosedRunConflictError,
+                       match="customer_source_commercial_scope_denied"):
+        _customer(source)
