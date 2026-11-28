@@ -16,6 +16,9 @@ import {captureAlternative,restoreAlternative} from "./vrDesignReview";
 import type {DesignAlternative} from "./vrDesignReview";
 import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
 import {ArchitecturalPlan} from "./ArchitecturalPlanPanel";
+import {SLAB_KINDS,validSlab,slabArea,slabVolume} from "./independentSlabs";
+import type {IndependentSlab,SlabKind} from "./independentSlabs";
+const NO_SLABS:readonly IndependentSlab[]=[];
 import {DEFAULT_FENCE,FENCE_STYLES,validSiteBounds,validFence} from "./siteFence";
 import type {FenceSettings,SiteBounds,FenceStyle} from "./siteFence";
 import type {LiningBoard} from "./constructionLiningVisual";
@@ -108,6 +111,7 @@ export function App() {
   const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
   const [outdoor,setOutdoor]=useState(true);
+  const [slabStore,setSlabStore]=useState<{scene:SceneManifest;slabs:IndependentSlab[]}|null>(null);
   const [siteStore,setSiteStore]=useState<{scene:SceneManifest;bounds:SiteBounds|null;fence:FenceSettings}|null>(null);
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
   const [previewLights,setPreviewLights]=useState(true);
@@ -285,18 +289,19 @@ export function App() {
   const catalogue = catalogueSession?.scene === manifest ? catalogueSession : null;
   const recoveryKey=manifest?"planreader-vr-recovery:"+scopeKey(manifest):null;
   const recoveryDraft=catalogue?.draft??null;
+  const independentSlabs=slabStore?.scene===manifest?slabStore.slabs:NO_SLABS;
   const savedSite=siteStore?.scene===manifest?siteStore:undefined;
   useEffect(()=>{
     if(!manifest||recoveryScene!==manifest||!recoveryKey)return;
     const timer=window.setTimeout(()=>{
       try{
-        const saved=saveVrReview(manifest,buildState,recoveryDraft,savedSite);
+        const saved=saveVrReview(manifest,buildState,recoveryDraft,savedSite,independentSlabs);
         if(new Blob([saved]).size>3*1024*1024)throw Error("Recovery limit exceeded");
         localStorage.setItem(recoveryKey,saved);
       }catch{setVrDraftStatus("Automatic local recovery could not save; export a draft manually.");}
     },750);
     return ()=>window.clearTimeout(timer);
-  },[manifest,recoveryScene,recoveryKey,buildState,recoveryDraft,savedSite]);
+  },[manifest,recoveryScene,recoveryKey,buildState,recoveryDraft,savedSite,independentSlabs]);
   function restoreRecovery(){
     if(!manifest||!recoveryKey)return;
     try{
@@ -306,6 +311,7 @@ export function App() {
       const restored=restoreVrReview(manifest,JSON.parse(saved));
       setPlaced({scene:manifest,build:restored.build});
       setSiteStore(restored.site?{scene:manifest,...restored.site}:null);
+      setSlabStore({scene:manifest,slabs:restored.slabs});
       setCatalogueSession({scene:manifest,itemId:null,turn:0,draft:restored.itemDraft});
       setLastEdit("draw");setRecoveryScene(manifest);
       setVrDraftStatus("Recovered local draft. Automatic local recovery enabled.");
@@ -380,7 +386,7 @@ export function App() {
   function exportLocalVrDraft() {
     if(!manifest)return;
     try {
-      const text=saveVrReview(manifest,buildState,catalogue?.draft??null,savedSite);
+      const text=saveVrReview(manifest,buildState,catalogue?.draft??null,savedSite,independentSlabs);
       const blob=new Blob([text],{type:"application/json"});
       const url=URL.createObjectURL(blob);
       const anchor=document.createElement("a");
@@ -406,6 +412,7 @@ export function App() {
       const restored=restoreVrReview(source,data);
       setPlaced({scene:source,build:restored.build});
       setSiteStore(restored.site?{scene:source,...restored.site}:null);
+      setSlabStore({scene:source,slabs:restored.slabs});
       setCatalogueSession({scene:source,itemId:null,turn:0,draft:restored.itemDraft});
       setLastEdit("draw");
       setVrDraftStatus("Review-only draft reopened for the exact original source snapshot. No customer records changed.");
@@ -820,6 +827,15 @@ export function App() {
             {!resizeEnabled && <button type="button" onClick={resetFootprint}>Return to source size</button>}
           </p>}
 
+          <details className="footprint-tools"><summary>Independent concrete slabs</summary>
+            <p>Local design rectangles, independent of the building shell. Volumes are nominal; overlapping slabs are not deducted.</p>
+            <button type="button" disabled={!buildLevel||independentSlabs.length>=100} onClick={()=>{if(buildLevel)setSlabStore({scene:manifest,slabs:[...independentSlabs,{id:crypto.randomUUID(),kind:"driveway",levelId:buildLevel,x:baseFootprint?.minX??0,z:(baseFootprint?.minZ??0)-3,widthM:3,depthM:3,topM:.01,thicknessMm:100}]});}}>Add independent slab</button>
+            {independentSlabs.map(s=>{const edit=(patch:Partial<IndependentSlab>)=>{const next={...s,...patch};if(validSlab(next))setSlabStore({scene:manifest,slabs:independentSlabs.map(v=>v.id===s.id?next:v)});};return <fieldset key={s.id}><legend>{s.kind} · {s.levelId}</legend>
+              <label>Type <select value={s.kind} onChange={e=>edit({kind:e.currentTarget.value as SlabKind})}>{SLAB_KINDS.map(k=><option key={k}>{k}</option>)}</select></label>
+              {([["x","X (m)"],["z","Z (m)"],["widthM","Width (m)"],["depthM","Depth (m)"],["topM","Top elevation (m)"],["thicknessMm","Thickness (mm)"]] as const).map(([k,label])=><label key={k}>{label}<input type="number" step={k==="thicknessMm"?10:.05} key={s[k]} defaultValue={s[k]} onBlur={e=>edit({[k]:e.currentTarget.valueAsNumber})}/></label>)}
+              <p>{slabArea(s).toFixed(2)} m² · {slabVolume(s).toFixed(3)} m³ nominal concrete</p>
+              <button type="button" onClick={()=>setSlabStore({scene:manifest,slabs:independentSlabs.filter(v=>v.id!==s.id)})}>Remove slab</button></fieldset>;})}
+          </details>
           <details className="footprint-tools"><summary>Property boundary &amp; visual fence</summary>
             <p>Manual site outline only, not a verified survey. Coordinates are model metres; the land does not resize with the dwelling.</p>
             {!siteBounds?<button type="button" disabled={!baseFootprint} onClick={()=>{if(baseFootprint)editSite({minX:baseFootprint.minX-3,maxX:baseFootprint.maxX+3,minZ:baseFootprint.minZ-3,maxZ:baseFootprint.maxZ+3});}}>Create illustrative boundary (3 m around building)</button>:<>
@@ -867,7 +883,7 @@ export function App() {
               <SceneView manifest={manifest} isSceneLoading={()=>pendingLoad.current!==null} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                outdoor={outdoor} onOutdoor={setOutdoor} siteBounds={siteBounds} fence={fence} onFence={next=>editSite(siteBounds,next)} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
+                outdoor={outdoor} onOutdoor={setOutdoor} siteBounds={siteBounds} independentSlabs={independentSlabs} fence={fence} onFence={next=>editSite(siteBounds,next)} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
