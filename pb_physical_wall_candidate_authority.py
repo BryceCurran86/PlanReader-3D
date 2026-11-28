@@ -3231,6 +3231,19 @@ def _withhold_typed_negative_ink(equivalence: PhysicalWallEquivalenceResolution,
     )
 
 
+def _bounded_wall_equivalence(equivalence, identities, records, source_bytes, page_id):
+    """Default off (MAX 7240613240): release ambiguity-only abstentions owned by one painted wall body."""
+    from pb_bounded_wall_equivalence_shadow import release_bounded_equivalence, source_wall_bodies
+    from pb_floor_grid_linework_shadow import floor_grid_lattices, grid_only_wall_ids
+
+    with fitz.open(stream=source_bytes, filetype="pdf") as document:
+        drawings = document[int(page_id) - 1].get_drawings()
+    released, _counts, _ids = release_bounded_equivalence(
+        identities, equivalence, source_wall_bodies(drawings),
+        typed_non_wall_ids=grid_only_wall_ids(records, floor_grid_lattices(drawings)))
+    return released
+
+
 def _assemble_scope_result(
     *,
     source_producer: SourceVisibilityProducer,
@@ -3255,8 +3268,11 @@ def _assemble_scope_result(
     opening_local_exact_source_endpoints_shadow: bool = False,
     filter_typed_negative_non_wall_ink_shadow: bool = False,
     typed_negative_ink_promotion_guard: Optional[str] = None,
+    bounded_wall_equivalence_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
     _typed_negative_ink_guard(typed_negative_ink_promotion_guard)
+    if type(bounded_wall_equivalence_shadow) is not bool:
+        raise TypeError("bounded wall equivalence shadow requires an explicit boolean")
     if type(opening_local_exact_source_endpoints_shadow) is not bool:
         raise TypeError("exact opening-local W2 policy requires an explicit boolean")
     if type(filter_typed_negative_non_wall_ink_shadow) is not bool:
@@ -3417,6 +3433,9 @@ def _assemble_scope_result(
         equivalence = _withhold_typed_negative_ink(
             equivalence, tuple(ordered_identities),
             _typed_negative_primitive_ids(source_bytes, page_id, segments, typed_negative_ink_promotion_guard))
+    if bounded_wall_equivalence_shadow:
+        equivalence = _bounded_wall_equivalence(
+            equivalence, tuple(ordered_identities), tuple(records), source_bytes, page_id)
 
     boundary_reasons: list[str] = list(pre_boundary_reasons)
     wall_boundary_reasons: dict[str, str] = {}
@@ -3542,6 +3561,7 @@ def _build_scope_result(
     physical_scale_producer: Optional[PhysicalScaleProducer] = None,
     filter_typed_negative_non_wall_ink_shadow: bool = False,
     typed_negative_ink_promotion_guard: Optional[str] = None,
+    bounded_wall_equivalence_shadow: bool = False,
 ) -> PhysicalWallCandidateScopeResult:
     scope_id = _decision_scope_id(page_id)
     selector = PhysicalWallCandidateSelector(
@@ -3603,6 +3623,7 @@ def _build_scope_result(
         physical_opening_authority=physical_opening_authority,
         filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
         typed_negative_ink_promotion_guard=typed_negative_ink_promotion_guard,
+        bounded_wall_equivalence_shadow=bounded_wall_equivalence_shadow,
     )
 
 
@@ -3710,6 +3731,7 @@ def _build_authenticated_viewport_scope_results(
     filter_typed_negative_non_wall_ink_shadow: bool = False,
     source_segment_filter_shadow=None,
     typed_negative_ink_promotion_guard: Optional[str] = None,
+    bounded_wall_equivalence_shadow: bool = False,
 ) -> tuple[PhysicalWallCandidateScopeResult, ...]:
     page_number = int(page_id)
     # A viewport scope is page-local authority. A scoped native ingestion still
@@ -3946,6 +3968,7 @@ def _build_authenticated_viewport_scope_results(
                 authenticated_frame_edge_primitive_count=frame_edge_count,
                 filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
                 typed_negative_ink_promotion_guard=typed_negative_ink_promotion_guard,
+                bounded_wall_equivalence_shadow=bounded_wall_equivalence_shadow,
             )
         )
     return tuple(results)
@@ -4088,6 +4111,17 @@ class PhysicalWallCandidateProducer:
             typed_negative_ink_promotion_guard=_typed_negative_ink_guard(guard))
 
     @classmethod
+    def from_source_visibility_bounded_equivalence_shadow(
+        cls, source_visibility_producer, *, page_ids: Optional[Sequence[str]] = None,
+        include_authenticated_viewports: bool = False,
+    ):
+        """Opt-in (MAX 7240613240): bounded equivalence releases body-owned walls without a direct rival."""
+        return cls._from_source_visibility_producer(
+            source_visibility_producer, page_ids=page_ids,
+            include_authenticated_viewports=include_authenticated_viewports,
+            include_page_scopes=True, supplemental_only=False, bounded_wall_equivalence_shadow=True)
+
+    @classmethod
     def from_source_revision_shadow(cls,source_visibility_producer,*,revision_id,page_ids=None):
         """Address one current source root without visiting unrelated revisions."""
         return cls._from_source_visibility_producer(source_visibility_producer,
@@ -4157,6 +4191,7 @@ class PhysicalWallCandidateProducer:
         filter_typed_negative_non_wall_ink_shadow: bool = False,
         selected_revision_id: Optional[str] = None,
         typed_negative_ink_promotion_guard: Optional[str] = None,
+        bounded_wall_equivalence_shadow: bool = False,
     ):
         """Build wall scopes, optionally narrowed by source page address.
 
@@ -4311,6 +4346,8 @@ class PhysicalWallCandidateProducer:
                         physical_scale_producer=physical_scale_producer,
                         **({"typed_negative_ink_promotion_guard": _typed_negative_ink_guard(typed_negative_ink_promotion_guard)}
                            if typed_negative_ink_promotion_guard is not None and not supplemental_only else {}),
+                        **({"bounded_wall_equivalence_shadow": True}
+                           if bounded_wall_equivalence_shadow and not supplemental_only else {}),
                         **(
                             {"opening_local_exact_source_endpoints_shadow": True}
                             if supplemental_only and opening_local_exact_source_endpoints_shadow
@@ -4340,6 +4377,7 @@ class PhysicalWallCandidateProducer:
                         physical_plan_view_shadow=physical_plan_view_shadow,
                         filter_typed_negative_non_wall_ink_shadow=filter_typed_negative_non_wall_ink_shadow,
                         typed_negative_ink_promotion_guard=_typed_negative_ink_guard(typed_negative_ink_promotion_guard),
+                        **({"bounded_wall_equivalence_shadow": True} if bounded_wall_equivalence_shadow else {}),
                     ):
                         viewport_key = _ScopeKey(
                             document_id=viewport_result.document_id,

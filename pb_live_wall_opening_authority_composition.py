@@ -163,6 +163,7 @@ def compose_live_wall_opening_authority(
     source_revision_scope_shadow: bool = False,
     require_plan_view_host_ownership_shadow: bool = False,
     typed_negative_ink_promotion_guard: Optional[str] = None,
+    bounded_wall_equivalence_shadow: bool = False,
 ) -> LiveWallOpeningAuthorityComposition:
     """Compose exact source-owned wall/opening host authority for source pages.
 
@@ -186,6 +187,11 @@ def compose_live_wall_opening_authority(
         raise TypeError("plan view host ownership shadow must be an explicit boolean")
     if typed_negative_ink_promotion_guard is not None and source_revision_scope_shadow:
         raise ValueError("typed negative ink guard is not combined with the revision scope shadow")
+    if type(bounded_wall_equivalence_shadow) is not bool:
+        raise TypeError("bounded wall equivalence shadow must be an explicit boolean")
+    if bounded_wall_equivalence_shadow and (
+            source_revision_scope_shadow or typed_negative_ink_promotion_guard is not None):
+        raise ValueError("bounded wall equivalence is not combined with another wall scope option")
     if source_fragment_roles_shadow and not include_unmeasured_ink_closed_flanks_shadow:
         raise ValueError("source fragment roles require isolated G17 source capture")
     revision_id = str(revision_id or "").strip()
@@ -236,6 +242,10 @@ def compose_live_wall_opening_authority(
         wall_producer = PhysicalWallCandidateProducer.from_source_visibility_typed_negative_ink_guard_shadow(
             source_visibility_producer, guard=typed_negative_ink_promotion_guard,
             page_ids=_clean_page_ids((*selected_pages, *evidence_pages)))
+    elif bounded_wall_equivalence_shadow:
+        # Default off (MAX 7240613240).
+        wall_producer = PhysicalWallCandidateProducer.from_source_visibility_bounded_equivalence_shadow(
+            source_visibility_producer, page_ids=_clean_page_ids((*selected_pages, *evidence_pages)))
     else:
         wall_producer = PhysicalWallCandidateProducer.from_source_visibility_producer(
             source_visibility_producer,
