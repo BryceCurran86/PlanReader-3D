@@ -1180,7 +1180,8 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         if(wall&&aimed){
           const result=aimOpening(wall,aimed.point,"door",build.current.buildSizes,newPlacementId("sliding-door"));
           if(!result||result.error){reportTool(result?.error??"Aim at a clear portion of the draft wall.");return;}
-          const opening={...result.opening,doorMechanism:"sliding" as const};
+          const mechanism=item.visual.style==="cavity"?"cavity":item.visual.style==="barn"?"barn":"sliding";
+          const opening={...result.opening,doorMechanism:mechanism as "cavity"|"barn"|"sliding"};
           const next={...wall,openings:[...wall.openings,opening]};
           if(!validEditedWall(next)){reportTool("Sliding door needs clear adjacent wall space for its travel. Choose a narrower door or another location.");return;}
           build.current.onBuildAction({kind:"adjust",previous:wall,wall:next});
