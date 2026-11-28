@@ -2331,7 +2331,8 @@ export function SceneView({ manifest, isSceneLoading, visibleIds, level, levels,
         }
       }
       const outdoor=visualSettings.current.outdoor&&!topEditing();
-      const photographicSky=outdoor&&activeMood==="daylight"&&outdoorHdr!==null&&activeQuality!=="performance";
+      // Keep the presentation horizon neutral; HDR is lighting only, never neighbouring scenery.
+      const photographicSky=false;
       environment.update(outdoor,activeMood==="night",lightEye.x,lightEye.z,photographicSky);
       const budget=realismBudget(activeQuality,renderer.xr.isPresenting);
       garden.update(gardenBounds,outdoor&&budget.landscape);
