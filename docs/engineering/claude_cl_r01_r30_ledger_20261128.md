@@ -33,7 +33,7 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R23 Lot16 raster wall lineage | C26 | validation | paint classifier (#4810); 28 Nov: WC and LINEN walls are raster only, 48–63% picture ink, rest mixed, none vector ink | picture-side lineage is the only lineage; no native path ids to claim |
 | R24 holes and exclusions | C23 | validation | `pb_room_face_hole_report_shadow` (#4810) | classify with AG semantics |
 | R25 Q5446 finished faces | C24 | validation | finished interior face recovery shadow (main `a05df3bb5`) | BATH/LIVING on the original |
-| R26 curved and stepped walls | C25 | missing (curved) | skew/curve hardening of footprints (main `74d5db2d9`); wall candidates take straight pieces only | curved extraction |
+| R26 curved and stepped walls | C25 | validation | skew/curve hardening of footprints (main `74d5db2d9`); report-only paired-arc detector `pb_curved_wall_pair_shadow` (28 Nov, synthetic) | read originals; polyline curves; no wall candidacy yet |
 | R27 picture/vector corroboration | C26 | failed | picture detection changes identities; Maryborough areas moved (7232754709) | stays off |
 | R28 donors and preview wiring | C27/C28 | validation | donor audit; preview chord wiring (main #4772/#4773), piece cache and review recalculation (#4810) | MAX wires the app callback |
 | R29 geometry runtime | C29 | release | speed work on #4810: four originals 2101 → 1624 s, all outputs identical, memory at or below main | merge |
