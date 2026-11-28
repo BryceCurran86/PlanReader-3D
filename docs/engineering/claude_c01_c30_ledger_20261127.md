@@ -7,7 +7,7 @@ drawings only). Nothing here is merged; MAX owns merge, pins and official scorin
 | --- | --- | --- | --- |
 | C01 plan-view ownership report | DONE | report | originals: every floor-plan host owned; only the 6 non-plan (and 2 roof-plan) hosts unowned |
 | C02 withhold non-plan hosts | DONE | opt-in | before/after changes only Maryborough's 6; frames and wall scopes identical |
-| C03 page-set dependence | DONE | **live** (own revertible commit) | order-independent candidacy; combined AG `6bebb3f8d` + Claude check passed: 65/65 customer rows identical, only unresolved-wall counts differ |
+| C03 page-set dependence | DONE | **live** (own revertible commit) | order-independent candidacy; combined AG `6bebb3f8d` + Claude check passed: 65/65 customer rows identical, only unresolved-wall counts differ. **28 Nov:** the local full-page endpoint check (private PDF, CI cannot run it) fails on this change: demotion-only, 1 Lot16 and 47 Maryborough walls no longer representative, hosts unchanged; byte-identical to main with it off. MAX to choose: declare, or revert |
 | C04 viewport crossing primitives | NOT STARTED | | |
 | C05 non-wall ink never a wall | PARTIAL | opt-in | guard built (two modes); originals: walls withheld, 0 host/frame changes; signed-row check pending before any default |
 | C06 rooms in wall-ink scope | PARTIAL | report | existing ring builder gives inside-face rings on the three topology sheets (171 / 18 / 54 candidates); the two floor-finish rooms have no ring (both open into one interior part); not wired |
