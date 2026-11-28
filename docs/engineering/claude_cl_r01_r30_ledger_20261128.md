@@ -12,9 +12,9 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R02 face-aware W2 snap | new | failed | `order-free-snap-1.1.0` (`4fc2d178d`): Lot16 named rooms kept, shuffle invariant; Maryborough sheet 7 gives no rooms | find the first face-ownership gate that fails sheet 7 |
 | R03 cold room / false sales cell | new | validation (trace) | self-intersecting ring under the snap; area on a floor-grid cell (7234165306) | fix after R02 |
 | R04 finish edges on wall ink | C05/C08 | validation | `pb_finish_face_wall_support_shadow` (#4810) rejects the Office/Food Prep/Sales cells; report-only panel candidate; C05 guard (#4810, off) | cold-room ring runs on outer faces (R07) before any veto; signed rows |
-| R05 Office doorway | C08 | validation | `door_jamb_returns` (main, #4763) closes the real Office; union shadow (#4810) keeps WSH/DRY | route wiring with conflicts abstaining |
+| R05 Office doorway | C08 | validation | `door_jamb_returns` (main, #4763) closes the real Office (92% wall support); union shadow (#4810) keeps WSH/DRY | MAX: is the ring builder the surface source for finish rows |
 | R06 Food Prep open plan | C22 | validation | open-plan ring shadow (main `a05df3bb5`, runtime #4561) | real threshold and finish ownership with AG evidence |
-| R07 inside-face rings and ids | C06–C08 | validation | ring builder; ring-wall identity map (#4810); viewport wall links (main #4780, off) | disambiguate edge-to-wall links without choosing |
+| R07 inside-face rings and ids | C06–C08 | validation | ring builder gives Cold Room, Freezer and Office inside-face rings (28 Nov); ring-wall identity map (#4810); viewport wall links (main #4780, off) | panel walls (MAX); edge-to-wall links without choosing |
 | R08 source-lineage identity | new | validation | `pb_wall_lineage_identity_shadow` (#4810 `1675267bb`); offline: whole chains not enough for hosts | jamb-piece identity design if MAX wants it |
 | R09 viewport crossing | C04 | validation | page wall scopes crop at the viewport boundary (main) | audit crossing-primitive provenance |
 | R10 external footprint first | C09 | validation | footprint-first traces in the live claim, inside-face envelope (main `e1cbd4cb5`, #4549); edge support (main #4650, off) | original proof across plan styles |
