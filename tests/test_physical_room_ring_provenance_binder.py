@@ -1,0 +1,203 @@
+"""Focused tests for generic physical room-ring provenance binder (MAX #7236315096, Claude #7236464810)."""
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from pb_migration_contracts import EvidenceResolutionStatus
+from pb_source_floor_surface_wall_support_veto import (
+    FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
+    FloorSurfaceWallSupportInput,
+)
+from pb_source_physical_room_ring_provenance_binder import (
+    AMBIGUOUS_MULTIPLE_PHYSICAL_ROOM_RINGS_FOR_LABEL,
+    NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL,
+    ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED,
+    PHYSICAL_ROOM_RING_PROVENANCE_REBOUND,
+    RoomProvenanceBindingCandidate,
+    bind_room_provenance_to_physical_rings_shadow,
+)
+
+SHA = "a" * 64
+GRID_CELL = ((10.0, 10.0), (44.0, 10.0), (44.0, 44.0), (10.0, 44.0))
+OPEN_CELL = ((300.0, 10.0), (334.0, 10.0), (334.0, 44.0), (300.0, 44.0))
+PARTIAL_ROOM = ((500.0, 10.0), (650.0, 10.0), (650.0, 160.0), (500.0, 160.0))
+PHYSICAL_RING = ((0.0, 0.0), (180.0, 0.0), (180.0, 160.0), (0.0, 160.0))
+
+
+def _surf(sid: str, qid: str, poly) -> FloorSurfaceWallSupportInput:
+    return FloorSurfaceWallSupportInput(
+        surface_entity_id=sid,
+        quantity_id=qid,
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256=SHA,
+        page_id="7",
+        viewport_id="view_p7_2",
+        polygon_pdf_pts=poly,
+    )
+
+
+def _wall_predicate(poly, drawings, closures=()):
+    x0 = poly[0][0]
+    if x0 in (10.0, 300.0):
+        # 0% physical wall support drafting/grid cell
+        return SimpleNamespace(
+            edges=(
+                SimpleNamespace(length=34.0, unsupported=34.0),
+                SimpleNamespace(length=34.0, unsupported=34.0),
+            )
+        )
+    if x0 == 500.0:
+        # 28% paired-wall supported room (e.g. cold room)
+        return SimpleNamespace(
+            edges=(
+                SimpleNamespace(length=100.0, unsupported=44.0),
+                SimpleNamespace(length=100.0, unsupported=100.0),
+            )
+        )
+    # 99.6% physical room ring with doorway closure
+    return SimpleNamespace(
+        edges=(
+            SimpleNamespace(length=180.0, unsupported=0.0),
+            SimpleNamespace(length=160.0, unsupported=1.36),
+        )
+    )
+
+
+def test_false_cell_rebinds_to_unique_wall_supported_ring_while_open_zone_stays_withheld() -> None:
+    ring = SimpleNamespace(
+        record_id="layered_wall_doorway_room_ring_demo_enclosed",
+        source_sha256=SHA,
+        page_index=6,
+        polygon_pdf_pts=PHYSICAL_RING,
+        area_pt2=28800.0,
+        wall_edge_count=10,
+        closure_edge_count=1,
+        bounding_closure_ids=("layered_doorway_closure_demo_1",),
+        bounding_wall_path_indices=(1, 2, 3, 4),
+    )
+
+    c_enclosed_false_cell = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_grid_cell", "q_enclosed", GRID_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(25.0, 25.0),
+        explicit_area_m2=9.05352,
+        explicit_area_authority="documented_dimension",
+        explicit_area_evidence_ids=("dim_x", "dim_y"),
+        floor_finish_code="FT1",
+        floor_finish_evidence_ids=("fin_1",),
+        rcp_ceiling_material="PLASTERBOARD",
+        rcp_ceiling_height_mm=2700,
+        rcp_ceiling_evidence_ids=("rcp_1",),
+    )
+    c_open_zone_false_cell = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_open_cell", "q_open", OPEN_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(315.0, 25.0),
+        explicit_area_m2=13.270425,
+        explicit_area_authority="documented_dimension",
+        explicit_area_evidence_ids=("dim_a", "dim_b"),
+    )
+    c_partial_supported = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_partial_wall", "q_partial", PARTIAL_ROOM),
+        page_index=6,
+        room_label_anchor_pdf_pt=(550.0, 50.0),
+        explicit_area_m2=25.37875,
+        explicit_area_authority="documented_dimension",
+        explicit_area_evidence_ids=("dim_c", "dim_d"),
+    )
+
+    bindings = bind_room_provenance_to_physical_rings_shadow(
+        candidates=(c_enclosed_false_cell, c_open_zone_false_cell, c_partial_supported),
+        physical_rings=(ring,),
+        drawings=(),
+        wall_support_predicate=_wall_predicate,
+        expected_document_id="doc1",
+        expected_revision_id="rev1",
+        expected_source_sha256=SHA,
+    )
+    by_qid = {b.quantity_id: b for b in bindings}
+
+    # 1. Enclosed room rebound from false grid cell -> physical ring with all provenance preserved
+    b_enc = by_qid["q_enclosed"]
+    assert b_enc.withheld is False
+    assert b_enc.status is EvidenceResolutionStatus.CORROBORATED
+    assert b_enc.bound_ring_record_id == "layered_wall_doorway_room_ring_demo_enclosed"
+    assert b_enc.bound_surface_entity_id == "layered_wall_doorway_room_ring_demo_enclosed"
+    assert b_enc.bound_ring_closure_ids == ("layered_doorway_closure_demo_1",)
+    assert b_enc.wall_support_fraction > 0.99
+    assert b_enc.explicit_area_m2 == 9.05352
+    assert b_enc.explicit_area_evidence_ids == ("dim_x", "dim_y")
+    assert b_enc.floor_finish_code == "FT1"
+    assert b_enc.rcp_ceiling_material == "PLASTERBOARD"
+    assert b_enc.rcp_ceiling_height_mm == 2700
+    assert b_enc.reason_codes == (PHYSICAL_ROOM_RING_PROVENANCE_REBOUND,)
+    assert b_enc.shadow_only is True
+    assert b_enc.commercial_authority_granted is False
+
+    # 2. Unenclosed open-plan zone stays strictly withheld (false-cell veto preserved!)
+    b_open = by_qid["q_open"]
+    assert b_open.withheld is True
+    assert b_open.status is EvidenceResolutionStatus.ABSTAINED
+    assert b_open.bound_ring_record_id is None
+    assert b_open.explicit_area_m2 is None
+    assert b_open.reason_codes == (
+        FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
+        NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL,
+    )
+
+    # 3. Already wall-supported surface retained directly without rebinding
+    b_part = by_qid["q_partial"]
+    assert b_part.withheld is False
+    assert b_part.status is EvidenceResolutionStatus.CORROBORATED
+    assert b_part.bound_surface_entity_id == "surf_partial_wall"
+    assert b_part.bound_ring_record_id is None
+    assert b_part.explicit_area_m2 == 25.37875
+    assert ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED in b_part.reason_codes
+
+
+def test_ambiguous_overlapping_physical_rings_fail_closed_with_conflict() -> None:
+    ring1 = SimpleNamespace(
+        record_id="ring_1",
+        source_sha256=SHA,
+        page_index=6,
+        polygon_pdf_pts=PHYSICAL_RING,
+        area_pt2=28800.0,
+        wall_edge_count=8,
+        closure_edge_count=1,
+        bounding_closure_ids=("c1",),
+        bounding_wall_path_indices=(1, 2),
+    )
+    ring2 = SimpleNamespace(
+        record_id="ring_2",
+        source_sha256=SHA,
+        page_index=6,
+        polygon_pdf_pts=PHYSICAL_RING,
+        area_pt2=28800.0,
+        wall_edge_count=8,
+        closure_edge_count=1,
+        bounding_closure_ids=("c2",),
+        bounding_wall_path_indices=(3, 4),
+    )
+    cand = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_grid", "q_ambig", GRID_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(25.0, 25.0),
+        explicit_area_m2=9.05352,
+    )
+    bindings = bind_room_provenance_to_physical_rings_shadow(
+        candidates=(cand,),
+        physical_rings=(ring1, ring2),
+        drawings=(),
+        wall_support_predicate=_wall_predicate,
+        expected_document_id="doc1",
+        expected_revision_id="rev1",
+        expected_source_sha256=SHA,
+    )
+    assert len(bindings) == 1
+    assert bindings[0].withheld is True
+    assert bindings[0].status is EvidenceResolutionStatus.CONFLICT
+    assert bindings[0].reason_codes == (
+        FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT,
+        AMBIGUOUS_MULTIPLE_PHYSICAL_ROOM_RINGS_FOR_LABEL,
+    )
