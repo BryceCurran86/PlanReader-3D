@@ -453,6 +453,7 @@ def _collect_live_physical_net_wall_claim(
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
     viewport_wall_identity_links: bool = False,
+    cross_sheet_registered_only: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Run the complete source-owned physical external wall chain for one PDF.
 
@@ -470,6 +471,8 @@ def _collect_live_physical_net_wall_claim(
     The proof needs the optional fontTools dependency and abstains without it.
     """
 
+    if type(cross_sheet_registered_only) is not bool:
+        raise ValueError("cross-sheet registered only must be an explicit boolean")
     if type(single_width_uniform_page_door_height_shadow) is not bool:
         raise ValueError("single width uniform page door height shadow must be an explicit boolean")
     if type(include_surface_finishes) is not bool:
@@ -1250,6 +1253,7 @@ def _collect_live_physical_net_wall_claim(
                     source=surface_semantic_source,
                     cross_view_area=cross_view_area,
                     canonical_floors=canonical_floors,
+                    **({"registered_only": True} if cross_sheet_registered_only else {}),
                 )
                 if correspondence_records:
                     correspondence_status = "correspondence_resolved"
@@ -1668,6 +1672,7 @@ def collect_live_physical_net_wall_claim(
     layered_dark_painted_wall_source: bool = False,
     layered_wall_end_stroke_closures: bool = False,
     viewport_wall_identity_links: bool = False,
+    cross_sheet_registered_only: bool = False,
 ) -> LivePhysicalNetWallClaim:
     """Collect the original claim, optionally appending source-reproved areas.
 
@@ -1682,6 +1687,8 @@ def collect_live_physical_net_wall_claim(
         raise ValueError("supported opening area recovery must be an explicit boolean")
     if recover_additional_opening_areas and recover_supported_opening_areas:
         raise ValueError("choose one opening area recovery policy")
+    if type(cross_sheet_registered_only) is not bool:
+        raise ValueError("cross-sheet registered only must be an explicit boolean")
     if type(single_width_uniform_page_door_height_shadow) is not bool:
         raise ValueError("single width uniform page door height shadow must be an explicit boolean")
     if type(include_surface_finishes) is not bool:
@@ -1768,6 +1775,8 @@ def collect_live_physical_net_wall_claim(
            if layered_wall_end_stroke_closures else {}),
         **({"viewport_wall_identity_links": True}
            if viewport_wall_identity_links else {}),
+        **({"cross_sheet_registered_only": True}
+           if cross_sheet_registered_only else {}),
     )
     if recovery_page_id is None:
         return claim
