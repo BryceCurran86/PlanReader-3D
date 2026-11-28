@@ -722,6 +722,8 @@ def build_wall_graph_for_viewport(
     partition_exact_collinear_overlaps_shadow: bool = False,
     complete_link_snap_shadow: bool = False,
     retain_native_clip_sequence_shadow: bool = False,
+    order_free_snap_shadow: bool = False,
+    retain_leaf_fragments_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Run the full Stage A pipeline for one viewport's already-scoped segments.
 
@@ -741,6 +743,14 @@ def build_wall_graph_for_viewport(
     Two additional explicit source-only policies preserve same-side overlap
     intervals and immutable exactly equal vertices. Both are off by default;
     neither supplies structural wall, host, measurement or quantity authority.
+
+    ``order_free_snap_shadow`` (default off) decides the endpoint snap from the
+    geometry alone, so input order and stubs no longer than the tolerance cannot
+    move a corner (pb_wall_room_topology_order_free_snap_shadow). Shadow only.
+
+    ``retain_leaf_fragments_shadow`` (default off) also returns each split
+    fragment's own endpoints and source ids before snapping, for the report-only
+    lineage identity (pb_wall_lineage_identity_shadow). Nothing else changes.
     """
     if type(partition_exact_collinear_overlaps_shadow) is not bool:
         raise ValueError("exact collinear partition shadow must be explicit boolean")
@@ -777,6 +787,19 @@ def build_wall_graph_for_viewport(
         # opposite question for zero tolerance. They act on the same W2 source
         # scope and have never been exercised together, so they stay exclusive.
         raise ValueError("complete link snap shadow is exclusive with the exact source-incidence shadows")
+    if type(retain_leaf_fragments_shadow) is not bool:
+        raise ValueError("leaf fragment retention shadow must be explicit boolean")
+    if type(order_free_snap_shadow) is not bool:
+        raise ValueError("order-free snap shadow must be explicit boolean")
+    if order_free_snap_shadow and (
+        gap_snap_tolerance_pt <= 0
+        or complete_link_snap_shadow
+        or exact_endpoint_index_shadow
+        or immutable_exact_endpoints_shadow
+        or partition_exact_collinear_overlaps_shadow
+    ):
+        # It replaces the positive-tolerance snap decision only.
+        raise ValueError("order-free snap shadow requires the positive-tolerance snap alone")
     structural_segments, excluded_segments = filter_structural_segments(segments)
     point_pairs = _segments_to_point_pairs(structural_segments)
     parent_indexes: List[int] | None = [] if exact_split_parent_lineage_shadow else None
@@ -792,14 +815,23 @@ def build_wall_graph_for_viewport(
         from pb_wall_room_topology_collinear_partition_shadow import partition_exact_collinear_fragments
         split_segment_dicts = partition_exact_collinear_fragments(split_segment_dicts)
     audit_short_source = os.environ.get("GPTMAX_W2_SHORT_SOURCE_AUDIT") == "1"
-    snapped_graph = _snap_geometry_indexed(
-        split_segment_dicts,
-        tolerance_pt=gap_snap_tolerance_pt,
-        include_endpoint_assignments=audit_short_source,
-        **({"exact_endpoint_index_shadow": True} if exact_endpoint_index_shadow else {}),
-        **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}),
-        **({"complete_link_snap_shadow": True} if complete_link_snap_shadow else {}),
-    )
+    if order_free_snap_shadow:
+        from pb_wall_room_topology_order_free_snap_shadow import order_free_snap_geometry
+
+        snapped_graph = order_free_snap_geometry(
+            split_segment_dicts,
+            gap_snap_tolerance_pt,
+            include_endpoint_assignments=audit_short_source,
+        )
+    else:
+        snapped_graph = _snap_geometry_indexed(
+            split_segment_dicts,
+            tolerance_pt=gap_snap_tolerance_pt,
+            include_endpoint_assignments=audit_short_source,
+            **({"exact_endpoint_index_shadow": True} if exact_endpoint_index_shadow else {}),
+            **({"immutable_exact_endpoints_shadow": True} if immutable_exact_endpoints_shadow else {}),
+            **({"complete_link_snap_shadow": True} if complete_link_snap_shadow else {}),
+        )
     isolate_graph_lineage(snapped_graph)
     snap_collapsed_fragments = observe_snap_collapsed_fragments(
         split_segment_dicts, snapped_graph
@@ -814,6 +846,18 @@ def build_wall_graph_for_viewport(
         merged_graph["complete_link_snap_shadow"] = (
             snapped_graph["complete_link_snap_shadow"]
         )
+    if order_free_snap_shadow:
+        merged_graph["order_free_snap_shadow"] = snapped_graph["order_free_snap_shadow"]
+    if retain_leaf_fragments_shadow:
+        merged_graph["leaf_fragments_shadow"] = {
+            str(fragment.get("id")): {
+                "points": (fragment.get("x1"), fragment.get("y1"), fragment.get("x2"), fragment.get("y2")),
+                "source_primitive_ids": tuple(
+                    (fragment.get(LINEAGE_KEY) or {}).get("source_primitive_ids") or ()
+                ),
+            }
+            for fragment in split_segment_dicts
+        }
     # Explicit opt-in diagnostic only. This is an observational source
     # provenance ledger; it never changes the wall graph or creates hosts.
     if audit_short_source:

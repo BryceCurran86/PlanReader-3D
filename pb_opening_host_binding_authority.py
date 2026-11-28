@@ -54,6 +54,7 @@ from pb_physical_wall_identity import (
     PhysicalWallEquivalenceResolution,
     resolve_physical_wall_equivalence,
 )
+from pb_source_coordinate_precision import near_axis, source_coordinate_tolerance
 from pb_source_observation_authority import ObservationSelector, SourceObservationRecord
 from pb_source_visibility_authority import (
     RASTER_OPENING_PRIMITIVE_RENDER_DPI,
@@ -1094,6 +1095,18 @@ class OpeningHostBindingProducer:
                     exclusive[key] = result
         self._results = exclusive
 
+    def withhold_published_hosts(self, reasons_by_opening: Mapping[str, Sequence[str]]) -> None:
+        """Opt-in demotion only: a published host for a named opening becomes ABSTAINED with those reasons.
+
+        Nothing can be granted, replaced or re-bound here; openings without a published host record are untouched.
+        """
+        self.drop_borrowed_mixed_scope_hosts()
+        self._results = {
+            key: (_blocked_binding(*reasons_by_opening[key[-1]])
+                  if result.record is not None and key[-1] in reasons_by_opening else result)
+            for key, result in self._results.items()
+        }
+
     def published_results(self) -> Mapping[_BindingKey, OpeningHostBindingResult]:
         return MappingProxyType(dict(self._results))
 
@@ -1200,19 +1213,33 @@ def _endpoints(line: Sequence[float]) -> tuple[Point, Point]:
     return ((float(line[0]), float(line[1])), (float(line[2]), float(line[3])))
 
 
-def _parallel(left: Sequence[float], right: Sequence[float]) -> bool:
+def _parallel(left: Sequence[float], right: Sequence[float], tolerance: Optional[float] = None) -> bool:
+    # ``tolerance`` is set only by the opt-in source precision mode (C14); None keeps the historical test exactly.
     lu, ru = _canonical_unit(left), _canonical_unit(right)
-    return lu is not None and ru is not None and abs(_cross(lu, ru)) <= _COORD_TOL
+    if lu is None or ru is None:
+        return False
+    limit = _COORD_TOL
+    if tolerance is not None:
+        shortest = min(math.hypot(line[2] - line[0], line[3] - line[1]) for line in (left, right))
+        limit = max(_COORD_TOL, 2.0 * tolerance / shortest)
+    return abs(_cross(lu, ru)) <= limit
 
 
-def _collinear(left: Sequence[float], right: Sequence[float]) -> bool:
-    if not _parallel(left, right):
+def _collinear(left: Sequence[float], right: Sequence[float], tolerance: Optional[float] = None) -> bool:
+    if not _parallel(left, right, tolerance):
         return False
     axis = _canonical_unit(left)
     assert axis is not None
     first = _endpoints(left)[0]
-    other = _endpoints(right)[0]
-    return abs(_cross(axis, (other[0] - first[0], other[1] - first[1]))) <= _COORD_TOL
+    if tolerance is None:
+        other = _endpoints(right)[0]
+        return abs(_cross(axis, (other[0] - first[0], other[1] - first[1]))) <= _COORD_TOL
+    length = math.hypot(left[2] - left[0], left[3] - left[1])
+    for other in _endpoints(right):
+        delta = (other[0] - first[0], other[1] - first[1])
+        if abs(_cross(axis, delta)) > tolerance * (2.0 + 2.0 * math.hypot(*delta) / length):
+            return False
+    return True
 
 
 def _scalar_interval(line: Sequence[float], axis: Point) -> tuple[float, float]:
@@ -2330,6 +2357,13 @@ def _opening_geometry(
     if len(records) != 6:
         return None
 
+    precise = getattr(authority, "_angled_opening_precision_shadow", False) is True
+    tolerance = (source_coordinate_tolerance([line for line in map(_line, records) if line is not None], floor=_COORD_TOL)
+                 if precise else None)
+    if tolerance is not None and all(line is not None and near_axis(line, tolerance) for line in map(_line, records)):
+        tolerance = None  # axis-aligned openings keep the historical geometry
+    gap_limit = _COORD_TOL if tolerance is None else 4.0 * tolerance
+
     breaks: list[tuple[Point, Point, Point]] = []
     for index, first_record in enumerate(records):
         first = _line(first_record)
@@ -2337,7 +2371,7 @@ def _opening_geometry(
             return None
         for second_record in records[index + 1 :]:
             second = _line(second_record)
-            if second is None or not _collinear(first, second):
+            if second is None or not _collinear(first, second, tolerance):
                 continue
             axis = _canonical_unit(first)
             assert axis is not None
@@ -2347,7 +2381,7 @@ def _opening_geometry(
                 left, left_iv, right, right_iv = first, first_iv, second, second_iv
             else:
                 left, left_iv, right, right_iv = second, second_iv, first, first_iv
-            if right_iv[0] - left_iv[1] <= _COORD_TOL:
+            if right_iv[0] - left_iv[1] <= gap_limit:
                 continue
             start = _point_at_scalar(left, axis, left_iv[1])
             end = _point_at_scalar(right, axis, right_iv[0])
@@ -2363,7 +2397,7 @@ def _opening_geometry(
             a1 = end_a[0] * axis[0] + end_a[1] * axis[1]
             b0 = start_b[0] * axis[0] + start_b[1] * axis[1]
             b1 = end_b[0] * axis[0] + end_b[1] * axis[1]
-            if abs(a0 - b0) > _COORD_TOL or abs(a1 - b1) > _COORD_TOL:
+            if abs(a0 - b0) > gap_limit or abs(a1 - b1) > gap_limit:
                 continue
             normal = (-axis[1], axis[0])
             thickness = abs(
@@ -2981,18 +3015,26 @@ def _source_same_group_distinct_pair_conflicts(
     for group_index, group in enumerate(equivalence.equivalence_groups):
         for wall_id in group:
             groups_by_member.setdefault(str(wall_id), set()).add(group_index)
+    if not groups_by_member:
+        return frozenset()
     result: set[tuple[str, str]] = set()
     for left, right, raw in equivalence.pair_classifications:
+        # Only a pair inside one SAME group can conflict, so membership is
+        # checked before the (far costlier) class conversion.
+        a, b = str(left), str(right)
+        left_groups = groups_by_member.get(a)
+        if left_groups is None:
+            continue
+        right_groups = groups_by_member.get(b)
+        if right_groups is None or left_groups.isdisjoint(right_groups):
+            continue
         try:
             classification = PhysicalEquivalenceClass(raw)
         except (TypeError, ValueError):
             # Bad original class is an explicit, contradictory source
             # receipt, never permission to trust an issued SAME group.
             classification = PhysicalEquivalenceClass.AMBIGUOUS_PHYSICAL_EQUIVALENCE
-        if classification is PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
-            continue
-        a, b = str(left), str(right)
-        if groups_by_member.get(a, set()) & groups_by_member.get(b, set()):
+        if classification is not PhysicalEquivalenceClass.SAME_PHYSICAL_WALL:
             result.add(tuple(sorted((a, b))))
     return frozenset(result)
 

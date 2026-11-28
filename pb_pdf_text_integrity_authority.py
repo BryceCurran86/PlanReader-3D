@@ -2418,6 +2418,16 @@ class PdfTextIntegrityAuthority:
                 kept.append(observation_id)
         return tuple(kept)
 
+    def receipt_objects(self, snapshot_id: str, observation_ids: Sequence[str]) -> tuple:
+        """The receipt object (or None) filed for each id, in order.
+
+        Addressing only, for a caller that reuses its own earlier resolve_text results: it must compare these by identity and
+        resolve again when any changed. Grants no text authority.
+        """
+        receipts = self._receipts
+        snapshot_id = str(snapshot_id)
+        return tuple(receipts.get((snapshot_id, observation_id)) for observation_id in observation_ids)
+
     def observation_ids_for_page(
         self,
         snapshot_id: str,

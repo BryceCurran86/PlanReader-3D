@@ -40,6 +40,7 @@ from pb_new_source_modality_router import classify_source_page_modality
 from pb_new_typed_vector_ink_scope import scope_outlined_vector_lettering
 from pb_next_wall_ring_preview import (
     KIND_SOURCE_OWNED_CHORD,
+    LayeredPieceCache,
     REASON_PRIMITIVE_CAP,
     _clip_drawing_items,
     _collect_cavity_multi_face_strips,
@@ -160,6 +161,7 @@ def source_native_trace_preview(
     source_owned_doorway_chord_closures: bool = False,
     admit_wall_joint_paint: bool = True,
     review_packet: Mapping | None = None,
+    piece_cache: LayeredPieceCache | None = None,
 ) -> tuple[dict, bytes]:
     """Return actual native-source trace evidence + PNG on the original PDF page.
 
@@ -195,6 +197,10 @@ def source_native_trace_preview(
     (``ReviewPacketError``, a ValueError, otherwise). The automatic result is traced as without it; a second, user-assisted trace
     applies the marks and is reported in ONE additive summary key, ``user_assisted_review`` (see
     ``pb_user_assisted_review_topology``). It never changes the automatic rooms, the PNG, or any authority.
+
+    ``piece_cache`` (default None: nothing changes) is a ``LayeredPieceCache`` the caller keeps for one session. Both room traces
+    use it, so a later call for the same page and options forms rooms again without reading the walls again. The output is the
+    same with or without it. Only the room tracer is cached; the earlier steps on the page still run on every call.
     """
     pdf_path = Path(pdf_path)
     if pdf_path.suffix.lower() != ".pdf":
@@ -209,6 +215,8 @@ def source_native_trace_preview(
         raise ValueError("new_trace_doorway_chord_shadow_and_closures_are_exclusive")
     if type(admit_wall_joint_paint) is not bool:
         raise ValueError("new_trace_admit_wall_joint_paint_must_be_bool")
+    if piece_cache is not None and not isinstance(piece_cache, LayeredPieceCache):
+        raise ValueError("new_trace_piece_cache_must_be_a_layered_piece_cache")
     source_bytes = pdf_path.read_bytes()
     sha = hashlib.sha256(source_bytes).hexdigest()
     with fitz.open(stream=source_bytes, filetype="pdf") as document:
@@ -393,8 +401,11 @@ def source_native_trace_preview(
             ),
             wall_end_stroke_closures=False,
             viewport_pdf_pts=panes,
-            source_owned_doorway_chords=() if doorway_chords is None else tuple(doorway_chords["chords"]),
+            # copies: the applied notes written into the block below must not change the tracer's inputs between traces
+            source_owned_doorway_chords=() if doorway_chords is None else tuple(dict(c) for c in doorway_chords["chords"]),
         )
+        if piece_cache is not None:
+            tracer_kwargs["piece_cache"] = piece_cache  # both room traces below; keyed by every tracer input
         recorder = None if packet is None else BarrierRecorder()
         result = build_layered_wall_doorway_room_rings(
             wall_drawings, source_native_cs_jamb_closure=False, source_native_internal_swing_closure=False, **tracer_kwargs,

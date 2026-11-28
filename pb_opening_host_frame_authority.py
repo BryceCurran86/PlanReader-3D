@@ -45,7 +45,8 @@ from pb_physical_wall_candidate_authority import (
 )
 from pb_physical_wall_identity import PhysicalEquivalenceClass
 from pb_source_observation_authority import ObservationSelector
-from pb_source_visibility_authority import SourceVisibilityAuthority
+from pb_source_visibility_authority import RASTER_OPENING_PRIMITIVE_RENDER_DPI, SourceVisibilityAuthority
+from pb_raster_opening_source_primitives import RASTER_WALL_BAND_END, RASTER_WALL_BAND_FACE
 from pb_raster_source_wall_frame_projection import source_edge_axis_projection
 
 OPENING_HOST_FRAME_SCHEMA_VERSION = "1.3.0"
@@ -357,6 +358,7 @@ class OpeningHostFrameProducer:
         ] = None,
         raster_split_frame_shadow: bool = False,
         source_fragment_roles_shadow: bool = False,
+        raster_structural_rival_shadow: bool = False,
         _seal: object = None,
     ) -> None:
         if _seal is not _PRODUCER_SEAL:
@@ -378,6 +380,8 @@ class OpeningHostFrameProducer:
             raise TypeError("raster_split_frame_shadow must be a bool")
         if type(source_fragment_roles_shadow) is not bool:
             raise TypeError("source_fragment_roles_shadow must be a bool")
+        if type(raster_structural_rival_shadow) is not bool:
+            raise TypeError("raster_structural_rival_shadow must be a bool")
         if source_fragment_roles_shadow and supplemental_wall_candidate_authority is None:
             raise ValueError("source fragment roles require a supplemental source authority")
         self._opening = physical_opening_authority
@@ -387,6 +391,9 @@ class OpeningHostFrameProducer:
         # Opt-in diagnostic ONLY: never enabled in the default composition.
         self._raster_split_frame_shadow = raster_split_frame_shadow
         self._source_fragment_roles_shadow = source_fragment_roles_shadow
+        # Report only: off-centre fragments proven to be solid wall ink. No decision ever reads this.
+        self._raster_structural_rival_shadow = raster_structural_rival_shadow
+        self._structural_rival_records: dict[tuple[str, str, str], dict] = {}
         self._results: dict[_Key, OpeningHostFrameResult] = {}
         # Proven representative selectors for this exact canonical frame.
         # Keep witnesses separate: shared-wall source_observation_ids may
@@ -405,6 +412,7 @@ class OpeningHostFrameProducer:
         ] = None,
         raster_split_frame_shadow: bool = False,
         source_fragment_roles_shadow: bool = False,
+        raster_structural_rival_shadow: bool = False,
     ) -> "OpeningHostFrameProducer":
         return cls(
             physical_opening_authority,
@@ -413,8 +421,92 @@ class OpeningHostFrameProducer:
             supplemental_wall_candidate_authority=supplemental_wall_candidate_authority,
             raster_split_frame_shadow=raster_split_frame_shadow,
             source_fragment_roles_shadow=source_fragment_roles_shadow,
+            raster_structural_rival_shadow=raster_structural_rival_shadow,
             _seal=_PRODUCER_SEAL,
         )
+
+    def structural_rival_shadow(self) -> tuple[Mapping[str, object], ...]:
+        """What the report-only structural rival proof would add; empty unless it was switched on."""
+        return tuple(MappingProxyType(dict(self._structural_rival_records[key]))
+                     for key in sorted(self._structural_rival_records))
+
+    def _raster_wall_band_boxes(self, selector) -> tuple[tuple[bool, float, float, float, float], ...]:
+        """The page's solid wall bands, (horizontal, along_lo, along_hi, across_lo, across_hi), from authenticated receipts.
+
+        A band is two ``raster_wall_band_face`` receipts of one extent joined by its two ``raster_wall_band_end`` receipts.
+        """
+        visibility = self._opening.source_visibility_authority()
+        faces: set[tuple[float, float, float, float]] = set()
+        ends: set[tuple[float, float, float, float]] = set()
+        for observation_id in sorted(visibility.raster_opening_primitive_observation_ids_for_snapshot(selector.snapshot_id)):
+            result = visibility.resolve_raster_opening_primitive(ObservationSelector(
+                document_id=selector.document_id, revision_id=selector.revision_id,
+                source_sha256=selector.source_sha256, snapshot_id=selector.snapshot_id, observation_id=observation_id))
+            observation = result.observation
+            if (result.status is not EvidenceResolutionStatus.CORROBORATED or observation is None
+                    or observation.page_id != selector.page_id):
+                continue
+            line = host_geometry._line(observation)
+            if line is not None and observation.observation_kind == RASTER_WALL_BAND_FACE:
+                faces.add(line)
+            elif line is not None and observation.observation_kind == RASTER_WALL_BAND_END:
+                ends.add(line)
+        bands = []
+        for horizontal in (True, False):
+            along, across = (0, 1) if horizontal else (1, 0)
+            extents: dict[tuple[float, float], list[float]] = {}
+            for face in faces:
+                if face[across] == face[across + 2] and face[along] != face[along + 2]:
+                    extents.setdefault((face[along], face[along + 2]), []).append(face[across])
+            for (lo, hi), positions in extents.items():
+                positions.sort()
+                for index, low in enumerate(positions):
+                    for high in positions[index + 1:]:
+                        joined = [(x, low, x, high) if horizontal else (low, x, high, x) for x in (lo, hi)]
+                        if all(end in ends for end in joined):
+                            bands.append((horizontal, lo, hi, low, high))
+        return tuple(sorted(bands))
+
+    @staticmethod
+    def _structural_rival_proof(record, geometry, bands) -> Optional[tuple[float, float]]:
+        """(offset, band thickness) for the first segment beyond the centre tolerance but inside the host body that lies, over
+        its whole length, in one solid band as thick as the host (the module's thickness tolerance); else None."""
+        axis_x, axis_y = abs(float(geometry.axis[0])), abs(float(geometry.axis[1]))
+        if min(axis_x, axis_y) > _COORD_TOL:
+            return None
+        horizontal = axis_y <= _COORD_TOL
+        along, across = (0, 1) if horizontal else (1, 0)
+        pixel = 72.0 / RASTER_OPENING_PRIMITIVE_RENDER_DPI
+        allowance = host_geometry._RASTER_WHOLE_WALL_CENTER_TOL_PT + _COORD_TOL
+        thickness = float(geometry.thickness)
+        thickness_tol = max(0.75, thickness * 0.15)
+        points = record.wall_candidate.centerline_pts
+        for start, end in zip(points, points[1:]):
+            data = host_geometry._source_line_axis_data((*start, *end), geometry)
+            if data is None or not allowance < abs(data[2]) <= thickness / 2.0 + pixel:
+                continue
+            lo, hi = sorted((float(start[along]), float(end[along])))
+            position = (float(start[across]) + float(end[across])) / 2.0
+            for band_horizontal, a0, a1, c0, c1 in bands:
+                if (band_horizontal == horizontal and a0 - pixel <= lo and hi <= a1 + pixel
+                        and c0 - pixel <= position <= c1 + pixel and abs((c1 - c0) - thickness) <= thickness_tol):
+                    return round(data[2], 4), round(c1 - c0, 4)
+        return None
+
+    def _note_structural_rival(self, binding, wall_id, record, geometry, bands, component_ids, pair_lookup, motif_ids):
+        proof = self._structural_rival_proof(record, geometry, bands)
+        if proof is None:
+            return
+        pairs = [(member, pair_lookup.get(tuple(sorted((wall_id, member))))) for member in component_ids]
+        self._structural_rival_records[(str(binding.page_id), str(binding.record_id), str(wall_id))] = {
+            "page_id": str(binding.page_id), "host_binding_id": str(binding.record_id), "wall_candidate_id": str(wall_id),
+            "offset_pt": proof[0], "band_thickness_pt": proof[1],
+            # whether the frame would need DISTINCT proof it does not have, by the live rival rule
+            "would_abstain": any(
+                kind is not PhysicalEquivalenceClass.DISTINCT_PHYSICAL_WALLS
+                and not (kind is None and wall_id in motif_ids and member not in motif_ids)
+                for member, kind in pairs),
+        }
 
     def _scope_records_by_id(self, wall_scope, selector) -> dict[str, PhysicalWallCandidateRecord]:
         fields = ("document_id", "revision_id", "source_sha256", "snapshot_id", "page_id", "decision_scope_id")
@@ -1221,6 +1313,7 @@ class OpeningHostFrameProducer:
             motif_ids = repeated_raster_drafting_motif_wall_ids(wall_scope.records)
         skipped_motif_wall_ids: list[str] = []
         unproven_pairs: set[tuple[str, str]] = set()
+        structural_bands = None  # read only when the report-only structural rival proof is on
         for record in wall_scope.records:
             wall_id = record.wall_candidate_id
             if wall_id in component_set:
@@ -1245,6 +1338,17 @@ class OpeningHostFrameProducer:
                 _u_min, _u_max, offset = projection
                 excluded = min(abs(offset - face) for face in face_offsets) > face_tol
             if excluded:
+                if raster_component and self._raster_structural_rival_shadow:
+                    try:  # report only: it must never change or stop the live decision
+                        if structural_bands is None:
+                            structural_bands = self._raster_wall_band_boxes(binding)
+                        self._note_structural_rival(binding, wall_id, record, geometry, structural_bands, component_ids,
+                                                    pair_lookup, motif_ids)
+                    except Exception as exc:  # noqa: BLE001
+                        self._structural_rival_records[(str(binding.page_id), str(binding.record_id), "shadow_error")] = {
+                            "page_id": str(binding.page_id), "host_binding_id": str(binding.record_id),
+                            "shadow_error": type(exc).__name__,
+                        }
                 continue
             # This is an aligned candidate on one of the selected wall faces.
             # It may be excluded only by positive DISTINCT proof against every

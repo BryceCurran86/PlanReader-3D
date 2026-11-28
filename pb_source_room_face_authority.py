@@ -300,6 +300,17 @@ def _wall_edges(record: object) -> tuple[Edge, ...]:
 
 def _finite_source_edge(value: Edge) -> bool:
     """Reject invalid endpoints and overflowed lengths on either source edge."""
+    # Same answer as the general check below, without it, for the usual shape: two pairs of plain floats.
+    if type(value) is tuple and len(value) == 2:
+        first, second = value
+        if type(first) is tuple and type(second) is tuple and len(first) == 2 and len(second) == 2:
+            x1, y1 = first
+            x2, y2 = second
+            if type(x1) is float and type(y1) is float and type(x2) is float and type(y2) is float:
+                return (
+                    math.isfinite(x1) and math.isfinite(y1) and math.isfinite(x2) and math.isfinite(y2)
+                    and math.isfinite(math.hypot(x2 - x1, y2 - y1))
+                )
     try:
         if len(value) != 2 or any(len(point) != 2 for point in value):
             return False

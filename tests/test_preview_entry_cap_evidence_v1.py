@@ -229,35 +229,34 @@ def test_a_genuinely_over_budget_wall_set_still_abstains_with_evidence_present()
 
 def test_one_pass_closes_a_room_that_a_tile_seam_would_cut(monkeypatch):
     """Evidence alone must not push a page into tile mode: a room across the seam of two viewports closes in one pass."""
-    calls = []  # the builder's own per-viewport recursion goes through the module name, so only tile builds are recorded
-    real = nxt.build_layered_wall_doorway_room_rings
-
-    def spy(*args, **kwargs):
-        calls.append(kwargs.get("viewport_pdf_pts"))
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(nxt, "build_layered_wall_doorway_room_rings", spy)
+    calls = _spy_passes(monkeypatch)
     rows = _room(dx=0.0) + _evidence_rows(25_000, x0=2000.0, y0=2000.0)
     left, right = (-1e6, -1e6, 50.0, 1e6), (50.0, -1e6, 1e6, 1e6)        # the seam at x = 50 cuts the room in two
     result = _build(rows, stroke_pair_wall_faces=True, viewport_pdf_pts=[left, right])
-    assert calls == [], "one pass over the union of the viewports: no per-viewport build"
+    assert calls == [[left, right]], "one pass over the union of the viewports: no per-viewport build"
     assert result.status is EvidenceResolutionStatus.CANDIDATE and len(_candidates(result)) == 1
 
 
-def test_a_viewport_union_over_budget_by_wall_primitives_still_tiles(monkeypatch):
+def _spy_passes(monkeypatch):
+    """The viewports of every pass the builder makes; its per-viewport recursion goes through the module name."""
     calls = []
-    real = nxt.build_layered_wall_doorway_room_rings
+    real = nxt._layered_passes
 
     def spy(*args, **kwargs):
         calls.append(kwargs.get("viewport_pdf_pts"))
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(nxt, "build_layered_wall_doorway_room_rings", spy)
+    monkeypatch.setattr(nxt, "_layered_passes", spy)
+    return calls
+
+
+def test_a_viewport_union_over_budget_by_wall_primitives_still_tiles(monkeypatch):
+    calls = _spy_passes(monkeypatch)
     monkeypatch.setattr(nxt, "_collect_strips", lambda rows: ([], []))
     left, right = (-1e6, -1e6, 50.0, 1e6), (50.0, -1e6, 1e6, 1e6)
     rows = [_black_stroke()] * 10_001 + [dict(_black_stroke(), items=[_line(900, 1, 907, 1)]) for _ in range(10_001)]
     _build(rows, stroke_pair_wall_faces=True, viewport_pdf_pts=[left, right])
-    assert calls == [left, right], "the union is over budget, so each viewport is built on its own"
+    assert calls == [[left, right], left, right], "the union is over budget, so each viewport is built on its own"
 
 
 @pytest.mark.parametrize("reverse", [False, True])

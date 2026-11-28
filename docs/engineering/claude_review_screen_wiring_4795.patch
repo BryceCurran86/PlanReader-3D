@@ -1,0 +1,156 @@
+diff --git a/pb_guided_plan_review_ui.py b/pb_guided_plan_review_ui.py
+index dba297f14..8dbd501ac 100644
+--- a/pb_guided_plan_review_ui.py
++++ b/pb_guided_plan_review_ui.py
+@@ -260,6 +260,27 @@ def render_guided_plan_review(st, *, workspace, page, native_trace, doc_path,
+                 file_name=f"plan-review-page-{pdf_page}-r{saved['revision']}.json",
+                 mime="application/json", key=prefix + "_packet",
+             )
++            from pb_guided_review_recalculation import recalculate_review, stored_review_result
++            st.markdown("**Recalculate rooms with these corrections**")
++            result = stored_review_result(st.session_state, packet=packet, registered_sha=digest)
++            if st.button("Recalculate rooms", key=prefix + "_recalculate"):
++                try:
++                    with st.spinner("Tracing the original page again with your corrections..."):
++                        result = recalculate_review(
++                            st.session_state, pdf_path=doc_path, packet=packet, registered_sha=digest,
++                            workspace_id=int(workspace["id"]), page_id=int(page["id"]), pdf_page=pdf_page)
++                except (ValueError, OSError, RuntimeError) as exc:
++                    result = None
++                    st.error(f"Corrections not recalculated: {exc}")
++            if result is not None:
++                block = result["summary"]["user_assisted_review"]
++                if block["status"] == "applied":
++                    st.info(f"Rooms: {block['automatic_room_count']} automatic, {block['user_assisted_room_count']} "
++                            "with your corrections. User-assisted only: nothing here is measured or priced.")
++                else:
++                    st.warning("Corrections not applied: " + ", ".join(block.get("reason_codes", [])))
++                st.dataframe([{"Mark": m["correction_id"], "Type": m["category"], "Outcome": m["outcome"]}
++                              for m in block["marks"]], hide_index=True, use_container_width=True)
+     st.caption("Drafts are stored locally against this exact registered PDF, page and displayed "
+                "image. A changed image or revision does not silently inherit old correction geometry. "
+                "The prepared native marks require the existing topology/quantity consumers to "
+diff --git a/pb_planreader_3d_app.py b/pb_planreader_3d_app.py
+index 9f22cb6a0..168b51601 100644
+--- a/pb_planreader_3d_app.py
++++ b/pb_planreader_3d_app.py
+@@ -6439,6 +6439,7 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
+                 )
+         if batch_clicked and (not stored_sha or stored_sha==digest):
+             from pb_new_source_trace_preview import source_native_trace_preview
++            from pb_guided_review_recalculation import session_piece_cache
+             batch_live.update(enabled=True,first=start_page,count=batch_pages)
+             batch_results=[]
+             for pdf_page_number in range(start_page,start_page+batch_pages):
+@@ -6446,6 +6447,8 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
+                     item_summary,item_png=source_native_trace_preview(
+                         doc_path,pdf_page_number-1,
+                         progress_callback=_show_live_trace,
++                        # the page on screen keeps its tracer pieces for guided-review corrections
++                        piece_cache=session_piece_cache(st.session_state) if pdf_page_number==selected_pdf_page else None,
+                     )
+                     batch_results.append({
+                         "page": pdf_page_number,
+@@ -6486,10 +6489,12 @@ def plan_mapper_page(workspace:dict[str,Any]) -> None:
+         elif st.session_state.get(native_trace_key,{}).get("digest")!=digest:
+             try:
+                 from pb_new_source_trace_preview import source_native_trace_preview
++                from pb_guided_review_recalculation import session_piece_cache
+                 with st.spinner("Tracing original PDF wall ink and room closures (new engine only)..."):
+                     trace_summary,trace_png=source_native_trace_preview(
+                         doc_path,int(page["page_no"])-1,
+                         progress_callback=_show_live_trace,
++                        piece_cache=session_piece_cache(st.session_state),
+                     )
+                 st.session_state[native_trace_key]={
+                     "digest":digest,"summary":trace_summary,"png":trace_png,
+diff --git a/tests/test_guided_review_recalculation_screen_v1.py b/tests/test_guided_review_recalculation_screen_v1.py
+new file mode 100644
+index 000000000..d3dcb23a3
+--- /dev/null
++++ b/tests/test_guided_review_recalculation_screen_v1.py
+@@ -0,0 +1,84 @@
++"""The guided review screen recalculates the rooms with a saved correction (runs the real Streamlit script runner).
++
++Synthetic PDF and a minimal local database only.
++"""
++from __future__ import annotations
++
++import hashlib
++import json
++import sqlite3
++
++import pytest
++
++import pb_guided_plan_review as review
++import pb_new_source_trace_preview as canonical
++from tests.test_user_assisted_review_topology_v1 import _missing_wall_room, _pdf
++
++AppTest = pytest.importorskip("streamlit.testing.v1").AppTest
++
++SCRIPT = '''
++import json, sqlite3
++import streamlit as st
++from pb_guided_plan_review_ui import render_guided_plan_review
++
++cfg = json.loads(open({config!r}, encoding="utf-8").read())
++
++
++def connect():
++    conn = sqlite3.connect(cfg["db"])
++    conn.row_factory = sqlite3.Row
++    return conn
++
++
++summary = json.loads(open(cfg["summary"], encoding="utf-8").read())
++png = open(cfg["png"], "rb").read()
++render_guided_plan_review(
++    st, workspace={{"id": 1}}, page={{"id": 1, "page_no": 1, "scale_verified": 0}},
++    native_trace={{"digest": cfg["sha"], "summary": summary, "png": png}}, doc_path=cfg["pdf"],
++    registered_sha=cfg["sha"], connect=connect, line_editor=None)
++'''
++
++
++def _setup(tmp_path):
++    pdf = _pdf(tmp_path / "missing.pdf", _missing_wall_room())
++    sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
++    summary, png = canonical.source_native_trace_preview(pdf, 0)
++    db = tmp_path / "local.db"
++    with sqlite3.connect(db) as conn:
++        conn.executescript(
++            "CREATE TABLE workspaces(id INTEGER PRIMARY KEY);"
++            "CREATE TABLE documents(id INTEGER PRIMARY KEY, workspace_id INTEGER, sha256 TEXT);"
++            "CREATE TABLE pages(id INTEGER PRIMARY KEY, workspace_id INTEGER, document_id INTEGER, page_no INTEGER);"
++            "INSERT INTO workspaces VALUES (1);"
++            f"INSERT INTO documents VALUES (1, 1, '{sha}');"
++            "INSERT INTO pages VALUES (1, 1, 1, 1);")
++    scope = review.ReviewScope(1, 1, 1, sha, hashlib.sha256(png).hexdigest())
++    wall = {"id": "w1", "takeoff_row_id": 2, "kind": "line", "x1": 31.8, "y1": 70.571, "x2": 38.2, "y2": 70.571}
++
++    def connect():
++        conn = sqlite3.connect(db)
++        conn.row_factory = sqlite3.Row
++        return conn
++
++    review.save_review(connect, scope, expected_revision=0, shapes=[wall], answers={})
++    (tmp_path / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
++    (tmp_path / "overlay.png").write_bytes(png)
++    config = tmp_path / "config.json"
++    config.write_text(json.dumps({"db": str(db), "pdf": str(pdf), "sha": sha, "png": str(tmp_path / "overlay.png"),
++                                  "summary": str(tmp_path / "summary.json")}), encoding="utf-8")
++    return AppTest.from_string(SCRIPT.format(config=str(config)), default_timeout=120)
++
++
++def _recalculate_button(app):
++    return next(button for button in app.button if button.label == "Recalculate rooms")
++
++
++def test_the_button_recalculates_with_the_saved_correction_and_keeps_the_result(tmp_path):
++    app = _setup(tmp_path).run()
++    assert not app.exception
++    assert not any("Rooms:" in info.value for info in app.info)  # nothing is recalculated until asked
++    _recalculate_button(app).click().run()
++    assert not app.exception and not app.error
++    assert any("Rooms: 0 automatic, 1 with your corrections" in info.value for info in app.info)
++    app.run()  # a plain rerun shows the kept result without recalculating
++    assert any("Rooms: 0 automatic, 1 with your corrections" in info.value for info in app.info)

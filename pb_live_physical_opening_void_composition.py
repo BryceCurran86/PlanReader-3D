@@ -487,14 +487,15 @@ def compose_live_physical_opening_voids(
         )
     )
     schedule_results = {}
-    for opening_id, opening_selector in opening_selectors.items():
-        binding_selector = wall_opening_composition.binding_selectors.get(opening_id)
-        if binding_selector is None:
-            continue
-        schedule_results[opening_id] = schedule_binding_producer.publish_scope(
-            opening_selector=opening_selector,
-            decision_scope_id=binding_selector.decision_scope_id,
-        )
+    with schedule_binding_producer.reusing_page_text():
+        for opening_id, opening_selector in opening_selectors.items():
+            binding_selector = wall_opening_composition.binding_selectors.get(opening_id)
+            if binding_selector is None:
+                continue
+            schedule_results[opening_id] = schedule_binding_producer.publish_scope(
+                opening_selector=opening_selector,
+                decision_scope_id=binding_selector.decision_scope_id,
+            )
     schedule_binding_authority = schedule_binding_producer.authority()
 
     row_height_producer = ScheduleRowHeightProducer.from_source_visibility_producer(

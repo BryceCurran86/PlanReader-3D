@@ -79,10 +79,12 @@ def split_segments_at_intersections(
         for index, seg in enumerate(segments)
     ]
     ordered = sorted(bounds, key=lambda item: (item[0], item[2], item[1], item[3], item[4]))
+    count = len(ordered)
     for pos, left in enumerate(ordered):
         left_x0, left_y0, left_x1, left_y1, i = left
-        for right in ordered[pos + 1:]:
-            right_x0, right_y0, right_x1, right_y1, j = right
+        # By position: slicing the rest of the list copied it once per segment.
+        for position in range(pos + 1, count):
+            right_x0, right_y0, right_x1, right_y1, j = ordered[position]
             if right_x0 > left_x1 + tol:
                 break
             if right_y0 > left_y1 + tol or right_y1 < left_y0 - tol:

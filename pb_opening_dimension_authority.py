@@ -162,18 +162,25 @@ def _proven_jambs(
     return (left, right)
 
 
-def _matches_endpoint_set(
-    line: Sequence[float],
+def _jamb_midpoint_projections(
     jambs: tuple[SourceObservationRecord, SourceObservationRecord],
     axis: tuple[float, float],
-) -> bool:
+) -> Optional[list[float]]:
+    """The two jamb midpoints along the opening axis: read once per opening, compared with every candidate."""
     jamb_lines = tuple(_line(item) for item in jambs)
     if any(item is None for item in jamb_lines):
-        return False
-    jamb_mids = tuple(_midpoint(item) for item in jamb_lines if item is not None)
-    expected = sorted(_projection(point, axis) for point in jamb_mids)
-    actual = sorted(_projection(point, axis) for point in _endpoints(line))
-    return all(abs(left - right) <= _COORD_TOL for left, right in zip(actual, expected))
+        return None
+    return sorted(_projection(_midpoint(item), axis) for item in jamb_lines if item is not None)
+
+
+def _matches_endpoint_set(
+    line: Sequence[float],
+    expected: Sequence[float],
+    axis: tuple[float, float],
+) -> bool:
+    first, second = _endpoints(line)
+    actual = sorted((_projection(first, axis), _projection(second, axis)))
+    return abs(actual[0] - expected[0]) <= _COORD_TOL and abs(actual[1] - expected[1]) <= _COORD_TOL
 
 
 def _endpoint_associations(
@@ -626,6 +633,7 @@ class OpeningDimensionAuthority:
             all_visible,
         )
         support_ids = set(existence.source_observation_ids)
+        jamb_projections = _jamb_midpoint_projections(jambs, axis)
         candidates: list[
             tuple[SourceObservationRecord, SourceObservationRecord, SourceObservationRecord]
         ] = []
@@ -638,7 +646,7 @@ class OpeningDimensionAuthority:
             dimension_axis = unit_by_id.get(record.observation_id)
             if dimension_axis is None or abs(_cross(dimension_axis, axis)) > _PARALLEL_TOL:
                 continue
-            if not _matches_endpoint_set(geometry, jambs, axis):
+            if jamb_projections is None or not _matches_endpoint_set(geometry, jamb_projections, axis):
                 continue
             associations = _endpoint_associations(geometry, jambs)
             if associations is None:

@@ -124,6 +124,8 @@ RASTER_OPENING_PRIMITIVE_IDENTITY_VERSION = "2.0.0"
 # when the producer-owned detected geometry is unchanged. Keep this value
 # stable unless the physical identity contract itself is intentionally migrated.
 RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION = "1.0.0"
+# Segments detected on the images-only render (opt-in); the ref's render hash is that render's.
+RASTER_PICTURE_SEGMENT_IDENTITY_VERSION = "picture-1.0.0"
 # Raster detector and native image-region geometry are emitted to four decimal
 # page-point precision. One least-significant unit is the only ownership slack.
 _RASTER_GEOMETRY_QUANTIZATION_TOLERANCE_PT = 1e-4
@@ -364,6 +366,49 @@ class RasterOpeningPrimitiveVisibilityReceipt:
     pixel_geometry: tuple[float, float, float, float]
     geometry: tuple[float, float, float, float]
     detector_version: str = RASTER_OPENING_PRIMITIVE_DETECTOR_VERSION
+
+
+class _ChangeCountedReceipts(dict):
+    """The raster opening-primitive receipt table, counting every write made through it.
+
+    A reader that saw the same table and the same count knows no receipt was added, replaced or removed since,
+    without comparing them all. Reads are unchanged.
+    """
+
+    changes = 0
+
+    def __setitem__(self, key, value) -> None:
+        self.changes += 1
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key) -> None:
+        self.changes += 1
+        super().__delitem__(key)
+
+    def pop(self, *args):
+        self.changes += 1
+        return super().pop(*args)
+
+    def popitem(self):
+        self.changes += 1
+        return super().popitem()
+
+    def clear(self) -> None:
+        self.changes += 1
+        super().clear()
+
+    def update(self, *args, **kwargs) -> None:
+        self.changes += 1
+        super().update(*args, **kwargs)
+
+    def setdefault(self, key, default=None):
+        self.changes += 1
+        return super().setdefault(key, default)
+
+    def __ior__(self, other):
+        self.changes += 1
+        super().update(other)
+        return self
 
 
 @dataclass(frozen=True)
@@ -739,7 +784,8 @@ def _raster_segment_receipt_matches_parent(
         if len(parts) == 4:
             prefix, render_sha, identity_version, index = parts
             if (receipt.dpi != RASTER_RENDER_DPI
-                    or identity_version != RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION
+                    or identity_version not in (RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
+                                               RASTER_PICTURE_SEGMENT_IDENTITY_VERSION)
                     or receipt.visibility_render_sha256 is not None):
                 return False
         elif len(parts) == 5:
@@ -1053,7 +1099,19 @@ class SourceVisibilityProducer:
                  source_raster_text_receipt_replay: bool = False,
                  raster_double_face_negative_shadow: bool = False,
                  source_glyph_ledger_text_trust: bool = False,
-                 raster_corner_framed_opening_shadow: bool = False) -> None:
+                 raster_corner_framed_opening_shadow: bool = False,
+                 angled_opening_precision_shadow: bool = False,
+                 crossing_wall_negative_shadow: bool = False,
+                 raster_picture_detection_shadow: bool = False) -> None:
+        if type(raster_picture_detection_shadow) is not bool:
+            raise ValueError("raster picture detection shadow must be explicit boolean")
+        self._raster_picture_detection_shadow = raster_picture_detection_shadow
+        if type(crossing_wall_negative_shadow) is not bool:
+            raise ValueError("crossing wall negative shadow must be explicit boolean")
+        self._crossing_wall_negative_shadow = crossing_wall_negative_shadow
+        if type(angled_opening_precision_shadow) is not bool:
+            raise ValueError("angled opening precision shadow must be explicit boolean")
+        self._angled_opening_precision_shadow = angled_opening_precision_shadow
         if type(raster_double_face_negative_shadow) is not bool:
             raise ValueError("double-face negative shadow requires an explicit boolean")
         self._raster_double_face_negative_shadow = raster_double_face_negative_shadow
@@ -1092,7 +1150,7 @@ class SourceVisibilityProducer:
         ] = {}
         self._raster_opening_primitive_receipts: dict[
             tuple[str, str], RasterOpeningPrimitiveVisibilityReceipt
-        ] = {}
+        ] = _ChangeCountedReceipts()
         self._visibility_page_cache: (
             "OrderedDict[tuple[str, str, int, bool, bool], _CachedVisibilityPage]"
         ) = OrderedDict()
@@ -2859,6 +2917,9 @@ class SourceVisibilityProducer:
             if page_id in pages_with_visible and not image_regions:
                 continue
 
+            # Opt-in: on a page with line work AND pictures, line work and text drawn over a picture already have native
+            # observations, so picture walls are detected on the picture alone (never on the full render).
+            picture_only = bool(self._raster_picture_detection_shadow and image_regions and page_id in pages_with_visible)
             png_bytes, page_parent = self._producer.render_native_page_png(
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,
@@ -2866,11 +2927,25 @@ class SourceVisibilityProducer:
                 snapshot_id=snapshot.snapshot_id,
                 page_id=page_id,
                 dpi=float(RASTER_RENDER_DPI),
+                **({"images_only": True} if picture_only else {}),
             )
             image_sha256 = hashlib.sha256(png_bytes).hexdigest()
+            threshold_from = {}
+            if picture_only:
+                # Classify the picture's pixels with the full page's threshold: the same pixels read the same way.
+                full_png = self._producer.render_native_page_png(
+                    document_id=published.revision.document_id,
+                    revision_id=published.revision.revision_id,
+                    source_sha256=published.revision.source_sha256,
+                    snapshot_id=snapshot.snapshot_id,
+                    page_id=page_id,
+                    dpi=float(RASTER_RENDER_DPI),
+                )[0]
+                threshold_from = {"threshold_reference_png": full_png}
             segments = detect_axis_aligned_raster_segments(
                 png_bytes,
                 dpi=RASTER_RENDER_DPI,
+                **threshold_from,
             )
             # Once render + detection complete successfully, repeating the same
             # immutable revision/page cannot produce new source evidence.
@@ -2902,7 +2977,8 @@ class SourceVisibilityProducer:
             # Supplemental geometry has its own frozen identity namespace;
             # existing ordinary render geometry and index order stay intact.
             families = [(segments, image_sha256, RASTER_RENDER_DPI,
-                         RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
+                         RASTER_PICTURE_SEGMENT_IDENTITY_VERSION if picture_only
+                         else RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
                          RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION, None)]
             if image_regions and published.raster_opening_primitive_observation_ids:
                 # Source nomination is limited to the complete independently

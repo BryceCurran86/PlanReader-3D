@@ -32,9 +32,11 @@ from pb_plan_opening_detection_indexed_v172 import (
     detect_door_candidates_indexed,
     detect_gap_candidates_indexed,
 )
+from pb_source_coordinate_precision import near_axis, source_coordinate_tolerance
 from pb_source_observation_authority import (
     NativePageImagePlacement,
     ObservationSelector,
+    PRODUCER_INTEGRITY_FAILURE,
     SourceObservationAuthority,
     SourceObservationAuthorityResult,
     SourceObservationRecord,
@@ -473,10 +475,13 @@ def _line_geometry(record: SourceObservationRecord) -> Optional[tuple[float, flo
     return (x1, y1, x2, y2)
 
 
-def _point_close(left: tuple[float, float], right: tuple[float, float]) -> bool:
+def _point_close(left: tuple[float, float], right: tuple[float, float],
+                 tolerance: Optional[float] = None) -> bool:
+    # ``tolerance`` is set only by the opt-in source precision mode (C14); None keeps the historical test exactly.
+    limit = _COORD_EQ_ABS_TOL if tolerance is None else tolerance
     return (
-        abs(left[0] - right[0]) <= _COORD_EQ_ABS_TOL
-        and abs(left[1] - right[1]) <= _COORD_EQ_ABS_TOL
+        abs(left[0] - right[0]) <= limit
+        and abs(left[1] - right[1]) <= limit
     )
 
 
@@ -484,29 +489,37 @@ def _segment_matches(
     record: SourceObservationRecord,
     first: tuple[float, float],
     second: tuple[float, float],
+    tolerance: Optional[float] = None,
 ) -> bool:
     line = _line_geometry(record)
     if line is None:
         return False
+    if tolerance is not None and near_axis(line, tolerance):
+        tolerance = None
     start = (line[0], line[1])
     end = (line[2], line[3])
     return (
-        _point_close(start, first) and _point_close(end, second)
+        _point_close(start, first, tolerance) and _point_close(end, second, tolerance)
     ) or (
-        _point_close(start, second) and _point_close(end, first)
+        _point_close(start, second, tolerance) and _point_close(end, first, tolerance)
     )
 
 
 def _parallel(
     left: tuple[float, float, float, float],
     right: tuple[float, float, float, float],
+    tolerance: Optional[float] = None,
 ) -> bool:
+    if tolerance is not None and near_axis(left, tolerance) and near_axis(right, tolerance):
+        tolerance = None  # axis-aligned pairs keep the historical test
     ldx, ldy = left[2] - left[0], left[3] - left[1]
     rdx, rdy = right[2] - right[0], right[3] - right[1]
     llen = math.hypot(ldx, ldy)
     rlen = math.hypot(rdx, rdy)
     if llen <= _COORD_EQ_ABS_TOL or rlen <= _COORD_EQ_ABS_TOL:
         return False
+    if tolerance is not None:  # endpoint rounding turns into angle error tolerance/length on each line
+        return abs(ldx * rdy - ldy * rdx) <= max(_PARALLEL_REL_TOL * llen * rlen, tolerance * (llen + rlen))
     return abs(ldx * rdy - ldy * rdx) <= _PARALLEL_REL_TOL * llen * rlen
 
 
@@ -532,10 +545,20 @@ def _cross(left: tuple[float, float], right: tuple[float, float]) -> float:
 def _collinear(
     left: tuple[float, float, float, float],
     right: tuple[float, float, float, float],
+    tolerance: Optional[float] = None,
 ) -> bool:
-    if not _parallel(left, right):
+    if tolerance is not None and near_axis(left, tolerance) and near_axis(right, tolerance):
+        tolerance = None
+    if not _parallel(left, right, tolerance):
         return False
     direction = _canonical_direction(left)
+    if tolerance is not None:  # both ends of the other line, allowing the first line's own direction error
+        length = math.hypot(left[2] - left[0], left[3] - left[1])
+        for point in ((right[0], right[1]), (right[2], right[3])):
+            delta = (point[0] - left[0], point[1] - left[1])
+            if abs(_cross(direction, delta)) > tolerance * (2.0 + 2.0 * math.hypot(*delta) / length):
+                return False
+        return True
     delta = (right[0] - left[0], right[1] - left[1])
     return abs(_cross(direction, delta)) <= _COORD_EQ_ABS_TOL
 
@@ -560,6 +583,7 @@ def _candidate_collinear_record_pairs(
     line_geometries: Optional[
         Sequence[Optional[tuple[float, float, float, float]]]
     ] = None,
+    tolerance: Optional[float] = None,
 ) -> tuple[tuple[int, int], ...]:
     """Return a conservative broad-phase superset of collinear record pairs.
 
@@ -599,6 +623,8 @@ def _candidate_collinear_record_pairs(
         return ()
 
     max_angle_delta = math.asin(min(1.0, _PARALLEL_REL_TOL))
+    if tolerance is not None:  # a wider broad phase only; the exact predicates still decide membership
+        max_angle_delta = max(max_angle_delta, 1e-4)
     angle_width = max(max_angle_delta * 4.0, 1e-12)
     angle_bucket_count = max(1, int(math.ceil(math.pi / angle_width)))
     offset_width = max(
@@ -631,7 +657,7 @@ def _candidate_collinear_record_pairs(
         for prior in candidate_indexes:
             prior_line = lines[prior]
             assert prior_line is not None
-            if _parallel(prior_line, line) and _collinear(prior_line, line):
+            if _parallel(prior_line, line, tolerance) and _collinear(prior_line, line, tolerance):
                 pairs.add((prior, index) if prior < index else (index, prior))
 
         buckets.setdefault((a_bin, o_bin), []).append(index)
@@ -644,12 +670,16 @@ def _face_break(
     *,
     first_line: Optional[tuple[float, float, float, float]] = None,
     second_line: Optional[tuple[float, float, float, float]] = None,
+    tolerance: Optional[float] = None,
 ) -> Optional[_FaceBreak]:
     if first_line is None:
         first_line = _line_geometry(first)
     if second_line is None:
         second_line = _line_geometry(second)
-    if first_line is None or second_line is None or not _collinear(first_line, second_line):
+    if (tolerance is not None and first_line is not None and second_line is not None
+            and near_axis(first_line, tolerance) and near_axis(second_line, tolerance)):
+        tolerance = None
+    if first_line is None or second_line is None or not _collinear(first_line, second_line, tolerance):
         return None
     direction = _canonical_direction(first_line)
     first_values = sorted(
@@ -668,7 +698,7 @@ def _face_break(
         right_record, right_line, right_values = first, first_line, first_values
     gap_start = left_values[1]
     gap_end = right_values[0]
-    if gap_end - gap_start <= _COORD_EQ_ABS_TOL:
+    if gap_end - gap_start <= (_COORD_EQ_ABS_TOL if tolerance is None else tolerance):
         return None
     start_point = _endpoint_at_projection(left_line, direction, gap_start)
     end_point = _endpoint_at_projection(right_line, direction, gap_end)
@@ -685,10 +715,13 @@ def _face_break(
     )
 
 
-def _same_gap(left: _FaceBreak, right: _FaceBreak) -> bool:
-    if abs(left.gap_start - right.gap_start) > _COORD_EQ_ABS_TOL:
+def _same_gap(left: _FaceBreak, right: _FaceBreak, tolerance: Optional[float] = None) -> bool:
+    if tolerance is not None and all(min(abs(a), abs(b)) <= _COORD_EQ_ABS_TOL for a, b in (left.direction, right.direction)):
+        tolerance = None
+    limit = _COORD_EQ_ABS_TOL if tolerance is None else 4.0 * tolerance  # projections on two slightly different axes
+    if abs(left.gap_start - right.gap_start) > limit:
         return False
-    if abs(left.gap_end - right.gap_end) > _COORD_EQ_ABS_TOL:
+    if abs(left.gap_end - right.gap_end) > limit:
         return False
     dot = left.direction[0] * right.direction[0] + left.direction[1] * right.direction[1]
     return abs(abs(dot) - 1.0) <= _PARALLEL_REL_TOL
@@ -1814,6 +1847,10 @@ class PhysicalOpeningAuthority:
             _source_visibility_producer, "_raster_double_face_negative_shadow", False)
         self._raster_corner_framed_opening_shadow = getattr(
             _source_visibility_producer, "_raster_corner_framed_opening_shadow", False)
+        self._angled_opening_precision_shadow = getattr(
+            _source_visibility_producer, "_angled_opening_precision_shadow", False) is True
+        self._crossing_wall_negative_shadow = getattr(
+            _source_visibility_producer, "_crossing_wall_negative_shadow", False) is True
         if _raster_paired_outer_faces_shadow_override is not None and type(_raster_paired_outer_faces_shadow_override) is not bool:
             raise ValueError("raster paired outer faces override must be explicit boolean")
         self._raster_paired_outer_faces_shadow = (self._raster_source_policy_at_creation
@@ -1841,6 +1878,12 @@ class PhysicalOpeningAuthority:
         # Observability ONLY: exact producer-owned raw candidate -> original
         # visible source observation membership. Never a count or wall host.
         self._native_raw_candidate_support_cache: dict[
+            tuple[str, str, str, str, str],
+            tuple[tuple[str, str, tuple[str, ...]], ...],
+        ] = {}
+        # Observability ONLY: candidates whose every support was contested, so the
+        # closure lists them neither as proven nor as unresolved. Never authority.
+        self._native_contested_candidate_cache: dict[
             tuple[str, str, str, str, str],
             tuple[tuple[str, str, tuple[str, ...]], ...],
         ] = {}
@@ -1892,6 +1935,8 @@ class PhysicalOpeningAuthority:
                 tuple[SourceObservationAuthorityResult, ...],
             ],
         ] = {}
+        # Reuse raster inventory only while original source producer inputs remain identical.
+        self._raster_primitive_snapshot_inputs: dict[tuple, tuple] = {}
         self._raster_framed_candidate_cache: dict[
             tuple[str, str, str, str, str],
             tuple[CandidateSemanticOpening, ...],
@@ -1942,6 +1987,7 @@ class PhysicalOpeningAuthority:
             "_visible_candidate_cache",
             "_visible_candidate_membership_cache",
             "_native_raw_candidate_support_cache",
+            "_native_contested_candidate_cache",
             "_visible_viewport_candidate_membership_cache",
             "_visible_existence_cache",
             "_visible_disposition_cache",
@@ -1950,6 +1996,7 @@ class PhysicalOpeningAuthority:
             "_visible_snapshot_cache",
             "_visible_snapshot_record_index_cache",
             "_raster_primitive_snapshot_cache",
+            "_raster_primitive_snapshot_inputs",
             "_raster_framed_candidate_cache",
             "_raster_gap_candidate_audit_cache",
             "_raster_gap_first_gate_shadow_cache",
@@ -2282,6 +2329,56 @@ class PhysicalOpeningAuthority:
         self._visible_snapshot_record_index_cache[cache_key] = (records, index)
         return index
 
+    @staticmethod
+    def _same_raster_inventory_inputs(first, second) -> bool:
+        if first is None or second is None:
+            return False
+        if not all(a is b for a, b in zip(first[:-1], second[:-1])):
+            return False
+        before, after = first[-1], second[-1]
+        if type(before) is int or type(after) is int:
+            # A counted receipt table: unchanged exactly when nothing was written through it.
+            return type(before) is type(after) and before == after
+        return len(before) == len(after) and all(a is b for a, b in zip(before, after))
+
+    def _raster_inventory_inputs(self, published) -> tuple | None:
+        """Immutable source-object token, never a caller-supplied proof.
+
+        Snapshot-chain tables discard their flat view on ANY write, including
+        a parent/fingerprint replacement outside the selected opening/page.
+        The receipt table is independent: the producer's table counts its
+        writes, and any other mapping has every published entry compared, so a
+        page with thousands of primitives is not re-walked on every proof.
+        A diagnostic replacement with an ordinary mapping cannot use this fast
+        path and is reauthenticated through the existing scalar source reader.
+        """
+        producer = self._source_visibility_producer
+        if producer is None:
+            return None
+        if producer.published_snapshot_for_revision(published.revision.revision_id) is not published:
+            return None
+        store = producer._producer._store
+        snapshot_id = published.snapshot.snapshot_id
+        observations = getattr(store.observations, "ensure_flat", None)
+        fingerprints = getattr(store.record_fingerprints, "ensure_flat", None)
+        if observations is None or fingerprints is None:
+            return None
+        rows, hashes = observations(snapshot_id), fingerprints(snapshot_id)
+        if rows is None or hashes is None:
+            return None
+        ids = published.raster_opening_primitive_observation_ids
+        receipts = producer._raster_opening_primitive_receipts
+        changes = getattr(receipts, "changes", None)
+        return (
+            published, ids,
+            store.revisions.get(published.revision.revision_id),
+            store.snapshots.get(snapshot_id),
+            store.source_bytes_by_revision.get(published.revision.revision_id),
+            rows, hashes, receipts,
+            changes if type(changes) is int
+            else tuple(receipts.get((snapshot_id, oid)) for oid in ids),
+        )
+
     def _raster_primitive_snapshot_records(
         self,
         seed: SourceObservationAuthorityResult,
@@ -2304,10 +2401,6 @@ class PhysicalOpeningAuthority:
             str(seed.snapshot.source_sha256),
             str(seed.snapshot.snapshot_id),
         )
-        cached = self._raster_primitive_snapshot_cache.get(key)
-        if cached is not None:
-            return cached
-
         published = producer.published_snapshot_for_revision(
             seed.snapshot.revision_id
         )
@@ -2315,7 +2408,20 @@ class PhysicalOpeningAuthority:
             published is None
             or published.snapshot.snapshot_id != seed.snapshot.snapshot_id
         ):
+            self._invalidate_snapshot_caches_after_failed_source_batch(key[3])
             return (), ()
+
+        inputs = self._raster_inventory_inputs(published)
+        cached = self._raster_primitive_snapshot_cache.get(key)
+        if cached is not None:
+            if self._same_raster_inventory_inputs(
+                inputs, self._raster_primitive_snapshot_inputs.get(key),
+            ):
+                return cached
+            # Clear both positive and negative discovery/closure caches. A
+            # restored receipt must be independently proved, not inherit a
+            # stale negative recorded during a temporary integrity failure.
+            self._invalidate_snapshot_caches_after_failed_source_batch(key[3])
 
         records: list[SourceObservationRecord] = []
         failures: list[SourceObservationAuthorityResult] = []
@@ -2337,7 +2443,19 @@ class PhysicalOpeningAuthority:
             else:
                 failures.append(result)
         resolved = (tuple(records), tuple(failures))
+        after = self._raster_inventory_inputs(published)
+        # An absent pre-read token followed by a tracked post-read token is
+        # itself a changed source transaction. Do not bless the inventory
+        # merely because the original table was restored during enumeration.
+        if (inputs is None) != (after is None) or (
+            inputs is not None
+            and not self._same_raster_inventory_inputs(inputs, after)
+        ):
+            self._invalidate_snapshot_caches_after_failed_source_batch(key[3])
+            return (), (visibility._conflict(PRODUCER_INTEGRITY_FAILURE),)
         self._raster_primitive_snapshot_cache[key] = resolved
+        if after is not None:
+            self._raster_primitive_snapshot_inputs[key] = after
         return resolved
 
     def _raster_framed_candidates_for(
@@ -3076,9 +3194,6 @@ class PhysicalOpeningAuthority:
         source_result: SourceObservationAuthorityResult,
     ) -> PhysicalOpeningExistenceResult:
         cache_key = self._visible_selector_cache_key(selector)
-        cached = self._raster_existence_cache.get(cache_key)
-        if cached is not None:
-            return cached
 
         def cache(
             result: PhysicalOpeningExistenceResult,
@@ -3101,7 +3216,9 @@ class PhysicalOpeningAuthority:
 
         records, failures = self._raster_primitive_snapshot_records(source_result)
         if failures:
-            return cache(PhysicalOpeningExistenceResult(
+            # An interrupted read may have no reusable source-inventory token.
+            # Do not persist its negative proof beyond restoration of source.
+            return PhysicalOpeningExistenceResult(
                 status=_source_failure_status(*failures),
                 proposition=None,
                 physical_opening_existence=PHYSICAL_OPENING_EXISTENCE_UNRESOLVED,
@@ -3110,7 +3227,14 @@ class PhysicalOpeningAuthority:
                     *tuple(item.reason_codes for item in failures),
                 ),
                 source_observation=source_result,
-            ))
+            )
+
+        # Inventory freshness precedes a cached physical proposition. Checking
+        # only this selector misses damage to a different supporting primitive
+        # or an off-page competitor in the same original source universe.
+        cached = self._raster_existence_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         observation = source_result.observation
         raw_candidates = self._raster_framed_candidates_for(observation, records)
@@ -3331,6 +3455,8 @@ class PhysicalOpeningAuthority:
     def _visible_structural_candidates(
         seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
+        precision: bool = False,
+        crossing_wall_negative: bool = False,
     ) -> tuple[CandidateSemanticOpening, ...]:
         """Discover exact structural openings without quadratic rescans of breaks.
 
@@ -3381,8 +3507,11 @@ class PhysicalOpeningAuthority:
         collapsed = sorted(last_by_geometry.values(), key=lambda row: row[0])
         scoped = tuple(row[1] for row in collapsed)
         cached_lines = tuple(row[2] for row in collapsed)
+        tolerance = (source_coordinate_tolerance(cached_lines, floor=_COORD_EQ_ABS_TOL) if precision else None)
+        edge = _COORD_EQ_ABS_TOL if tolerance is None else tolerance
+        precise = {} if tolerance is None else {"tolerance": tolerance}  # off: exactly the historical calls
         collinear_pairs = _candidate_collinear_record_pairs(
-            scoped, line_geometries=cached_lines
+            scoped, line_geometries=cached_lines, **precise
         )
         collinear_neighbors: dict[int, set[int]] = {}
         for first_index, second_index in collinear_pairs:
@@ -3396,6 +3525,7 @@ class PhysicalOpeningAuthority:
                 scoped[second_index],
                 first_line=cached_lines[first_index],
                 second_line=cached_lines[second_index],
+                **precise,
             )
             if found is None:
                 continue
@@ -3429,11 +3559,12 @@ class PhysicalOpeningAuthority:
                 # opposition/integrity checks (which can only ABSTAIN).
                 # A positive source-visible stub strictly INSIDE the proposed
                 # gap does prove these are not adjacent wall faces.
+                limit = _COORD_EQ_ABS_TOL if min(map(abs, found.direction)) <= _COORD_EQ_ABS_TOL else edge
                 interior_stub = (
-                    values[0] > found.gap_start + _COORD_EQ_ABS_TOL
-                    and values[1] < found.gap_end - _COORD_EQ_ABS_TOL
+                    values[0] > found.gap_start + limit
+                    and values[1] < found.gap_end - limit
                 )
-                if interior_stub and overlap > _COORD_EQ_ABS_TOL:
+                if interior_stub and overlap > limit:
                     continuation = True
                     break
             if not continuation:
@@ -3452,7 +3583,7 @@ class PhysicalOpeningAuthority:
             for record in scoped
         }
 
-        coord_tol = _COORD_EQ_ABS_TOL
+        coord_tol = _COORD_EQ_ABS_TOL if tolerance is None else 4.0 * tolerance
         max_same_angle = math.acos(max(-1.0, 1.0 - _PARALLEL_REL_TOL))
         angle_width = max(max_same_angle * 2.0, 1e-12)
         angle_bucket_count = max(1, int(math.ceil(math.pi / angle_width)))
@@ -3486,6 +3617,37 @@ class PhysicalOpeningAuthority:
             tuple[SourceObservationRecord, ...],
         ] = {}
 
+        def continues_outward(jamb: SourceObservationRecord) -> bool:
+            """Collinear source carries on from BOTH ends of this jamb, away from the wall, for at least the jamb's own
+            length (C12, opt-in). Pieces chain end to end, so splitting the line changes nothing; short lining or
+            architrave ticks beyond a face stop short of that."""
+            line = _line_geometry(jamb)
+            ends = ((line[0], line[1]), (line[2], line[3]))
+            thickness = math.dist(*ends)
+            limit = _COORD_EQ_ABS_TOL if tolerance is None else tolerance
+            if thickness <= limit:
+                return False
+            for here, other_end in (ends, ends[::-1]):
+                unit = ((here[0] - other_end[0]) / thickness, (here[1] - other_end[1]) / thickness)
+                reach, frontier, seen = 0.0, [here], {jamb.observation_id}
+                while frontier and reach + limit < thickness:
+                    point = frontier.pop()
+                    first_bin = point_bin(point)
+                    neighbours = {item.observation_id: item for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                                  for item in endpoint_point_index.get((first_bin[0] + dx, first_bin[1] + dy), ())}
+                    for item in neighbours.values():
+                        if item.observation_id in seen or not _collinear(line, _line_geometry(item), tolerance):
+                            continue
+                        x0, y0, x1, y1 = _line_geometry(item)
+                        for start, far in (((x0, y0), (x1, y1)), ((x1, y1), (x0, y0))):
+                            if _point_close(start, point, tolerance):
+                                seen.add(item.observation_id)
+                                frontier.append(far)
+                                reach = max(reach, (far[0] - here[0]) * unit[0] + (far[1] - here[1]) * unit[1])
+                if reach + limit < thickness:
+                    return False
+            return True
+
         def indexed_segment_matches(
             first: tuple[float, float],
             second: tuple[float, float],
@@ -3507,7 +3669,7 @@ class PhysicalOpeningAuthority:
                     candidates.values(),
                     key=lambda item: scoped_position[item.observation_id],
                 )
-                if _segment_matches(record, first, second)
+                if _segment_matches(record, first, second, **precise)
             )
             segment_match_cache[key] = result
             return result
@@ -3538,7 +3700,7 @@ class PhysicalOpeningAuthority:
 
             for first_index in sorted(prior_indexes):
                 first_break = breaks[first_index]
-                if not _same_gap(first_break, second_break):
+                if not _same_gap(first_break, second_break, **precise):
                     continue
                 if not _distinct_parallel_axes(first_break, second_break):
                     continue
@@ -3571,6 +3733,9 @@ class PhysicalOpeningAuthority:
                                 break
                             parent_ids.append(item.derivation_parent_ids[0])
                         if not lineage_ok or len(set(parent_ids)) != 6:
+                            continue
+                        # Both "jambs" carrying on past both faces are a wall passing through (C12, opt-in removal).
+                        if crossing_wall_negative and continues_outward(left_jamb) and continues_outward(right_jamb):
                             continue
                         geometry_key = tuple(
                             sorted(
@@ -3946,8 +4111,12 @@ class PhysicalOpeningAuthority:
         cls,
         seed: SourceObservationRecord,
         records: tuple[SourceObservationRecord, ...],
+        precision: bool = False,
+        crossing_wall_negative: bool = False,
     ) -> tuple[CandidateSemanticOpening, ...]:
-        strong = cls._visible_structural_candidates(seed, records)
+        options = {**({"precision": True} if precision else {}),
+                   **({"crossing_wall_negative": True} if crossing_wall_negative else {})}
+        strong = cls._visible_structural_candidates(seed, records, **options)
         generic = cls._visible_generic_correlated_candidates(seed, records)
         strong_sets = [set(item.source_observation_ids) for item in strong]
         retained = [
@@ -4026,6 +4195,11 @@ class PhysicalOpeningAuthority:
                 )
         return raw_membership, scoped_membership
 
+    def _structural_detector_options(self) -> dict[str, bool]:
+        """Only the options that are on, so a default detector call is exactly the historical one."""
+        return {**({"precision": True} if self._angled_opening_precision_shadow else {}),
+                **({"crossing_wall_negative": True} if self._crossing_wall_negative_shadow else {})}
+
     def _visible_candidates_for(
         self,
         seed: SourceObservationRecord,
@@ -4037,7 +4211,7 @@ class PhysicalOpeningAuthority:
         cached = self._visible_candidate_cache.get(key)
         if cached is not None:
             return cached
-        candidates = self._visible_all_structural_candidates(seed, records)
+        candidates = self._visible_all_structural_candidates(seed, records, **self._structural_detector_options())
         self._visible_candidate_cache[key] = candidates
         self._visible_candidate_membership_cache[key] = (
             self._candidate_membership_index(candidates)
@@ -4317,8 +4491,10 @@ class PhysicalOpeningAuthority:
         # hypothesis opposed by complete annotation evidence remains unresolved
         # in closure; retain its raw support instead of silently discarding it.
         proven_supports = []
+        contested: list[tuple[str, str, tuple[str, ...]]] = []
         for candidate in promotable:
             support = frozenset(candidate.source_observation_ids)
+            listed = False
             for observation_id in candidate.source_observation_ids:
                 existence = self.prove_existence(
                     replace(selector, observation_id=observation_id)
@@ -4330,6 +4506,7 @@ class PhysicalOpeningAuthority:
                     == support
                 ):
                     proven_supports.append(support)
+                    listed = True
                     break
                 if (
                     existence.candidate is not None
@@ -4337,6 +4514,9 @@ class PhysicalOpeningAuthority:
                 ):
                     raw_candidates[candidate.candidate_id] = support
                     raw_patterns[candidate.candidate_id] = candidate.structural_pattern
+                    listed = True
+            if not listed:
+                contested.append((candidate.candidate_id, candidate.structural_pattern, tuple(sorted(support))))
         typed_non_plan_supports = tuple(
             frozenset(candidate.source_observation_ids)
             for candidate in proven
@@ -4365,6 +4545,7 @@ class PhysicalOpeningAuthority:
         # A diagnostic may subsequently reauthenticate this grouping without
         # re-running a different detector. This does not make incomplete raw
         # candidates physically real, resolved or countable.
+        self._native_contested_candidate_cache[self._visible_page_candidate_key(seed)] = tuple(sorted(set(contested)))
         self._native_raw_candidate_support_cache[
             self._visible_page_candidate_key(seed)
         ] = tuple(sorted(
@@ -4555,6 +4736,31 @@ class PhysicalOpeningAuthority:
             for candidate_id, source_ids, aperture, pattern in sorted(items)
         )
 
+    def visible_contested_candidate_groups(
+        self, selector: ObservationSelector,
+    ) -> tuple[dict[str, object], ...]:
+        """Report only: candidates the closure lists nowhere because every support is contested.
+
+        Retention, never authority: no existence, host, count or ID changes, and
+        the closure result itself is untouched.
+        """
+        if not isinstance(selector, ObservationSelector):
+            raise TypeError("selector must be ObservationSelector")
+        closure = self.assess_visible_candidate_closure(selector)
+        source = self._resolve_visible_cached(selector)
+        if (closure.status is not EvidenceResolutionStatus.CORROBORATED
+                or source.status is not EvidenceResolutionStatus.CORROBORATED
+                or source.observation is None):
+            raise RuntimeError("contested candidate original scope unavailable")
+        groups = self._native_contested_candidate_cache.get(self._visible_page_candidate_key(source.observation))
+        if groups is None:
+            raise RuntimeError("contested candidate membership unavailable")
+        return tuple(
+            dict(candidate_id=candidate_id, source_observation_ids=list(observation_ids),
+                 candidate_status="contested_every_support", structural_pattern=pattern)
+            for candidate_id, pattern, observation_ids in groups
+        )
+
     @staticmethod
     def _single_raw_candidate(
         observation: SourceObservationRecord,
@@ -4721,7 +4927,7 @@ class PhysicalOpeningAuthority:
         failure, source_result, _records, by_id, restricted = self._seeded_universe(selector, member_observation_ids)
         if failure is not None:
             return failure
-        found = self._visible_structural_candidates(source_result.observation, restricted)
+        found = self._visible_structural_candidates(source_result.observation, restricted, **self._structural_detector_options())
         return PhysicalOpeningCandidateStructureResult(
             status=EvidenceResolutionStatus.CANDIDATE,
             page_id=str(source_result.observation.page_id),
@@ -4749,7 +4955,7 @@ class PhysicalOpeningAuthority:
         if failure is not None:
             return SeededFaceInkInventory(
                 status=failure.status, reason_codes=tuple(failure.reason_codes), page_id=failure.page_id, structures=())
-        found = self._visible_structural_candidates(source_result.observation, restricted)
+        found = self._visible_structural_candidates(source_result.observation, restricted, **self._structural_detector_options())
         used = collections.Counter(i for structure in found for i in set(structure.source_observation_ids))
         structures = []
         for structure in sorted(found, key=lambda c: c.candidate_id):
@@ -4822,7 +5028,7 @@ class PhysicalOpeningAuthority:
         if any(value not in by_id for value in accounted):
             return unresolved(source_result, (SNAPSHOT_OBSERVATION_INTEGRITY_FAILURE,))
         observation = source_result.observation
-        found = self._visible_structural_candidates(observation, restricted)
+        found = self._visible_structural_candidates(observation, restricted, **self._structural_detector_options())
         survivors = []
         rivals = []
         for structure in found:
