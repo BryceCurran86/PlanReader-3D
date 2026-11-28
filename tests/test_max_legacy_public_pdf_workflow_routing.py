@@ -93,3 +93,21 @@ def test_batch_two_original_replay_boundary(filename, job, boundary):
         if sibling != job:
             assert config.get("if") != OFF
             assert all(s.get("if") != OFF for s in config.get("steps", []))
+
+# Batch three: five residual PR-only original-source routes.
+BATCH_THREE = [
+    ("diag-gpt1-original-material-plan-marks.yml", "original-source", None),
+    ("test-gpt2-b02-real-grid-title.yml", "source-grid-title-proof", None),
+    ("test-gpt1-original-ft3-highres-source.yml", "original-source", "Recover each exact original native FT3 word through the real producer"),
+    ("test-gptmax-zero-endpoint-index-shadow.yml", "original-full-page", None),
+    ("test-gptmax-w2-short-source-fragment.yml", "original-source-trace-parity", None),
+]
+
+@pytest.mark.parametrize("filename,job,boundary", BATCH_THREE)
+def test_batch_three_original_replay_boundary(filename, job, boundary):
+    test_batch_two_original_replay_boundary(filename, job, boundary)
+    data = jobs(filename)
+    deferred = data[job]["steps"]
+    assert any("documents/sources/" in str(s) for s in deferred) or "documents/sources/" in str(data[job])
+    if boundary is not None:
+        assert any("pytest" in s.get("run", "") and "if" not in s for s in deferred)
