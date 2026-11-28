@@ -111,6 +111,9 @@ class PhysicalRoomRingProvenanceBinding:
     rcp_ceiling_evidence_ids: tuple[str, ...]
     reason_codes: tuple[str, ...]
     bound_finish_zone_witness_id: str | None = None
+    explicit_area_preserved_independently: bool = False
+    ring_ownership_verified: bool = False
+    firm_authority_granted: bool = False
     shadow_only: bool = True
     commercial_authority_granted: bool = False
     schema_version: str = SCHEMA_VERSION
@@ -150,6 +153,29 @@ def _ring_attr(ring: Any, name: str, default: Any = None) -> Any:
     if isinstance(ring, dict):
         return ring.get(name, default)
     return getattr(ring, name, default)
+
+
+def _ring_is_producer_owned(ring: Any) -> bool:
+    """Return True if ring carries LayeredRoomRingRecord producer ownership seal."""
+    try:
+        from pb_layered_wall_doorway_room_ring_shadow import LayeredRoomRingRecord
+
+        if isinstance(ring, LayeredRoomRingRecord):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _has_independent_explicit_area(cand: RoomProvenanceBindingCandidate) -> bool:
+    """Verify explicit area is backed by independent source evidence, never polygon area."""
+    return (
+        cand.explicit_area_m2 is not None
+        and math.isfinite(float(cand.explicit_area_m2))
+        and float(cand.explicit_area_m2) > 0.0
+        and bool(str(cand.explicit_area_authority or "").strip())
+        and bool(cand.explicit_area_evidence_ids)
+    )
 
 
 def _ring_status_is_admissible(ring: Any) -> bool:
@@ -195,6 +221,7 @@ def bind_room_provenance_to_physical_rings_shadow(
     page_room_label_anchors: Sequence[tuple[int, str, tuple[float, float]]] = (),
     min_ring_wall_support_fraction: float = DEFAULT_MIN_RING_WALL_SUPPORT_FRACTION,
     finish_zone_witnesses_by_surface_id: Mapping[str, SourceProvenFinishZoneWitness] | None = None,
+    require_producer_owned_ring: bool = False,
 ) -> tuple[PhysicalRoomRingProvenanceBinding, ...]:
     """Bind explicit-area, floor-finish, and RCP provenance to wall-supported physical rings.
 
@@ -236,6 +263,8 @@ def bind_room_provenance_to_physical_rings_shadow(
         poly = tuple(_ring_attr(ring, "polygon_pdf_pts", ()) or ())
         if wall_edges <= 0 or not wall_paths or len(poly) < 3:
             continue
+        if require_producer_owned_ring and not _ring_is_producer_owned(ring):
+            continue
         scoped_rings.append((ring, poly, _ring_status_is_admissible(ring)))
 
     results: list[PhysicalRoomRingProvenanceBinding] = []
@@ -266,6 +295,7 @@ def bind_room_provenance_to_physical_rings_shadow(
                         ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED,
                         *base.reason_codes,
                     ),
+                    explicit_area_preserved_independently=_has_independent_explicit_area(cand),
                 )
             )
             continue
@@ -504,6 +534,9 @@ def bind_room_provenance_to_physical_rings_shadow(
                 rcp_ceiling_height_mm=cand.rcp_ceiling_height_mm,
                 rcp_ceiling_evidence_ids=cand.rcp_ceiling_evidence_ids,
                 reason_codes=(PHYSICAL_ROOM_RING_PROVENANCE_REBOUND,),
+                explicit_area_preserved_independently=_has_independent_explicit_area(cand),
+                ring_ownership_verified=_ring_is_producer_owned(ring),
+                firm_authority_granted=False,
             )
         )
 

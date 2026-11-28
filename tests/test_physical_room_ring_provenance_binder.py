@@ -442,3 +442,56 @@ def test_weak_25pct_ring_rejected_by_positive_support_threshold_and_open_zone_ke
     assert b_fz.floor_finish_evidence_ids == ("ev_sched_ft2", "ev_plan_ft2")
     assert b_fz.commercial_authority_granted is False
     assert OPEN_PLAN_FINISH_ZONE_WITNESS_ONLY_NO_PHYSICAL_RING in b_fz.reason_codes
+
+
+def test_require_producer_owned_ring_rejects_unsealed_rings_and_never_grants_firm() -> None:
+    duck_ring = SimpleNamespace(
+        record_id="ring_unsealed_duck",
+        source_sha256=SHA,
+        page_index=6,
+        status=EvidenceResolutionStatus.CANDIDATE,
+        polygon_pdf_pts=PHYSICAL_RING,
+        area_pt2=28197.7,
+        wall_edge_count=10,
+        closure_edge_count=1,
+        bounding_closure_ids=("c1",),
+        bounding_wall_path_indices=(1, 2),
+    )
+    cand = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_grid", "q_owner_check", GRID_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(25.0, 25.0),
+        explicit_area_m2=9.05352,
+        explicit_area_authority="documented_dimension",
+        explicit_area_evidence_ids=("dim_1", "dim_2"),
+    )
+    # With require_producer_owned_ring=True, unsealed duck-typed ring is strictly rejected
+    strict = bind_room_provenance_to_physical_rings_shadow(
+        candidates=(cand,),
+        physical_rings=(duck_ring,),
+        drawings=(),
+        wall_support_predicate=_wall_predicate,
+        expected_document_id="doc1",
+        expected_revision_id="rev1",
+        expected_source_sha256=SHA,
+        require_producer_owned_ring=True,
+    )
+    assert strict[0].withheld is True
+    assert strict[0].firm_authority_granted is False
+
+    # With default require_producer_owned_ring=False, ring binds shadow-only with
+    # ring_ownership_verified=False, firm_authority_granted=False, and
+    # explicit_area_preserved_independently=True
+    shadow = bind_room_provenance_to_physical_rings_shadow(
+        candidates=(cand,),
+        physical_rings=(duck_ring,),
+        drawings=(),
+        wall_support_predicate=_wall_predicate,
+        expected_document_id="doc1",
+        expected_revision_id="rev1",
+        expected_source_sha256=SHA,
+    )
+    assert shadow[0].withheld is False
+    assert shadow[0].ring_ownership_verified is False
+    assert shadow[0].firm_authority_granted is False
+    assert shadow[0].explicit_area_preserved_independently is True
