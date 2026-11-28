@@ -25,7 +25,7 @@ Default-off / shadow-only contract (``shadow_only=True``,
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import math
 from typing import Any
@@ -43,11 +43,32 @@ ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED = "original_surface_wall_supported_reta
 PHYSICAL_ROOM_RING_PROVENANCE_REBOUND = "physical_room_ring_provenance_rebound"
 NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL = "no_qualifying_physical_room_ring_for_label"
 RING_STATUS_NOT_CANDIDATE = "ring_status_not_candidate"
+RING_INSUFFICIENT_POSITIVE_WALL_SUPPORT = "ring_insufficient_positive_wall_support"
 RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS = "ring_contains_multiple_distinct_room_labels"
+OPEN_PLAN_FINISH_ZONE_WITNESS_ONLY_NO_PHYSICAL_RING = (
+    "open_plan_finish_zone_witness_only_no_physical_ring"
+)
 AMBIGUOUS_MULTIPLE_PHYSICAL_ROOM_RINGS_FOR_LABEL = (
     "ambiguous_multiple_physical_room_rings_for_label"
 )
 INVALID_ROOM_LABEL_ANCHOR = "invalid_room_label_anchor"
+DEFAULT_MIN_RING_WALL_SUPPORT_FRACTION = 0.50
+
+
+@dataclass(frozen=True)
+class SourceProvenFinishZoneWitness:
+    """Source-proven open-plan finish zone witness (never invents walls or room rings)."""
+
+    witness_id: str
+    surface_entity_id: str
+    document_id: str
+    revision_id: str
+    source_sha256: str
+    finish_code: str
+    evidence_ids: tuple[str, ...]
+    invented_wall_count: int = 0
+    shadow_only: bool = True
+    commercial_authority_granted: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,6 +110,7 @@ class PhysicalRoomRingProvenanceBinding:
     rcp_ceiling_height_mm: int | None
     rcp_ceiling_evidence_ids: tuple[str, ...]
     reason_codes: tuple[str, ...]
+    bound_finish_zone_witness_id: str | None = None
     shadow_only: bool = True
     commercial_authority_granted: bool = False
     schema_version: str = SCHEMA_VERSION
@@ -171,6 +193,8 @@ def bind_room_provenance_to_physical_rings_shadow(
     expected_source_sha256: str,
     closures: Sequence[Any] = (),
     page_room_label_anchors: Sequence[tuple[int, str, tuple[float, float]]] = (),
+    min_ring_wall_support_fraction: float = DEFAULT_MIN_RING_WALL_SUPPORT_FRACTION,
+    finish_zone_witnesses_by_surface_id: Mapping[str, SourceProvenFinishZoneWitness] | None = None,
 ) -> tuple[PhysicalRoomRingProvenanceBinding, ...]:
     """Bind explicit-area, floor-finish, and RCP provenance to wall-supported physical rings.
 
@@ -180,6 +204,11 @@ def bind_room_provenance_to_physical_rings_shadow(
       and the exact same ``wall_support_predicate``.
     - Keeps unenclosed zones (0 qualifying rings) strictly withheld.
     """
+    if not (
+        math.isfinite(min_ring_wall_support_fraction)
+        and 0.0 < float(min_ring_wall_support_fraction) <= 1.0
+    ):
+        raise ValueError("min_ring_wall_support_fraction must be in (0.0, 1.0]")
     if not candidates:
         return ()
 
@@ -303,6 +332,7 @@ def bind_room_provenance_to_physical_rings_shadow(
         matching_rings: list[tuple[Any, float]] = []
         multi_label_shell_rejected = False
         non_candidate_status_rejected = False
+        insufficient_positive_support_rejected = False
         # Build all OTHER room-label anchors on the same page so a giant multi-room
         # open-plan shell ring enclosing >=2 distinct room labels cannot be mistaken
         # for a single room's physical boundary.
@@ -355,17 +385,43 @@ def bind_room_provenance_to_physical_rings_shadow(
                 closures=ring_closures_for_check,
             )[0]
             if not ring_verdict.vetoed:
-                matching_rings.append((ring, ring_verdict.supported_fraction))
+                if ring_verdict.supported_fraction + 1e-9 >= float(min_ring_wall_support_fraction):
+                    matching_rings.append((ring, ring_verdict.supported_fraction))
+                else:
+                    insufficient_positive_support_rejected = True
 
         if not matching_rings:
-            # Open-plan / unenclosed zone (e.g., Food Prep): keep strictly withheld.
+            # Open-plan / unenclosed zone (e.g., Food Prep): keep strictly withheld
+            # from physical room publication. If a source-proven finish-zone witness
+            # exists for the exact same scope, record it strictly as witness-only
+            # (withheld=True, zero invented walls).
             extra_reasons: list[str] = [FLOOR_SURFACE_ZERO_PHYSICAL_WALL_SUPPORT]
             if non_candidate_status_rejected:
                 extra_reasons.append(RING_STATUS_NOT_CANDIDATE)
             if multi_label_shell_rejected:
                 extra_reasons.append(RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS)
+            if insufficient_positive_support_rejected:
+                extra_reasons.append(RING_INSUFFICIENT_POSITIVE_WALL_SUPPORT)
             if len(extra_reasons) == 1:
                 extra_reasons.append(NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL)
+
+            fz_witness = (
+                finish_zone_witnesses_by_surface_id.get(surf.surface_entity_id)
+                if finish_zone_witnesses_by_surface_id
+                else None
+            )
+            fz_valid = (
+                isinstance(fz_witness, SourceProvenFinishZoneWitness)
+                and fz_witness.surface_entity_id == surf.surface_entity_id
+                and fz_witness.document_id == expected_document_id
+                and fz_witness.revision_id == expected_revision_id
+                and fz_witness.source_sha256 == expected_source_sha256
+                and fz_witness.invented_wall_count == 0
+                and bool(fz_witness.finish_code.strip())
+                and bool(fz_witness.evidence_ids)
+            )
+            if fz_valid and fz_witness is not None:
+                extra_reasons.append(OPEN_PLAN_FINISH_ZONE_WITNESS_ONLY_NO_PHYSICAL_RING)
             abstain_reasons = tuple(extra_reasons)
             results.append(
                 PhysicalRoomRingProvenanceBinding(
@@ -381,12 +437,17 @@ def bind_room_provenance_to_physical_rings_shadow(
                     explicit_area_m2=None,
                     explicit_area_authority=None,
                     explicit_area_evidence_ids=(),
-                    floor_finish_code=None,
-                    floor_finish_evidence_ids=(),
+                    floor_finish_code=fz_witness.finish_code if (fz_valid and fz_witness) else None,
+                    floor_finish_evidence_ids=(
+                        fz_witness.evidence_ids if (fz_valid and fz_witness) else ()
+                    ),
                     rcp_ceiling_material=None,
                     rcp_ceiling_height_mm=None,
                     rcp_ceiling_evidence_ids=(),
                     reason_codes=abstain_reasons,
+                    bound_finish_zone_witness_id=(
+                        fz_witness.witness_id if (fz_valid and fz_witness) else None
+                    ),
                 )
             )
             continue
@@ -451,14 +512,18 @@ def bind_room_provenance_to_physical_rings_shadow(
 
 __all__ = [
     "AMBIGUOUS_MULTIPLE_PHYSICAL_ROOM_RINGS_FOR_LABEL",
+    "DEFAULT_MIN_RING_WALL_SUPPORT_FRACTION",
     "INVALID_ROOM_LABEL_ANCHOR",
     "NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL",
+    "OPEN_PLAN_FINISH_ZONE_WITNESS_ONLY_NO_PHYSICAL_RING",
     "ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED",
     "PHYSICAL_ROOM_RING_PROVENANCE_REBOUND",
     "RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS",
+    "RING_INSUFFICIENT_POSITIVE_WALL_SUPPORT",
     "RING_STATUS_NOT_CANDIDATE",
     "PhysicalRoomRingProvenanceBinding",
     "RoomProvenanceBindingCandidate",
     "SCHEMA_VERSION",
+    "SourceProvenFinishZoneWitness",
     "bind_room_provenance_to_physical_rings_shadow",
 ]

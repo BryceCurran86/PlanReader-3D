@@ -511,3 +511,58 @@ def classify_outlined_caption_view_type(
         supporting_texts=tuple(sorted(set(supporting))),
         reason_codes=("outlined_in_drawing_caption_corroborated",),
     )
+
+
+def classify_page_in_drawing_outlined_captions_shadow(
+    page: Any,
+    *,
+    source_sha256: str,
+    page_index: int,
+    render_dpis: Sequence[int] = (144, 216),
+    body_right_fraction: float = 0.82,
+    body_bottom_fraction: float = 0.90,
+    ocr_callable: Callable[[bytes], Sequence[OcrRawToken]] | None = None,
+    require_outlined_body: bool = True,
+) -> OutlinedCaptionViewClassification:
+    """Classify a sheet's view type via multi-DPI in-drawing body OCR (outside title block).
+
+    Intended for outlined-vector architectural sheets where title-block-only OCR
+    returns 0 titles because view captions (e.g. ``FLOOR PLAN``, ``ELEVATIONS``,
+    ``ROOF PLAN``) are drawn as vector outlines inside the drawing body itself.
+    Strictly shadow-only (``shadow_only=True``, ``commercial_projection_allowed=False``).
+    """
+    if require_outlined_body:
+        assessment = detect_outlined_text_drawing_body(page, page_index=page_index)
+        if not assessment.outlined_text_suspected:
+            return OutlinedCaptionViewClassification(
+                status="ABSTAINED",
+                view_type="unproven",
+                matched_view_types=(),
+                supporting_texts=(),
+                reason_codes=("outlined_text_body_not_suspected",),
+            )
+    width = float(page.rect.width)
+    height = float(page.rect.height)
+    body_clip = (
+        0.0,
+        0.0,
+        max(1.0, width * float(body_right_fraction)),
+        max(1.0, height * float(body_bottom_fraction)),
+    )
+    extraction = extract_vector_outlined_text_multi_dpi_shadow(
+        page=page,
+        source_sha256=source_sha256,
+        page_index=page_index,
+        region_bbox_pts=body_clip,
+        render_dpis=render_dpis,
+        ocr_callable=ocr_callable,
+    )
+    if not extraction.agreed_tokens:
+        return OutlinedCaptionViewClassification(
+            status="ABSTAINED",
+            view_type="unproven",
+            matched_view_types=(),
+            supporting_texts=(),
+            reason_codes=(*extraction.reason_codes, "no_multi_dpi_agreed_outlined_tokens"),
+        )
+    return classify_outlined_caption_view_type(extraction.agreed_tokens)

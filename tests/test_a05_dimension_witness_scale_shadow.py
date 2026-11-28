@@ -208,3 +208,68 @@ def test_a06_outlined_caption_view_classifier_separates_floor_from_roof_and_reje
     # Conflicting view types on same sheet must fail closed with CONFLICT
     conflict = classify_outlined_caption_view_type([_tok("FLOOR PLAN", 100, 700), _tok("ROOF PLAN", 100, 750)])
     assert conflict.status == "CONFLICT" and conflict.view_type == "unproven"
+
+
+def test_a06_in_drawing_outlined_caption_producer_shadow() -> None:
+    import fitz
+    from pb_source_vector_outlined_text_ocr_shadow import (
+        OcrRawToken,
+        classify_page_in_drawing_outlined_captions_shadow,
+    )
+
+    doc = fitz.open()
+    try:
+        # Page 0: synthetic outlined-vector body (0 native words, >500 vector segments, 0 images)
+        p0 = doc.new_page(width=842, height=595)
+        for i in range(520):
+            y = 20.0 + (i % 50) * 8.0
+            x = 20.0 + (i // 50) * 40.0
+            p0.draw_line(fitz.Point(x, y), fitz.Point(x + 25.0, y), color=(0, 0, 0), width=0.5)
+
+        # Page 1: normal native-text page -> must abstain immediately without OCR
+        p1 = doc.new_page(width=842, height=595)
+        for i in range(25):
+            p1.insert_text(fitz.Point(50.0, 50.0 + i * 14.0), f"NATIVE WORD {i}")
+
+        p0 = doc[0]
+        p1 = doc[1]
+
+        calls = 0
+
+        def _fake_ocr(_png: bytes):
+            nonlocal calls
+            calls += 1
+            # Return multi-DPI agreed tokens in pixel coordinates matching 144 / 216 DPI
+            # (2x and 3x of 72pt). Use fixed pixel scale via call index.
+            scale = 2.0 if calls == 1 else 3.0
+            return [
+                OcrRawToken("GROUND", (100 * scale, 400 * scale, 160 * scale, 415 * scale), 0.96),
+                OcrRawToken("FLOOR", (165 * scale, 400 * scale, 215 * scale, 415 * scale), 0.95),
+                OcrRawToken("PLAN", (220 * scale, 400 * scale, 265 * scale, 415 * scale), 0.97),
+            ]
+
+        res0 = classify_page_in_drawing_outlined_captions_shadow(
+            p0,
+            source_sha256="b" * 64,
+            page_index=0,
+            render_dpis=(144, 216),
+            ocr_callable=_fake_ocr,
+        )
+        assert res0.status == "CORROBORATED"
+        assert res0.view_type == "floor_plan"
+        assert res0.shadow_only is True
+        assert res0.commercial_projection_allowed is False
+        assert calls == 2
+
+        res1 = classify_page_in_drawing_outlined_captions_shadow(
+            p1,
+            source_sha256="b" * 64,
+            page_index=1,
+            render_dpis=(144, 216),
+            ocr_callable=_fake_ocr,
+        )
+        assert res1.status == "ABSTAINED"
+        assert "outlined_text_body_not_suspected" in res1.reason_codes
+        assert calls == 2  # OCR never invoked for native-text page
+    finally:
+        doc.close()

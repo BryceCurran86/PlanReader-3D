@@ -11,11 +11,14 @@ from pb_source_floor_surface_wall_support_veto import (
 from pb_source_physical_room_ring_provenance_binder import (
     AMBIGUOUS_MULTIPLE_PHYSICAL_ROOM_RINGS_FOR_LABEL,
     NO_QUALIFYING_PHYSICAL_ROOM_RING_FOR_LABEL,
+    OPEN_PLAN_FINISH_ZONE_WITNESS_ONLY_NO_PHYSICAL_RING,
     ORIGINAL_SURFACE_WALL_SUPPORTED_RETAINED,
     PHYSICAL_ROOM_RING_PROVENANCE_REBOUND,
     RING_CONTAINS_MULTIPLE_DISTINCT_ROOM_LABELS,
+    RING_INSUFFICIENT_POSITIVE_WALL_SUPPORT,
     RING_STATUS_NOT_CANDIDATE,
     RoomProvenanceBindingCandidate,
+    SourceProvenFinishZoneWitness,
     bind_room_provenance_to_physical_rings_shadow,
 )
 
@@ -363,3 +366,79 @@ def test_ring_wall_support_check_receives_only_rings_own_closures() -> None:
     assert bindings[0].withheld is False
     assert bindings[0].bound_ring_record_id == "ring_own_closure"
     assert seen_closure_ids == [("cl_mine",)]
+
+
+def test_weak_25pct_ring_rejected_by_positive_support_threshold_and_open_zone_keeps_finish_witness_only() -> None:
+    def _weak_ring_pred(poly, drawings, closures=()):
+        if poly == PHYSICAL_RING:
+            # Only 1 of 4 edges supported (25% < 50% default positive threshold)
+            return SimpleNamespace(
+                edges=(
+                    SimpleNamespace(length=100.0, unsupported=0.0),
+                    SimpleNamespace(length=300.0, unsupported=300.0),
+                )
+            )
+        return _wall_predicate(poly, drawings, closures=closures)
+
+    weak_ring = SimpleNamespace(
+        record_id="ring_weak_25pct",
+        source_sha256=SHA,
+        page_index=6,
+        status=EvidenceResolutionStatus.CANDIDATE,
+        polygon_pdf_pts=PHYSICAL_RING,
+        area_pt2=28800.0,
+        wall_edge_count=1,
+        closure_edge_count=0,
+        bounding_closure_ids=(),
+        bounding_wall_path_indices=(1,),
+    )
+    cand_weak = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_grid_weak", "q_weak", GRID_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(25.0, 25.0),
+        explicit_area_m2=9.05352,
+    )
+    cand_open_fz = RoomProvenanceBindingCandidate(
+        surface=_surf("surf_open_fz", "q_open_fz", OPEN_CELL),
+        page_index=6,
+        room_label_anchor_pdf_pt=(315.0, 25.0),
+        explicit_area_m2=13.270425,
+    )
+    fz_witness = SourceProvenFinishZoneWitness(
+        witness_id="fz_witness_ft2",
+        surface_entity_id="surf_open_fz",
+        document_id="doc1",
+        revision_id="rev1",
+        source_sha256=SHA,
+        finish_code="FT2",
+        evidence_ids=("ev_sched_ft2", "ev_plan_ft2"),
+    )
+    bindings = bind_room_provenance_to_physical_rings_shadow(
+        candidates=(cand_weak, cand_open_fz),
+        physical_rings=(weak_ring,),
+        drawings=(),
+        wall_support_predicate=_weak_ring_pred,
+        expected_document_id="doc1",
+        expected_revision_id="rev1",
+        expected_source_sha256=SHA,
+        finish_zone_witnesses_by_surface_id={"surf_open_fz": fz_witness},
+    )
+    by_qid = {b.quantity_id: b for b in bindings}
+
+    # 1. Weak 25% ring fails positive support threshold (veto != positive selector)
+    b_weak = by_qid["q_weak"]
+    assert b_weak.withheld is True
+    assert b_weak.bound_ring_record_id is None
+    assert RING_INSUFFICIENT_POSITIVE_WALL_SUPPORT in b_weak.reason_codes
+
+    # 2. Open-plan zone keeps source-proven finish-zone witness strictly withheld (zero invented walls)
+    b_fz = by_qid["q_open_fz"]
+    assert b_fz.withheld is True
+    assert b_fz.status is EvidenceResolutionStatus.ABSTAINED
+    assert b_fz.bound_ring_record_id is None
+    assert b_fz.explicit_area_m2 is None
+    assert b_fz.bound_finish_zone_witness_id == "fz_witness_ft2"
+    assert b_fz.floor_finish_code == "FT2"
+    assert b_fz.floor_finish_evidence_ids == ("ev_sched_ft2", "ev_plan_ft2")
+    assert b_fz.commercial_authority_granted is False
+    assert OPEN_PLAN_FINISH_ZONE_WITNESS_ONLY_NO_PHYSICAL_RING in b_fz.reason_codes
