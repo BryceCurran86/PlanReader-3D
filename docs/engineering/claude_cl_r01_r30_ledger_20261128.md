@@ -19,7 +19,7 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R09 viewport crossing | C04 | validation | crossing primitives are left out of a viewport scope with a receipt, not clipped (main) | census of wall-like crossings on originals before any clip |
 | R10 external footprint first | C09 | validation | footprint-first traces in the live claim, inside-face envelope (main `e1cbd4cb5`, #4549); edge support (main #4650, off) | original proof across plan styles |
 | R11 garage closure | C10 | validation | `pb_source_garage_door_footprint_continuity` and envelope (main) | original proof |
-| R12 party walls | C11 | validation | dual-dwelling and shared-envelope shadows (main `e18553a1c`) | no dual-dwelling original proven |
+| R12 party walls | C11 | validation | dual-dwelling and shared-envelope shadows (main `e18553a1c`) | text scan of the local originals (28 Nov): the one clearly two-dwelling set has no floor plan, so nothing to prove it on yet |
 | R13 true junctions | C12 | validation | `crossing_wall_negative_shadow` (#4810, off) | originals before/after, signed rows |
 | R14 doorway closure | C13 | validation | doorway chords (main #4772/#4773, off), jamb returns (#4763), topology closures (main `5eaffeadb`) | authenticated thresholds on originals |
 | R15 angled/mirrored doors | C14 | validation | `angled_opening_precision_shadow` (#4810, off); originals additive only | signed parity; two Maryborough candidates unproven |
