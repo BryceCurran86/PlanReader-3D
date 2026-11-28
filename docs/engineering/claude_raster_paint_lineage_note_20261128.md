@@ -38,5 +38,11 @@ stays whole; drawn lines and text are never seen. Default off: segments, identit
 vectors (scans) or without pictures are unaffected; the opening-local supplemental families are unchanged. Replay on the
 originals required before any promotion.
 
+## Gate result (2026-11-28): fails, replay not run
+The detector's Otsu threshold depends on the whole image, so picture detection now classifies with the full render's
+threshold; near the failing rooms its segments are then identical to today's apart from two letter pieces. Lot16 sheet 3
+still goes 61 to 53 rooms (WC and LINEN lost): a 78.5 pt picture segment present identically with the option does not
+become a wall, so wall building depends on unrelated segments elsewhere. That needs its own design before any replay.
+
 ## Must not influence
 Any wall count or quantity expectation. Originals: counts only, before any use.
