@@ -100,37 +100,57 @@ def _same_circle(a: dict, b: dict) -> bool:
     return math.dist(a["centre"], b["centre"]) <= _FIT_PT and abs(a["radius"] - b["radius"]) <= _FIT_PT
 
 
-def _arcs(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[dict], list[tuple[Point, Point]]]:
-    """Whole arcs (same circle, same ink merged) and every straight stroke (for the door test)."""
-    arcs: list[dict] = []
-    strokes: list[tuple[Point, Point]] = []
+def _cell(point: Point) -> tuple[int, int]:
+    return math.floor(point[0] / _FIT_PT), math.floor(point[1] / _FIT_PT)
+
+
+def _around(index: Mapping[tuple[int, int], list], point: Point):
+    cx, cy = _cell(point)
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            yield from index.get((cx + dx, cy + dy), ())
+
+
+def _arcs(drawings: Sequence[Mapping[str, Any]]) -> tuple[list[dict], dict]:
+    """Whole arcs (same circle, same ink merged) and the straight strokes indexed by end (for the door test)."""
+    pieces: list[dict] = []
+    strokes: dict[tuple[int, int], list[tuple[Point, Point]]] = {}
     for index, row in enumerate(drawings):
         if not isinstance(row, Mapping) or row.get("color") is None:
             continue
         ink = tuple(round(float(v), 3) for v in row["color"])
         for item in row.get("items") or ():
             if item[0] == "l":
-                strokes.append((_xy(item[1]), _xy(item[2])))
+                a, b = _xy(item[1]), _xy(item[2])
+                strokes.setdefault(_cell(a), []).append((a, b))
+                strokes.setdefault(_cell(b), []).append((b, a))
             if item[0] != "c":
                 continue
             piece = _fit(item)
-            if piece is None:
-                continue
-            for arc in arcs:
-                if arc["ink"] == ink and _same_circle(arc, piece):
-                    arc["spans"] += piece["spans"]
-                    arc["ends"] += piece["ends"]
-                    arc["paths"].add(index)
-                    break
-            else:
-                arcs.append({**piece, "ink": ink, "paths": {index}})
+            if piece is not None:
+                pieces.append({**piece, "ink": ink, "paths": {index}})
+    # Merged in geometry order, so drawing order cannot change which circle a piece joins.
+    pieces.sort(key=lambda p: (p["ink"], round(p["centre"][0], 3), round(p["centre"][1], 3), round(p["radius"], 3),
+                               round(p["spans"][0][0], 3)))
+    arcs: list[dict] = []
+    centres: dict[tuple[int, int], list[dict]] = {}
+    for piece in pieces:
+        for arc in _around(centres, piece["centre"]):
+            if arc["ink"] == piece["ink"] and _same_circle(arc, piece):
+                arc["spans"] += piece["spans"]
+                arc["ends"] += piece["ends"]
+                arc["paths"] |= piece["paths"]
+                break
+        else:
+            arcs.append(piece)
+            centres.setdefault(_cell(piece["centre"]), []).append(piece)
     return arcs, strokes
 
 
-def _door_swing(arc: dict, strokes: Sequence[tuple[Point, Point]]) -> bool:
+def _door_swing(arc: dict, strokes: Mapping[tuple[int, int], list]) -> bool:
     return any(
         math.dist(near, arc["centre"]) <= _FIT_PT and math.dist(far, end) <= _FIT_PT
-        for a, b in strokes for near, far in ((a, b), (b, a)) for end in arc["ends"]
+        for near, far in _around(strokes, arc["centre"]) for end in arc["ends"]
     )
 
 
@@ -138,12 +158,15 @@ def curved_wall_pairs(drawings: Sequence[Mapping[str, Any]]) -> list[dict]:
     """Report-only curved wall pairs, in a stable order. Inputs are never mutated."""
     arcs, strokes = _arcs(drawings)
     arcs.sort(key=lambda a: (round(a["centre"][0], 3), round(a["centre"][1], 3), round(a["radius"], 3), a["ink"]))
-    for arc in arcs:
+    centres: dict[tuple[int, int], list[int]] = {}
+    for position, arc in enumerate(arcs):
         arc["covered"] = _intervals(arc["spans"])
+        centres.setdefault(_cell(arc["centre"]), []).append(position)
     found = []
     for i, inner in enumerate(arcs):
-        for outer in arcs[i + 1:]:
-            if inner["ink"] != outer["ink"] or math.dist(inner["centre"], outer["centre"]) > _FIT_PT:
+        for j in sorted(_around(centres, inner["centre"])):
+            outer = arcs[j]
+            if j <= i or inner["ink"] != outer["ink"] or math.dist(inner["centre"], outer["centre"]) > _FIT_PT:
                 continue
             low, high = sorted((inner, outer), key=lambda a: a["radius"])
             thickness = high["radius"] - low["radius"]
@@ -159,7 +182,7 @@ def curved_wall_pairs(drawings: Sequence[Mapping[str, Any]]) -> list[dict]:
             status, reason = EvidenceResolutionStatus.CANDIDATE, REASON_PAIR
             if any(other is not low and other is not high and math.dist(other["centre"], low["centre"]) <= _FIT_PT
                    and low["radius"] - _DARK_FILL_THICK_MAX <= other["radius"] <= high["radius"] + _DARK_FILL_THICK_MAX
-                   for other in arcs):
+                   for other in (arcs[k] for k in _around(centres, low["centre"]))):
                 status, reason = EvidenceResolutionStatus.ABSTAINED, REASON_RINGS
             elif _door_swing(low, strokes) or _door_swing(high, strokes):
                 status, reason = EvidenceResolutionStatus.ABSTAINED, REASON_DOOR
