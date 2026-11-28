@@ -22,24 +22,21 @@ ink; if they are not, and native line segments cover it within the render's pixe
   90%), `image_and_vector` (both at least 90%), else `unattributed`.
 It names no new identities and changes nothing. Segments and lines must be in the same page frame.
 
-## Opt-in producer filter (shadow, 2026-11-28)
-Measured on Lot16 sheet 3: 1,890 of 1,997 unattributed segments lie inside native word boxes (glyph strokes), and 1,542 of
-2,094 wall candidates are made only of such strokes. `SourceVisibilityProducer(raster_image_paint_only_shadow=True)`: on a
-page with native visible vectors and images, an image-region raster segment is kept only when its ink is in the images-only
-render. Default off: segments, identities and receipts unchanged. Pages without vectors (scans) or without images are not
-affected. Segment indices (so raster ids) differ when on.
-
-Measured (one plan sheet per original, off to on): Lot16 candidates 2,094 to 320, published 59 to 24 (33 of today's 59 are
-letter strokes; no published native wall lost, 3 more publish), ambiguous 2,035 to 296; Maryborough candidates 3,737 to
-3,598, published 442 to 439 (its one picture covers 0.5% of the page); 3Laurel and Q5446 identical. Openings, rooms,
-quantities, other sheets and a signed-row replay are not checked.
-
 ## Signed-row replay result (2026-11-28): NOT SAFE TO PROMOTE
 All 65 signed rows kept the same values and Maryborough's three floor rooms were identical, but Lot16 sheet 3 lost 10 rooms
 including a WC and a LINEN cupboard whose walls exist only in the page's picture: where line work drawn over the picture
 extends a picture line, the full-render segment is partly outside the picture and the filter drops it whole. Next design:
 detect the primary raster family on the images-only render (picture ink stays whole, overlaid text and lines are never
 seen), check receipt binding, and repeat the replay.
+
+## Opt-in picture-only detection (shadow, 2026-11-28, replaces the filter; MAX 7230726656)
+`SourceVisibilityProducer(raster_picture_detection_shadow=True)`: on a page with native visible vectors AND embedded
+pictures, the primary raster family is detected on the producer's images-only render (kept inside picture regions as
+before). Each segment's ref carries that render's SHA-256 and the identity version `picture-1.0.0`, so receipts bind to
+the render that produced them and cannot be confused with full-render segments. A picture line continued by a drawn line
+stays whole; drawn lines and text are never seen. Default off: segments, identities and receipts unchanged; pages without
+vectors (scans) or without pictures are unaffected; the opening-local supplemental families are unchanged. Replay on the
+originals required before any promotion.
 
 ## Must not influence
 Any wall count or quantity expectation. Originals: counts only, before any use.

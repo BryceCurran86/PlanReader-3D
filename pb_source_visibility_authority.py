@@ -124,6 +124,8 @@ RASTER_OPENING_PRIMITIVE_IDENTITY_VERSION = "2.0.0"
 # when the producer-owned detected geometry is unchanged. Keep this value
 # stable unless the physical identity contract itself is intentionally migrated.
 RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION = "1.0.0"
+# Segments detected on the images-only render (opt-in); the ref's render hash is that render's.
+RASTER_PICTURE_SEGMENT_IDENTITY_VERSION = "picture-1.0.0"
 # Raster detector and native image-region geometry are emitted to four decimal
 # page-point precision. One least-significant unit is the only ownership slack.
 _RASTER_GEOMETRY_QUANTIZATION_TOLERANCE_PT = 1e-4
@@ -782,7 +784,8 @@ def _raster_segment_receipt_matches_parent(
         if len(parts) == 4:
             prefix, render_sha, identity_version, index = parts
             if (receipt.dpi != RASTER_RENDER_DPI
-                    or identity_version != RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION
+                    or identity_version not in (RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
+                                               RASTER_PICTURE_SEGMENT_IDENTITY_VERSION)
                     or receipt.visibility_render_sha256 is not None):
                 return False
         elif len(parts) == 5:
@@ -1099,10 +1102,10 @@ class SourceVisibilityProducer:
                  raster_corner_framed_opening_shadow: bool = False,
                  angled_opening_precision_shadow: bool = False,
                  crossing_wall_negative_shadow: bool = False,
-                 raster_image_paint_only_shadow: bool = False) -> None:
-        if type(raster_image_paint_only_shadow) is not bool:
-            raise ValueError("raster image paint only shadow must be explicit boolean")
-        self._raster_image_paint_only_shadow = raster_image_paint_only_shadow
+                 raster_picture_detection_shadow: bool = False) -> None:
+        if type(raster_picture_detection_shadow) is not bool:
+            raise ValueError("raster picture detection shadow must be explicit boolean")
+        self._raster_picture_detection_shadow = raster_picture_detection_shadow
         if type(crossing_wall_negative_shadow) is not bool:
             raise ValueError("crossing wall negative shadow must be explicit boolean")
         self._crossing_wall_negative_shadow = crossing_wall_negative_shadow
@@ -2914,6 +2917,9 @@ class SourceVisibilityProducer:
             if page_id in pages_with_visible and not image_regions:
                 continue
 
+            # Opt-in: on a page with line work AND pictures, line work and text drawn over a picture already have native
+            # observations, so picture walls are detected on the picture alone (never on the full render).
+            picture_only = bool(self._raster_picture_detection_shadow and image_regions and page_id in pages_with_visible)
             png_bytes, page_parent = self._producer.render_native_page_png(
                 document_id=published.revision.document_id,
                 revision_id=published.revision.revision_id,
@@ -2921,6 +2927,7 @@ class SourceVisibilityProducer:
                 snapshot_id=snapshot.snapshot_id,
                 page_id=page_id,
                 dpi=float(RASTER_RENDER_DPI),
+                **({"images_only": True} if picture_only else {}),
             )
             image_sha256 = hashlib.sha256(png_bytes).hexdigest()
             segments = detect_axis_aligned_raster_segments(
@@ -2938,22 +2945,6 @@ class SourceVisibilityProducer:
                         segment.geometry_pt, image_regions
                     )
                 )
-                if self._raster_image_paint_only_shadow:
-                    # Line work and text drawn over a picture already have native observations (shadow, default off).
-                    from pb_raster_segment_paint_lineage_shadow import segments_painted_in
-
-                    picture_png = self._producer.render_native_page_png(
-                        document_id=published.revision.document_id,
-                        revision_id=published.revision.revision_id,
-                        source_sha256=published.revision.source_sha256,
-                        snapshot_id=snapshot.snapshot_id,
-                        page_id=page_id,
-                        dpi=float(RASTER_RENDER_DPI),
-                        images_only=True,
-                    )[0]
-                    painted = segments_painted_in(
-                        picture_png, [segment.geometry_pt for segment in segments], dpi=RASTER_RENDER_DPI)
-                    segments = tuple(segment for segment, kept in zip(segments, painted) if kept)
             # Visibility publishes each proven source-owned primitive regardless
             # of whether enough neighbouring primitives exist to prove a wall or
             # opening. Object-completeness gates belong downstream. Re-sort using
@@ -2973,7 +2964,8 @@ class SourceVisibilityProducer:
             # Supplemental geometry has its own frozen identity namespace;
             # existing ordinary render geometry and index order stay intact.
             families = [(segments, image_sha256, RASTER_RENDER_DPI,
-                         RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
+                         RASTER_PICTURE_SEGMENT_IDENTITY_VERSION if picture_only
+                         else RASTER_VISIBLE_SEGMENT_IDENTITY_VERSION,
                          RASTER_VISIBLE_SEGMENT_DETECTOR_VERSION, None)]
             if image_regions and published.raster_opening_primitive_observation_ids:
                 # Source nomination is limited to the complete independently

@@ -2,9 +2,8 @@
 
 See docs/engineering/claude_raster_paint_lineage_note_20261128.md. A segment whose pixels are in the producer's
 images-only render is image ink; one whose pixels are not, but which native line segments cover within the render's pixel
-size, is those lines' ink (all of them listed, none chosen). It names no new identities and changes nothing; the only
-live-module import is the visibility producer's default-off ``raster_image_paint_only_shadow``. Segments and native lines
-must be given in the same page frame.
+size, is those lines' ink (all of them listed, none chosen). It names no new identities and changes nothing, and no live
+path imports it. Segments and native lines must be given in the same page frame.
 """
 from __future__ import annotations
 
@@ -35,13 +34,6 @@ def _image_share(mask: np.ndarray | None, geometry, pixels_per_point: float) -> 
     xs = np.clip(np.round(np.linspace(x0, x1, count)).astype(int), 0, mask.shape[1] - 1)
     ys = np.clip(np.round(np.linspace(y0, y1, count)).astype(int), 0, mask.shape[0] - 1)
     return float(np.count_nonzero(mask[ys, xs])) / count
-
-
-def segments_painted_in(images_only_png: bytes, geometries: Sequence[Sequence[float]], *, dpi: int) -> list[bool]:
-    """Is each segment's ink in this images-only render? (Same test as the ``image_ink`` classification.)"""
-    pixels_per_point = float(dpi) / 72.0
-    mask = _image_mask(images_only_png)
-    return [_image_share(mask, geometry, pixels_per_point) >= _PRESENT for geometry in geometries]
 
 
 def _native_cover(orientation: str, geometry, native_lines, pixel_pt: float) -> tuple[float, list[str]]:
