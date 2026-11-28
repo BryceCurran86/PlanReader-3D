@@ -723,6 +723,7 @@ def build_wall_graph_for_viewport(
     complete_link_snap_shadow: bool = False,
     retain_native_clip_sequence_shadow: bool = False,
     order_free_snap_shadow: bool = False,
+    retain_leaf_fragments_shadow: bool = False,
 ) -> Dict[str, Any]:
     """Run the full Stage A pipeline for one viewport's already-scoped segments.
 
@@ -746,6 +747,10 @@ def build_wall_graph_for_viewport(
     ``order_free_snap_shadow`` (default off) decides the endpoint snap from the
     geometry alone, so input order and stubs no longer than the tolerance cannot
     move a corner (pb_wall_room_topology_order_free_snap_shadow). Shadow only.
+
+    ``retain_leaf_fragments_shadow`` (default off) also returns each split
+    fragment's own endpoints and source ids before snapping, for the report-only
+    lineage identity (pb_wall_lineage_identity_shadow). Nothing else changes.
     """
     if type(partition_exact_collinear_overlaps_shadow) is not bool:
         raise ValueError("exact collinear partition shadow must be explicit boolean")
@@ -782,6 +787,8 @@ def build_wall_graph_for_viewport(
         # opposite question for zero tolerance. They act on the same W2 source
         # scope and have never been exercised together, so they stay exclusive.
         raise ValueError("complete link snap shadow is exclusive with the exact source-incidence shadows")
+    if type(retain_leaf_fragments_shadow) is not bool:
+        raise ValueError("leaf fragment retention shadow must be explicit boolean")
     if type(order_free_snap_shadow) is not bool:
         raise ValueError("order-free snap shadow must be explicit boolean")
     if order_free_snap_shadow and (
@@ -841,6 +848,16 @@ def build_wall_graph_for_viewport(
         )
     if order_free_snap_shadow:
         merged_graph["order_free_snap_shadow"] = snapped_graph["order_free_snap_shadow"]
+    if retain_leaf_fragments_shadow:
+        merged_graph["leaf_fragments_shadow"] = {
+            str(fragment.get("id")): {
+                "points": (fragment.get("x1"), fragment.get("y1"), fragment.get("x2"), fragment.get("y2")),
+                "source_primitive_ids": tuple(
+                    (fragment.get(LINEAGE_KEY) or {}).get("source_primitive_ids") or ()
+                ),
+            }
+            for fragment in split_segment_dicts
+        }
     # Explicit opt-in diagnostic only. This is an observational source
     # provenance ledger; it never changes the wall graph or creates hosts.
     if audit_short_source:

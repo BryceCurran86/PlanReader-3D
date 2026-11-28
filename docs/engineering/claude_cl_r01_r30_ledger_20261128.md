@@ -13,7 +13,7 @@ item: `claude_c01_c30_ledger_20261127.md`. No new verified benchmark match is cl
 | R05 Office doorway closure | C08 | PARTIAL | report | real Office ring via `door_jamb_returns`; union shadow keeps WSH/DRY; not wired |
 | R06 Food Prep open plan | C22 | NOT STARTED | | |
 | R07 inside-face rings and identities | C06–C08 | PARTIAL | report | ring builder candidates; edge-to-wall links ambiguous on Maryborough |
-| R08 source-lineage wall identity | new | PARTIAL | report | design and offline measurement; module in progress |
+| R08 source-lineage wall identity | new | PARTIAL | report | `pb_wall_lineage_identity_shadow` built with vetoes (synthetic); offline: whole chains not enough for hosts; no live caller |
 | R09 viewport crossing | C04 | NOT STARTED | | |
 | R10 external footprint first | C09 | NOT STARTED | | |
 | R11 garage closure | C10 | NOT STARTED | | |

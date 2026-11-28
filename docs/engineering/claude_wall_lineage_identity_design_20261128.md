@@ -45,5 +45,16 @@ ids, 6 more keep their lineage, 36 differ, mostly because the snap changes where
 lose some, 3 overlap, 2 other). So whole-chain lineage is not enough for hosts: host evidence would need the source
 pieces at the jambs, a further design step if MAX wants it.
 
+## Built (28 Nov, report only)
+`pb_wall_lineage_identity_shadow.wall_lineage_identities` (`wall-lineage-1.0.0`) with the opt-in
+`retain_leaf_fragments_shadow` on `build_wall_graph_for_viewport` (adds only the pieces' own endpoints and source ids).
+Synthetic tests: moved corner keeps the id; membership and viewport change it; short pieces ignored; vetoes for missing
+edge, piece or ancestry, no long piece, shared piece; order and direction invariance; minus zero; no mutation. No live
+caller; nothing existing changes.
+
+Observed while building: intersections can yield -0.0, and `stable_contract_id` hashes it apart from 0.0. The existing
+`canonical_path_fingerprint` (assembly wall ids) keeps -0.0 too, so those ids can depend on input order at such points.
+Not changed here (it would rename walls); for MAX.
+
 ## Not authority
 No wall, host, opening, measurement or quantity authority; no threshold other than the existing snap tolerance.
