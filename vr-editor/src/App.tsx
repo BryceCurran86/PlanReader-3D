@@ -16,6 +16,8 @@ import {captureAlternative,restoreAlternative} from "./vrDesignReview";
 import type {DesignAlternative} from "./vrDesignReview";
 import { ConstructionView, ConstructionLayerPanel, StandardsPanel } from "./ConstructionView";
 import {ArchitecturalPlan} from "./ArchitecturalPlanPanel";
+import {DEFAULT_FENCE,FENCE_STYLES,validSiteBounds,validFence} from "./siteFence";
+import type {FenceSettings,SiteBounds,FenceStyle} from "./siteFence";
 import type {LiningBoard} from "./constructionLiningVisual";
 import type {LayerOverrides} from "./constructionLayers";
 import {itemLayerVisible,itemLayer} from "./constructionLayers";
@@ -106,6 +108,7 @@ export function App() {
   const [reviewNotes, setReviewNotes] = useState<ReviewNotesState | null>(null);
   const [level, setLevel] = useState("all");
   const [outdoor,setOutdoor]=useState(true);
+  const [siteStore,setSiteStore]=useState<{scene:SceneManifest;bounds:SiteBounds|null;fence:FenceSettings}|null>(null);
   const [lightingMood, setLightingMood] = useState<LightingMood>("daylight");
   const [previewLights,setPreviewLights]=useState(true);
   const [renderQuality, setRenderQuality] = useState<RenderQuality>("balanced");
@@ -325,6 +328,10 @@ export function App() {
   const isDemo = manifest !== null && manifest === demoScene;
   const isStarter=!!manifest&&manifest===starterScene;
   const baseFootprint = useMemo(() => manifest && (isStarter?starterBounds(buildState.walls):footprintBounds(manifest, isDemo)), [manifest, isDemo,isStarter,buildState.walls]);
+  const site=siteStore&&siteStore.scene===manifest?siteStore:null;
+  const siteBounds=site?.bounds??null;
+  const fence=site?.fence??DEFAULT_FENCE;
+  function editSite(bounds:SiteBounds|null,nextFence=fence){if(manifest&&(!bounds||validSiteBounds(bounds))&&validFence(nextFence))setSiteStore({scene:manifest,bounds,fence:nextFence});}
   const scopedResize = resize?.scene === manifest ? resize : null;
   const projection = scopedResize?.projection ?? null;
   const studyGeometry=useMemo(()=>projection?{walls:buildState.walls.map(w=>projectWall(w,projection)),ceilings:buildState.ceilings.map(w=>projectCeiling(w,projection))}:{walls:buildState.walls,ceilings:buildState.ceilings},[projection,buildState.walls,buildState.ceilings]);
@@ -810,6 +817,17 @@ export function App() {
             {!resizeEnabled && <button type="button" onClick={resetFootprint}>Return to source size</button>}
           </p>}
 
+          <details className="footprint-tools"><summary>Property boundary &amp; visual fence</summary>
+            <p>Manual site outline only, not a verified survey. Coordinates are model metres; the land does not resize with the dwelling.</p>
+            {!siteBounds?<button type="button" disabled={!baseFootprint} onClick={()=>{if(baseFootprint)editSite({minX:baseFootprint.minX-3,maxX:baseFootprint.maxX+3,minZ:baseFootprint.minZ-3,maxZ:baseFootprint.maxZ+3});}}>Create illustrative boundary (3 m around building)</button>:<>
+              {([["minX","Left boundary X"],["maxX","Right boundary X"],["minZ","Front boundary Z"],["maxZ","Rear boundary Z"]] as const).map(([key,label])=><label key={key}>{label} (m)<input type="number" step=".1" key={siteBounds[key]} defaultValue={siteBounds[key]} onBlur={e=>{const n=e.currentTarget.valueAsNumber;editSite({...siteBounds,[key]:n});}}/></label>)}
+              <p>Draft site: {(siteBounds.maxX-siteBounds.minX).toFixed(2)} × {(siteBounds.maxZ-siteBounds.minZ).toFixed(2)} m · {((siteBounds.maxX-siteBounds.minX)*(siteBounds.maxZ-siteBounds.minZ)).toFixed(2)} m²</p>
+              <button type="button" onClick={()=>editSite(null)}>Hide boundary</button></>}
+            <label>Fence style <select value={fence.style} onChange={e=>editSite(siteBounds,{...fence,style:e.currentTarget.value as FenceStyle})}>{FENCE_STYLES.map(style=><option key={style} value={style}>{({timber:"Timber",colorbond:"COLORBOND",block:"Exposed blockwork",rendered:"Rendered blockwork"})[style]}</option>)}</select></label>
+            <label>Fence height (m)<input type="number" min=".6" max="3" step=".1" key={fence.heightM} defaultValue={fence.heightM} onBlur={e=>editSite(siteBounds,{...fence,heightM:e.currentTarget.valueAsNumber})}/></label>
+            <label>Fence colour<input type="color" value={fence.color} onChange={e=>editSite(siteBounds,{...fence,color:e.currentTarget.value})}/></label>
+            <p>Visual only; no structural specification or certified quantities. Session settings are not included in saved draft files.</p>
+          </details>
           {buildLevel && <LocalOutlinePanel key={scopeKey(manifest)+":"+buildLevel}
             walls={buildState.walls.filter(w=>w.levelId===buildLevel&&w.scopeKey===scopeKey(manifest))}
             blocked={!!(projection||resizeEnabled||catalogue?.draft.items.length||catalogue?.draft.history.length||catalogue?.draft.future?.length)}
@@ -846,7 +864,7 @@ export function App() {
               <SceneView manifest={manifest} isSceneLoading={()=>pendingLoad.current!==null} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
-                outdoor={outdoor} onOutdoor={setOutdoor} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
+                outdoor={outdoor} onOutdoor={setOutdoor} siteBounds={siteBounds} fence={fence} mood={lightingMood} onMood={setLightingMood} previewLights={previewLights} onPreviewLights={setPreviewLights} quality={renderQuality} onQuality={setRenderQuality} detail={surfaceDetail} inspection={inspection}
                 cameraRequest={cameraRequest} captureSerial={captureSerial} onCapture={setCaptureStatus}
                 mode={mode} canUndo={canUndo} canRedo={canRedo} onHistory={stepHistory} onDone={cancelTool}
                 moveMode={canMoveSource ? moveMode : "inspect"} wallMoveState={activeWallMoves} onMoveDelta={handleMoveDelta}
