@@ -1,4 +1,4 @@
-"""Order-independent wall-equivalence candidacy, default on (#4764 7214194403, geometry task C03). Synthetic only."""
+"""Order-independent wall-equivalence candidacy, default off (#4764 7211359981, geometry task C03). Synthetic only."""
 from __future__ import annotations
 
 import itertools
@@ -43,13 +43,10 @@ def test_the_overlap_test_itself_depends_on_argument_order():
     assert forward == (False, identity.PAIR_EXCLUDED_NO_LONGITUDINAL_OVERLAP) and backward == (True, None)
 
 
-def test_the_default_is_order_independent_and_false_restores_the_old_test():
+def test_default_behaviour_is_unchanged_and_order_dependent():
     long, short = _pair()
-    assert resolve_physical_wall_equivalence([long, short]) == resolve_physical_wall_equivalence([short, long])
-    assert resolve_physical_wall_equivalence([long, short]).representative_wall_ids == ()
-    old = dict(order_invariant_candidacy_shadow=False)
-    assert resolve_physical_wall_equivalence([long, short], **old).representative_wall_ids == ("w-a", "w-b")
-    assert resolve_physical_wall_equivalence([short, long], **old).representative_wall_ids == ()
+    assert resolve_physical_wall_equivalence([long, short]).representative_wall_ids == ("w-a", "w-b")
+    assert resolve_physical_wall_equivalence([short, long]).representative_wall_ids == ()
 
 
 @pytest.mark.parametrize("kwargs", [{}, {"swap_ids": True}, {"dx": 412.5, "dy": -77.25}, {"scale": 2.0}],
@@ -61,7 +58,7 @@ def test_the_option_gives_one_demotion_only_answer_in_either_order(kwargs):
     assert forward == backward
     assert forward.representative_wall_ids == () and set(forward.ambiguous_wall_ids) == {"w-a", "w-b"}
     for order in ([long, short], [short, long]):
-        historical = resolve_physical_wall_equivalence(order, order_invariant_candidacy_shadow=False).representative_wall_ids
+        historical = resolve_physical_wall_equivalence(order).representative_wall_ids
         assert set(forward.representative_wall_ids) <= set(historical)
 
 
@@ -88,8 +85,8 @@ def test_every_input_order_gives_the_same_resolution_with_the_option():
 def test_the_option_changes_nothing_when_no_pair_depends_on_order():
     walls = _mixed()[2:]
     for order in (walls, walls[::-1]):
-        assert (resolve_physical_wall_equivalence(order, order_invariant_candidacy_shadow=False)
-                == resolve_physical_wall_equivalence(order))
+        assert (resolve_physical_wall_equivalence(order)
+                == resolve_physical_wall_equivalence(order, order_invariant_candidacy_shadow=True))
 
 
 def test_inputs_are_not_mutated_and_the_option_must_be_a_boolean():

@@ -1078,7 +1078,7 @@ def resolve_physical_wall_equivalence(
     *,
     walls_by_id: Optional[Mapping[str, WallCandidate]] = None,
     points_per_mm: Optional[float] = None,
-    order_invariant_candidacy_shadow: bool = True,
+    order_invariant_candidacy_shadow: bool = False,
 ) -> PhysicalWallEquivalenceResolution:
     """Reconcile ALL competing candidates via SAME/DISTINCT/AMBIGUOUS components.
 
@@ -1089,9 +1089,9 @@ def resolve_physical_wall_equivalence(
     The longitudinal-overlap candidacy test projects onto the FIRST wall's axis,
     so near-parallel pairs can compete in one argument order and not the other,
     and input order (which follows snapshot-derived ids) changes the verdicts.
-    With ``order_invariant_candidacy_shadow`` (default on; False restores the
-    order-dependent test) a pair competes when either order says so: a superset of
-    both orders' competitors, so it can only withhold publication, never add it.
+    ``order_invariant_candidacy_shadow`` (default off) lets a pair compete when
+    either order says so: a superset of both orders' competitors, so it can only
+    withhold publication, never add it.
     """
     if type(order_invariant_candidacy_shadow) is not bool:
         raise TypeError("order invariant candidacy shadow must be an explicit boolean")
