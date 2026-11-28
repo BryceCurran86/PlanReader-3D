@@ -51,10 +51,18 @@ Picture detection plus this option, through the all-source-role handoff, off the
 - 139 customer rows keep every value, element, page and status, but Lot16's nine rows and 58 3Laurel rows change evidence
   ids: both settings rename host walls. The snap alone gives 13 of 22 Lot16 sheet-3 openings new host-wall ids (member
   walls moving at most 0.5 pt) and one opening loses its host.
-- Maryborough floor areas (live claim): the snap alone loses the cold room outline and its area, and an area appears on a
-  single floor-grid cell.
-So the snap changes which outlines close well beyond the sheet-3 gate, and wall identity by exact coordinates cannot
-survive it. Next: trace the lost outline; identity by source-primitive lineage (design first).
+- Maryborough floor areas (live claim): the snap alone drops the cold room's area, and an area appears on a single
+  floor-grid cell.
+So the snap changes outlines well beyond the sheet-3 gate, and wall identity by exact coordinates cannot survive it.
+
+### Cold room trace (correction)
+The outline is not lost: it still forms (97% the same) but the ring crosses itself, so `geometry_complete` is False and no
+area route can use it. First divergent stage is the W2 snap at a corner of thin double-line walls (faces 2.2–2.4 pt apart,
+inside the 2.5 pt tolerance): the option joins the closest pair first, across one wall; today's order joined the other
+way. Today's node there also depends on order (6 positions over 12 shuffles of the same pieces). Where the tolerance
+exceeds a wall's thickness, any endpoint snap decides which faces to join; a design candidate is to never join
+endpoints across parallel offset faces. Identity by source-primitive lineage: see
+`claude_wall_lineage_identity_design_20261128.md`.
 
 ## Not authority
 Changes node positions and joins on every page it is switched on for (about one node in ten on Lot16 sheet 3 versus the
