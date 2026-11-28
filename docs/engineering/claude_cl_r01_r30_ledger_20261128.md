@@ -23,14 +23,14 @@ benchmark match is claimed. Earlier detail: `claude_c01_c30_ledger_20261127.md`.
 | R13 true junctions | C12 | validation | `crossing_wall_negative_shadow` (#4810, off) | originals before/after, signed rows |
 | R14 doorway closure | C13 | validation | doorway chords (main #4772/#4773, off), jamb returns (#4763), topology closures (main `5eaffeadb`) | authenticated thresholds on originals |
 | R15 angled/mirrored doors | C14 | validation | `angled_opening_precision_shadow` (#4810, off); originals additive only | signed parity; two Maryborough candidates unproven |
-| R16 cavity sliders and robes | C15 | validation | cavity slider jamb shadows and internal door census (main `353902bbb`, #4637/#4639) | push/pull vs slider on originals |
+| R16 cavity sliders and robes | C15 | validation | cavity slider jamb shadows and internal door census (main `353902bbb`, #4637/#4639), used by the preview and door review; 77 tests pass (28 Nov) | reads explicit internal-wall layer names only; originals without them abstain |
 | R17 exterior window hosts | C16 | validation | window footprint continuity and external opening census (main `e0130c180`) | sill/head handoff from AG |
 | R18 corner stacker and external doors | C17 | missing (donor) | stacker readiness shadow (main); draft #4751 (MAX branch: 7 production lines re-applying the #4522 corner-frame change) not merged | MAX to say who ports it (host/frame also listed in MAX's lane) |
-| R19 3Laurel openings | C18 | missing (binding) | door donor A on main (#4639); piece B (in-swing figured width, shadow) recovered into #4810 (28 Nov); piece C's single-host nomination withdrawn (two-wall rule); D waits (layer name), E needs promotion review | 18 internal items unbound; C' receipt diagnostics; two-wall adapter |
+| R19 3Laurel openings | C18 | missing (binding) | door donor A on main (#4639); piece B (in-swing figured width, shadow) recovered into #4810 (28 Nov); piece C's single-host nomination withdrawn (two-wall rule), its read-only receipt gate diagnostics (C') ported (28 Nov); D waits (layer name), E needs promotion review | 18 internal items unbound; two-wall adapter |
 | R20 opening widths and heights | C19 | validation | figured-label opening quantities (live); schedule binding (#4810 C01) | schedule/elevation reconciliation with AG |
 | R21 jamb caps and returns | C20 | validation | `jamb_caps_must_be_wall_ends` and returns (main #4763, off) | originals positives/negatives |
 | R22 Lot16 stub candidates | C21 | proven (diagnostic) / validation (retention) | one rule explains 125 → 189; contested candidates now retained for audit (`visible_contested_candidate_groups`, synthetic) | read them on the originals |
-| R23 Lot16 raster wall lineage | C26 | validation | paint lineage classifier (#4810) | room edges by source |
+| R23 Lot16 raster wall lineage | C26 | validation | paint classifier (#4810); 28 Nov: WC and LINEN walls are raster only, 48–63% picture ink, rest mixed, none vector ink | picture-side lineage is the only lineage; no native path ids to claim |
 | R24 holes and exclusions | C23 | validation | `pb_room_face_hole_report_shadow` (#4810) | classify with AG semantics |
 | R25 Q5446 finished faces | C24 | validation | finished interior face recovery shadow (main `a05df3bb5`) | BATH/LIVING on the original |
 | R26 curved and stepped walls | C25 | missing (curved) | skew/curve hardening of footprints (main `74d5db2d9`); wall candidates take straight pieces only | curved extraction |
