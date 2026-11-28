@@ -879,7 +879,7 @@ export function App() {
           {toolMessage && <span className="sr-only" role="status">{toolMessage}</span>}
 
           <div className="viewport">
-            {planPreview?<ArchitecturalPlan scene={manifest} build={buildState} level={level} visible={visibleIds} projection={projection} moves={activeWallMoves?safeWallMoves(activeWallMoves,manifest):[]} extra={[...activeBatchSketches,...(activeAddedWallSketch?[activeAddedWallSketch]:[])]} shell={shell} onEdit={onBuildAction} onSelect={setDraftSelection} blocked={mode!=="inspect"||resizeEnabled||!buildLevel}/>:<Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
+            {planPreview?<ArchitecturalPlan scene={manifest} build={buildState} level={level} visible={visibleIds} projection={projection} moves={activeWallMoves?safeWallMoves(activeWallMoves,manifest):[]} extra={[...activeBatchSketches,...(activeAddedWallSketch?[activeAddedWallSketch]:[])]} shell={shell} slabs={independentSlabs} onSlabEdit={next=>{if(validSlab(next))setSlabStore({scene:manifest,slabs:independentSlabs.map(v=>v.id===next.id?next:v)});}} onEdit={onBuildAction} onSelect={setDraftSelection} blocked={mode!=="inspect"||resizeEnabled||!buildLevel}/>:<Suspense fallback={<div className="scene-loading" role="status">Loading 3D viewer…</div>}>
               <SceneView manifest={manifest} isSceneLoading={()=>pendingLoad.current!==null} visibleIds={visibleIds} level={level} levels={levels} onLevel={changeLevel}
                 selectedId={selected?.objectId ?? null} draftPickKind={draftPickKind} draftSelection={draftSelection} onDraftSelection={setDraftSelection}
                 onSelect={handleSelect} draftState={activeDraftState} onCycleStudy={handleCycleStudy}
