@@ -1717,6 +1717,7 @@ def test_project_handoff_records_explicit_unemitted_families_and_completeness_st
         output_dir=tmp_path / "out",
         family_group="all",
     )
+    assert summary["workspace_id"] == 1
     assert summary["emitted_families"] == []
     assert "floor_area" in summary["unemitted_families"]
     assert "floor_finish_area" in summary["unemitted_families"]

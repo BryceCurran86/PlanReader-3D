@@ -985,6 +985,7 @@ def _generate_project_handoff_locked(
     summary: dict[str, Any] = {
         "schema_version": "1.0.0",
         "project_id": project_id,
+        "workspace_id": workspace_id,
         "source_path": str(pdf_path),
         "source_sha256": source_sha256,
         "page_count": page_count,
@@ -2049,6 +2050,8 @@ def _generate_project_handoff_locked(
             summary.setdefault("family_only_verified_outputs", {})["floor_area"] = {
                 "family": "floor_area",
                 "scope": "family_only_incomplete_project",
+                "project_id": project_id,
+                "workspace_id": workspace_id,
                 "verified": True,
                 "whole_project_verified": False,
                 "benchmark_score_granted": False,
