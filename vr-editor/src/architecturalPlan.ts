@@ -1,3 +1,5 @@
+import {slabCorners} from "./independentSlabs.ts";
+import type {IndependentSlab} from "./independentSlabs.ts";
 import type {SceneManifest} from "./types.ts";
 import type {BuildState,PlanPoint,WallVisual} from "./buildPlacement.ts";
 import {openingFits,planLength} from "./buildPlacement.ts";
@@ -13,7 +15,7 @@ export type PlanDrawing={lines:PlanLine[];labels:PlanText[];bounds:[number,numbe
 type Move={objectId:string;dx:number;dz:number};
 /** All geometry in model metres. Only editable draft walls have known physical thickness.
  * Source lines and positioned openings remain review evidence, never invented assemblies. */
-export function architecturalPlan(scene:SceneManifest,build:Pick<BuildState,"walls">,level:string,visible?:ReadonlySet<string>,projection:FootprintProjection|null=null,moves:readonly Move[]=[],extra:readonly WallVisual[]=[],shell:DraftShell|null=null):PlanDrawing{
+export function architecturalPlan(scene:SceneManifest,build:Pick<BuildState,"walls">,level:string,visible?:ReadonlySet<string>,projection:FootprintProjection|null=null,moves:readonly Move[]=[],extra:readonly WallVisual[]=[],shell:DraftShell|null=null,slabs:readonly IndependentSlab[]=[]):PlanDrawing{
  const lines:PlanLine[]=[],labels:PlanText[]=[];let unlocated=0;
  const moveMap=new Map(moves.map(m=>[m.objectId,m]));
  function line(a:PlanPoint,b:PlanPoint,kind:PlanLine["kind"],weight=1){
@@ -103,6 +105,7 @@ export function architecturalPlan(scene:SceneManifest,build:Pick<BuildState,"wal
    labels.push({at:p(length/2,offset+.11),text:String(Math.round(length*1000))});
   }
  }
+ for(const slab of slabs){if(level!=="all"&&slab.levelId!==level)continue;const corners=slabCorners(slab);for(let i=0;i<4;i++)line(corners[i],corners[(i+1)%4],"floor",2);labels.push({at:[slab.x+slab.widthM/2,slab.z+slab.depthM/2],text:slab.kind+" slab"});}
  let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
  for(const l of lines)for(const p of [l.a,l.b]){minX=Math.min(minX,p[0]);minZ=Math.min(minZ,p[1]);maxX=Math.max(maxX,p[0]);maxZ=Math.max(maxZ,p[1]);}
  if(!Number.isFinite(minX)){minX=0;minZ=0;maxX=1;maxZ=1;}
