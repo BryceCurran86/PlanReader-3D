@@ -64,6 +64,24 @@ exceeds a wall's thickness, any endpoint snap decides which faces to join; a des
 endpoints across parallel offset faces. Identity by source-primitive lineage: see
 `claude_wall_lineage_identity_design_20261128.md`.
 
+## Face-aware eligibility (design before change, MAX 7234538605)
+Observed: where a wall is thinner than the 2.5 pt tolerance, a join can collapse one face onto the other (the cold room).
+Proposed, inside the order-free snap only (default off, same tolerance): two ends of long pieces may not join when some
+long piece at one and some long piece at the other
+- are parallel (within the existing 3 degree collinear tolerance),
+- leave their ends in the same direction (they run side by side, not end to end), and
+- are offset sideways by more than one detection pixel (0.5 pt; closer lines render as one stroke).
+Such a pair is a wall's two faces (or a double line spaced apart), never a continuation. Collinear gap closure (pieces
+leaving in opposite directions), real corners and junctions (not parallel) and coinciding or jittered double lines are
+unchanged. The veto applies to every pair inside a complete-linkage group; short pieces' ends are unaffected, so a cap
+between two faces stays an edge. Look-alikes to test: opposite-direction jitter, double lines one pixel apart, a T and an
+L within tolerance, jambs at an opening, ties and shuffles, rotation and translation.
+
+Built: `order-free-snap-1.1.0` (`_across_a_wall` veto, `face_pairs_kept_apart` count). Tests: thin-wall end and opening
+jambs keep both faces; side-by-side lines join only within one pixel; collinear gaps, corners and tees still join; a
+barred face pair does not block an equally close corner; shuffles, rotation and translation. Mutants caught. Originals:
+see below.
+
 ## Not authority
 Changes node positions and joins on every page it is switched on for (about one node in ten on Lot16 sheet 3 versus the
 ordinary snap), so it needs the signed-row replay before any switch-on. It grants no wall, room, measurement or quantity

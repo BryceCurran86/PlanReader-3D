@@ -157,6 +157,77 @@ def test_translation_and_rotation_give_the_transformed_result(degrees, shift):
     assert_same_lines(expected, lines(free(moved)))
 
 
+# A wall thinner than the tolerance: two faces 2.2 pt apart ending together, with its 2.2 pt end cap.
+THIN_END = [seg(-40, 0, 0, 0), seg(-40, 2.2, 0, 2.2), seg(0, 0, 0, 2.2)]
+
+
+def test_the_two_faces_of_a_thin_wall_are_never_joined():
+    assert not {(0.0, 0.0), (0.0, 2.2)} <= set(node_points(build_wall_graph_for_viewport(THIN_END)))
+    for variant in orders(THIN_END):
+        graph = free(variant)
+        assert lines(graph) == [((-40.0, 0.0), (0.0, 0.0)), ((-40.0, 2.2), (0.0, 2.2)), ((0.0, 0.0), (0.0, 2.2))]
+        assert graph["order_free_snap_shadow"]["face_pairs_kept_apart"] >= 1
+
+
+def test_the_faces_stay_apart_at_both_jambs_of_an_opening():
+    scene = THIN_END + [seg(10, 0, 50, 0), seg(10, 2.2, 50, 2.2), seg(10, 0, 10, 2.2)]
+    points = set(node_points(free(scene)))
+    assert {(0.0, 0.0), (0.0, 2.2), (10.0, 0.0), (10.0, 2.2)} <= points
+
+
+@pytest.mark.parametrize("offset,joined", [(0.0, True), (0.5, True), (0.6, False), (2.2, False)])
+def test_side_by_side_lines_join_only_within_one_pixel(offset, joined):
+    pair = [seg(0, 0, 30, 5), seg(0, offset, 30, 5 + offset)] if offset else [seg(0, 0, 30, 5), seg(0, 0, 30, 5.2)]
+    for variant in orders(pair):
+        starts = [p for p in node_points(free(variant)) if p[0] == 0.0]
+        assert (len(starts) == 1) is joined
+
+
+@pytest.mark.parametrize("offset", [0.0, 0.3, 1.0])
+def test_a_collinear_gap_still_closes_with_a_little_sideways_jitter(offset):
+    gap = [seg(-30, 0, 0, 0), seg(1.5, offset, 30, offset)]
+    for variant in orders(gap):
+        assert len(node_points(free(variant))) == 2  # one joined node removed by the straight merge
+
+
+def test_a_real_corner_and_a_tee_within_the_tolerance_still_join():
+    ell = [seg(-30, 0, 0, 0), seg(1, 1, 1, 30)]
+    tee = [seg(-30, 0, 0, 0), seg(0, 0, 30, 0), seg(0, 1.5, 0, 30)]
+    for variant in orders(ell):
+        assert len(node_points(free(variant))) == 3
+    for variant in orders(tee):
+        assert len([p for p in node_points(free(variant)) if abs(p[0]) < 3 and abs(p[1]) < 3]) == 1
+
+
+def test_a_corner_end_near_both_faces_joins_the_nearer_face_only():
+    scene = [seg(-40, 0, 0, 0), seg(-40, 2.2, 0, 2.2), seg(0.6, 0.6, 20, 20)]
+    results = {str(lines(free(v))) for v in orders(scene)}
+    assert len(results) == 1
+    points = set(node_points(free(scene)))
+    assert (0.3, 0.3) in points and (0.0, 2.2) in points
+
+
+def test_a_corner_end_equally_near_both_faces_is_left_alone():
+    scene = [seg(-40, 0, 0, 0), seg(-40, 2.2, 0, 2.2), seg(0.8, 1.1, 20, 30)]
+    for variant in orders(scene):
+        graph = free(variant)
+        assert {(0.0, 0.0), (0.0, 2.2), (0.8, 1.1)} <= set(node_points(graph))
+
+
+def test_a_barred_face_pair_does_not_block_an_equally_close_corner():
+    scene = [seg(-40, 0, 0, 0), seg(-40, 2.2, 0, 2.2), seg(0, 4.4, 0, 30)]
+    for variant in orders(scene):
+        assert {(0.0, 0.0), (0.0, 3.3)} <= set(node_points(free(variant)))
+
+
+def test_thin_wall_scene_is_rotation_and_translation_invariant():
+    c, s = math.cos(math.radians(37)), math.sin(math.radians(37))
+    move = lambda x, y: (x * c - y * s + 250.0, x * s + y * c - 40.0)
+    scene = THIN_END + [seg(-1.5, 30, -1.5, 3.8), seg(5, -1, 5, -30)]
+    moved = [seg(*move(q["x1"], q["y1"]), *move(q["x2"], q["y2"])) for q in scene]
+    assert_same_lines([tuple(move(*point) for point in pair) for pair in lines(free(scene))], lines(free(moved)))
+
+
 def test_splitting_a_wall_in_two_changes_nothing():
     split = WALLS[:2] + [seg(0, 0, 20, 0), seg(20, 0, 38.5, 0), WALLS[3]] + STUBS
     assert lines(free(split)) == lines(free(SCENE))
