@@ -46,6 +46,16 @@ With both, every named room is kept. The 8 outlines lost against today are boxes
 (dimension text inside, no metric floor; checked on a local overlay). Gained: BED 3, the pantry, one small outline beside
 the WC (not verified) and two small margin dimension boxes (false; the order-free snap alone also closes them).
 
+## Four-original off/on replay (2026-11-28): NOT SAFE, stays off
+Picture detection plus this option, through the all-source-role handoff, off then on:
+- 139 customer rows keep every value, element, page and status, but Lot16's nine rows and 58 3Laurel rows change evidence
+  ids: both settings rename host walls. The snap alone gives 13 of 22 Lot16 sheet-3 openings new host-wall ids (member
+  walls moving at most 0.5 pt) and one opening loses its host.
+- Maryborough floor areas (live claim): the snap alone loses the cold room outline and its area, and an area appears on a
+  single floor-grid cell.
+So the snap changes which outlines close well beyond the sheet-3 gate, and wall identity by exact coordinates cannot
+survive it. Next: trace the lost outline; identity by source-primitive lineage (design first).
+
 ## Not authority
 Changes node positions and joins on every page it is switched on for (about one node in ten on Lot16 sheet 3 versus the
 ordinary snap), so it needs the signed-row replay before any switch-on. It grants no wall, room, measurement or quantity
