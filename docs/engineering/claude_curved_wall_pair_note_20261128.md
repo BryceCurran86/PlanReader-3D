@@ -17,5 +17,5 @@ face, too thick, short overlap, mixed ink, columns, small symbols, offset centre
 no-mutation. Mutants caught.
 
 ## Not authority
-No wall, id, room, host, measurement or quantity. Originals not yet read through it; curved walls drawn as polylines
-are not covered.
+No wall, id, room, host, measurement or quantity. Read on three plan sheets (6, 14 and 1 fitted arcs): no pairs, no
+false positives; none of those sheets is known to have a curved wall. Curved walls drawn as polylines are not covered.
