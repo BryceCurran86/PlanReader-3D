@@ -273,3 +273,40 @@ def test_a06_in_drawing_outlined_caption_producer_shadow() -> None:
         assert calls == 2  # OCR never invoked for native-text page
     finally:
         doc.close()
+
+
+def test_a06_outlined_body_tolerates_small_logo_image_but_rejects_full_page_scan() -> None:
+    import fitz
+    from pb_source_vector_outlined_text_ocr_shadow import detect_outlined_text_drawing_body
+
+    # Create a tiny 4x4 PNG bytes buffer via PyMuPDF Pixmap
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 4, 4), False)
+    png_bytes = pix.tobytes("png")
+
+    doc = fitz.open()
+    try:
+        # Page 0: dense vector CAD sheet (>500 paths, 0 native words) + small title-block logo image
+        p0 = doc.new_page(width=842, height=595)
+        for i in range(520):
+            y = 20.0 + (i % 50) * 8.0
+            x = 20.0 + (i // 50) * 40.0
+            p0.draw_line(fitz.Point(x, y), fitz.Point(x + 25.0, y), color=(0, 0, 0), width=0.5)
+        p0.insert_image(fitz.Rect(740, 500, 820, 560), stream=png_bytes)
+
+        # Page 1: full-page raster scan covering 100% of page area
+        p1 = doc.new_page(width=842, height=595)
+        for i in range(520):
+            y = 20.0 + (i % 50) * 8.0
+            x = 20.0 + (i // 50) * 40.0
+            p1.draw_line(fitz.Point(x, y), fitz.Point(x + 25.0, y), color=(0, 0, 0), width=0.5)
+        p1.insert_image(fitz.Rect(0, 0, 842, 595), stream=png_bytes)
+
+        a0 = detect_outlined_text_drawing_body(doc[0], page_index=0)
+        assert a0.raster_image_count >= 1
+        assert a0.outlined_text_suspected is True
+
+        a1 = detect_outlined_text_drawing_body(doc[1], page_index=1)
+        assert a1.raster_image_count >= 1
+        assert a1.outlined_text_suspected is False
+    finally:
+        doc.close()

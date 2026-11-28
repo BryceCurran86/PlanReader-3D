@@ -88,6 +88,29 @@ def normalize_outlined_token(text: str) -> str:
     return cleaned
 
 
+def _has_full_page_raster_scan(page: Any, *, area_fraction_threshold: float = 0.85) -> bool:
+    """Return True if a single raster image covers >=85% of the page area (scanned sheet)."""
+    page_area = float(page.rect.width) * float(page.rect.height)
+    if page_area <= 0.0:
+        return False
+    get_img_info = getattr(page, "get_image_info", None)
+    if not callable(get_img_info):
+        return False
+    try:
+        infos = get_img_info(xrefs=False) or ()
+    except Exception:
+        return False
+    for info in infos:
+        bbox = info.get("bbox") if isinstance(info, dict) else None
+        if not bbox or len(bbox) != 4:
+            continue
+        iw = max(0.0, float(bbox[2]) - float(bbox[0]))
+        ih = max(0.0, float(bbox[3]) - float(bbox[1]))
+        if (iw * ih) / page_area >= area_fraction_threshold:
+            return True
+    return False
+
+
 def detect_outlined_text_drawing_body(
     page: Any,
     *,
@@ -97,7 +120,12 @@ def detect_outlined_text_drawing_body(
     max_body_words_for_outlined: int = 20,
     min_vector_drawings_for_outlined: int = 500,
 ) -> OutlinedTextBodyAssessment:
-    """Classify whether a page's drawing body likely stores text as vector outlines."""
+    """Classify whether a page's drawing body likely stores text as vector outlines.
+
+    Tolerates small embedded raster icons/logos (e.g., title-block builder logos
+    or legend symbols) on dense CAD vector sheets, while still excluding
+    full-page raster scans (single image covering >=85% of page area).
+    """
     words = page.get_text("words") or ()
     drawings = page.get_drawings() or ()
     images = page.get_images() or ()
@@ -111,10 +139,11 @@ def detect_outlined_text_drawing_body(
     )
     total_words = len(words)
     border_words = total_words - body_words
+    full_page_scan = bool(images) and _has_full_page_raster_scan(page)
     suspected = (
         body_words <= max_body_words_for_outlined
         and len(drawings) >= min_vector_drawings_for_outlined
-        and len(images) == 0
+        and not full_page_scan
     )
     return OutlinedTextBodyAssessment(
         page_index=page_index,
