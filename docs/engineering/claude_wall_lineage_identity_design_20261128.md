@@ -38,5 +38,12 @@ Synthetic: a moved corner keeps the lineage id; a different membership changes i
 shared piece and missing ancestry abstain; input order and direction invariance; determinism; no mutation. Then a
 report-only comparison on the originals (how many host member walls keep their lineage under a snap change).
 
+## First measurement (offline, one Maryborough capture, ordinary snap against order-free 1.0.0)
+Local script, not production code. Of 10,690 walls, 80% keep their candidate id; 94% of the 10,340 walls with a lineage
+key keep it (346 have no long piece, 4 collide). Host member walls of the 52 openings hosted both ways: 10 keep their
+ids, 6 more keep their lineage, 36 differ, mostly because the snap changes where a wall chain ends (17 gain pieces, 14
+lose some, 3 overlap, 2 other). So whole-chain lineage is not enough for hosts: host evidence would need the source
+pieces at the jambs, a further design step if MAX wants it.
+
 ## Not authority
 No wall, host, opening, measurement or quantity authority; no threshold other than the existing snap tolerance.
